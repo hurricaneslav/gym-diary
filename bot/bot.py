@@ -17,7 +17,7 @@ BOT_TOKEN = "8755960128:AAEnFMxCndddyMJiHOvgHfLFDjpleTBfz-w"
 
 # После деплоя на GitHub Pages ссылка будет такой:
 # https://ТВО_ЛОГИН.github.io/gym-diary/
-WEBAPP_URL = "https://github.com/hurricaneslav/gym-diary.git"
+WEBAPP_URL = "https://hurricaneslav.github.io/gym-diary/"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
