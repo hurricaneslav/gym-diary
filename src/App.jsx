@@ -60,15 +60,21 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .sug-item:active{background:#2A2A2A}
 .sug-match{color:#FFF;font-weight:600}
 .prev{margin:0 14px;padding:8px 0 10px;font-size:12px;color:#555;border-bottom:1px solid #1A1A1A;font-style:italic}
-.sets{padding:10px 14px;overflow:hidden}
-.set-row{display:grid;grid-template-columns:18px minmax(0,1fr) 10px minmax(0,1fr) 28px;align-items:center;gap:6px;margin-bottom:8px;width:100%}
-.set-n{font-size:11px;color:#444;text-align:center}
-.set-inp{background:#1A1A1A;border:1px solid #252525;color:#FFF;font-size:14px;padding:8px 6px;outline:none;font-family:inherit;text-align:center;-webkit-appearance:none;min-width:0;width:100%}
+.sets{padding:10px 14px;overflow:hidden;contain:layout}
+.set-row{display:flex;align-items:center;gap:6px;margin-bottom:8px;width:100%;min-width:0}
+.set-n{font-size:11px;color:#444;text-align:center;flex-shrink:0;width:18px}
+.set-inp{background:#1A1A1A;border:1px solid #252525;color:#FFF;font-size:14px;padding:8px 6px;outline:none;font-family:inherit;text-align:center;-webkit-appearance:none;min-width:0;width:0;flex:1}
 .set-inp:focus{border-color:#555}
 .set-inp::placeholder{color:#3A3A3A;font-size:12px}
-.set-sep{color:#444;text-align:center;font-size:13px}
+.set-sep{color:#444;text-align:center;font-size:13px;flex-shrink:0;width:10px}
 .del-btn{background:none;border:none;color:#444;cursor:pointer;padding:4px;display:flex;align-items:center;justify-content:center;line-height:1}
 .del-btn:active{color:#FF4444}
+.ex-comment{padding:0 14px 12px;margin-top:2px}
+.ex-comment-inp{width:100%;background:none;border:none;border-top:1px solid #1A1A1A;color:#888;font-size:13px;padding:10px 0 0;outline:none;font-family:inherit;resize:none;line-height:1.5;min-height:36px}
+.ex-comment-inp::placeholder{color:#3A3A3A}
+.ex-comment-inp:focus{color:#CCC}
+.w-ex-comment{padding:6px 14px 10px;font-size:12px;color:#555;font-style:italic;border-top:1px solid #1A1A1A;line-height:1.5}
+.ex-hist-comment{font-size:12px;color:#555;font-style:italic;margin-top:6px;line-height:1.5}
 .add-set{background:none;border:1px dashed #2A2A2A;color:#555;width:100%;padding:8px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;font-family:inherit;margin-top:4px}
 .add-set:active{border-color:#555;color:#999}
 .add-ex{background:none;border:1px dashed #2A2A2A;color:#555;width:100%;padding:12px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;margin-bottom:16px}
@@ -160,7 +166,7 @@ function WorkoutSheet({ workouts, initial, nextId, onSave, onClose }) {
     workouts.filter(w=>!isEdit||w.id!==initial?.id).flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean))
   )];
 
-  function newEx(){return{id:Date.now()+Math.random(),name:"",sets:[newSet()]};}
+  function newEx(){return{id:Date.now()+Math.random(),name:"",sets:[newSet()],comment:""};}
   function newSet(){return{weight:"",reps:""};}
   const addEx=()=>setExercises(p=>[...p,newEx()]);
   const upEx=(id,f,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,[f]:v}:e));
@@ -225,6 +231,16 @@ function WorkoutSheet({ workouts, initial, nextId, onSave, onClose }) {
                   </div>
                 ))}
                 <button className="add-set" onClick={()=>addSet(ex.id)}><IconPlus/>подход</button>
+              </div>
+              <div className="ex-comment">
+                <textarea
+                  className="ex-comment-inp"
+                  placeholder="Комментарий к упражнению..."
+                  value={ex.comment||""}
+                  onChange={e=>upEx(ex.id,"comment",e.target.value)}
+                  rows={1}
+                  onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}}
+                />
               </div>
             </div>
           );
@@ -305,6 +321,7 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
                 </div>
               ))}
             </div>
+            {ex.comment&&<div className="w-ex-comment">{ex.comment}</div>}
           </div>
         ))}
       <hr className="divider"/>
@@ -318,7 +335,7 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
       <button className="btn" onClick={()=>setShowNew(true)}><IconPlus/>Новая тренировка</button>
       {workouts.length===0
         ?<div className="empty"><div className="empty-icon">🏋️</div>Тренировок пока нет.<br/>Начни первую!</div>
-        :[...workouts].reverse().map(w=>(
+        :[...workouts].sort((a,b)=>b.date.localeCompare(a.date)).map(w=>(
           <div key={w.id} className="card" onClick={()=>setDetailId(w.id)}>
             <div style={{minWidth:0}}>
               <div className="card-title">{w.name}</div>
@@ -361,6 +378,7 @@ function ExercisesTab({workouts}) {
                 <div key={si}><span style={{color:"#555"}}>{si+1}.</span> {s.weight?`${s.weight} кг`:"—"} × {s.reps?`${s.reps} повт`:"—"}</div>
               ))}
             </div>
+            {exercise.comment&&<div className="ex-hist-comment">{exercise.comment}</div>}
           </div>
         ))}
       </div>
