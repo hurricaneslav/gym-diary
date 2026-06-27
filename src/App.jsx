@@ -4,8 +4,6 @@ import { api } from "./api.js";
 const today = () => new Date().toISOString().slice(0, 10);
 const formatDate = (iso) => { try { const [y,m,d]=iso.split("-"); return `${d}.${m}.${y}`; } catch { return iso; } };
 
-function smoothFocus(e){ setTimeout(()=>{ e.target.scrollIntoView({behavior:"smooth", block:"center"}); },300); }
-
 const MEASUREMENT_FIELDS = [
   {key:"weight",label:"Вес тела"},{key:"waist",label:"Талия"},{key:"chest",label:"Грудь"},
   {key:"shoulders",label:"Плечи"},{key:"armRight",label:"Правая рука"},{key:"armLeft",label:"Левая рука"},
@@ -112,6 +110,13 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 @keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 `;
 
+const smoothFocus = (e) => {
+  const el = e.target;
+  setTimeout(() => {
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, 320);
+};
+
 // ── Toast ──────────────────────────────────────────────────────────────────
 function Toast({ msg }) {
   return msg ? <div className="toast">{msg}</div> : null;
@@ -137,7 +142,7 @@ function ExNameInput({ value, onChange, allExNames }) {
   return (
     <div className="ex-name-wrap" ref={wrapRef}>
       <input className="ex-name-inp" placeholder="Название упражнения" value={value}
-        onChange={e=>{onChange(e.target.value);setOpen(true);}} onFocus={()=>setOpen(true)} autoComplete="off"/>
+        onChange={e=>{onChange(e.target.value);setOpen(true);}} onFocus={(e)=>{setOpen(true);smoothFocus(e);}} autoComplete="off"/>
       {open && suggestions.length > 0 && (
         <div className="suggestions">
           {suggestions.map(s => (
@@ -152,9 +157,9 @@ function ExNameInput({ value, onChange, allExNames }) {
 }
 
 // ── WorkoutSheet ──────────────────────────────────────────────────────────
-function WorkoutSheet({ workouts, initial, nextId, onSave, onClose }) {
+function WorkoutSheet({ workouts, initial, onSave, onClose }) {
   const isEdit = !!initial;
-  const defName = isEdit ? initial.name : `Тренировка ${nextId}`;
+  const defName = isEdit ? initial.name : `Тренировка ${workouts.length + 1}`;
   const [name, setName] = useState(defName);
   const [date, setDate] = useState(isEdit ? initial.date : today());
   const [exercises, setExercises] = useState(
@@ -180,21 +185,24 @@ function WorkoutSheet({ workouts, initial, nextId, onSave, onClose }) {
   const getPrev=(exName)=>{
     if(!exName.trim())return null;
     const lc=exName.trim().toLowerCase();
-
-    return workouts
-      .filter(w=>w.id!==initial?.id && w.date < date)
-      .flatMap(w=>w.exercises
-        .filter(e=>e.name.trim().toLowerCase()===lc)
-        .map(e=>({workout:w, exercise:e}))
-      )
-      .sort((a,b)=>b.workout.date.localeCompare(a.workout.date))[0] || null;
+    const src=isEdit?workouts.filter(w=>w.id!==initial.id):workouts;
+    // Find the workout with the latest date strictly before current workout date
+    const earlier=src.filter(w=>w.date<date);
+    earlier.sort((a,b)=>b.date.localeCompare(a.date));
+    for(const w of earlier){
+      const f=w.exercises.find(e=>e.name.trim().toLowerCase()===lc);
+      if(f)return{workout:w,exercise:f};
+    }
+    return null;
   };
 
   const handleSave=async()=>{
     setSaving(true);
     const filtered=exercises.filter(e=>e.name.trim()||e.sets.some(s=>s.weight||s.reps)).map(e=>({...e,sets:e.sets.filter(s=>s.weight||s.reps)}));
-    await onSave({id:isEdit?initial.id:nextId,name:name.trim()||defName,date,exercises:filtered});
+    const payload={id:isEdit?initial.id:-1,name:name.trim()||defName,date,exercises:filtered};
+    const res=await onSave(payload);
     setSaving(false);
+    return res;
   };
 
   return (
@@ -202,11 +210,11 @@ function WorkoutSheet({ workouts, initial, nextId, onSave, onClose }) {
       <div className="sheet">
         <div className="handle"/>
         <div className="sheet-title-row">
-          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName}/>
+          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName} onFocus={smoothFocus}/>
         </div>
         <div className="field">
           <div className="lbl">Дата</div>
-          <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)}/>
+          <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)} onFocus={smoothFocus}/>
         </div>
         <div className="sec-lbl" style={{marginTop:20,marginBottom:12}}>Упражнения</div>
         {exercises.map((ex,ei)=>{
@@ -221,17 +229,17 @@ function WorkoutSheet({ workouts, initial, nextId, onSave, onClose }) {
               {prev&&(
                 <div className="prev">
                   Прошлый раз ({formatDate(prev.workout.date)}):&nbsp;
-                  {prev.exercise.sets.map((s,i)=>`${s.weight?s.weight+"кг":"—"}×${s.reps||"—"}${i<prev.exercise.sets.length-1?", ":""}`)}
-                  {prev.exercise.comment && <div style={{marginTop:6,color:"#666"}}>Комментарий: {prev.exercise.comment}</div>}
+                  {prev.exercise.sets.filter(s=>s.weight||s.reps).map((s,i,arr)=>`${s.weight?s.weight+"кг":"—"}×${s.reps||"—"}${i<arr.length-1?", ":""}`)}
+                  {prev.exercise.comment?<><br/><span style={{fontStyle:"italic",color:"#555"}}>{prev.exercise.comment}</span></>:null}
                 </div>
               )}
               <div className="sets">
                 {ex.sets.map((s,si)=>(
                   <div key={si} className="set-row">
                     <span className="set-n">{si+1}</span>
-                    <input onFocus={smoothFocus} className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",e.target.value)}/>
+                    <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",e.target.value)} onFocus={smoothFocus}/>
                     <span className="set-sep">×</span>
-                    <input onFocus={smoothFocus} className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)}/>
+                    <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)} onFocus={smoothFocus}/>
                     <button className="del-btn" onClick={()=>remSet(ex.id,si)}><IconTrash/></button>
                   </div>
                 ))}
@@ -245,6 +253,7 @@ function WorkoutSheet({ workouts, initial, nextId, onSave, onClose }) {
                   onChange={e=>upEx(ex.id,"comment",e.target.value)}
                   rows={1}
                   onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}}
+                  onFocus={smoothFocus}
                 />
               </div>
             </div>
@@ -268,10 +277,11 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
 
   const detail=detailId!=null?workouts.find(w=>w.id===detailId):null;
   const editTarget=editId!=null?workouts.find(w=>w.id===editId):null;
-  const nextId=workouts.length>0?Math.max(...workouts.map(w=>w.id))+1:1;
+  const nextId = null; // не используется — ID генерирует сервер
 
   const handleCreate=async(w)=>{
-    const saved = await api.saveWorkout({...w, id:-1});
+    const res=await api.saveWorkout(w);
+    const saved={...w,id:res.id};
     setWorkouts(p=>[...p,saved]);
     setShowNew(false);
     toast("Тренировка сохранена ✓");
@@ -331,7 +341,7 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
         ))}
       <hr className="divider"/>
       <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить тренировку</button>
-      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} nextId={nextId} onSave={handleUpdate} onClose={()=>setEditId(null)}/>}
+      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} onSave={handleUpdate} onClose={()=>setEditId(null)}/>}
     </div>
   );
 
@@ -351,28 +361,63 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
             </div>
           </div>
         ))}
-      {showNew&&<WorkoutSheet workouts={workouts} initial={null} nextId={nextId} onSave={handleCreate} onClose={()=>setShowNew(false)}/>}
-      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} nextId={nextId} onSave={handleUpdate} onClose={()=>setEditId(null)}/>}
+      {showNew&&<WorkoutSheet workouts={workouts} initial={null} onSave={handleCreate} onClose={()=>setShowNew(false)}/>}
+      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} onSave={handleUpdate} onClose={()=>setEditId(null)}/>}
     </div>
   );
 }
 
 // ── ExercisesTab ──────────────────────────────────────────────────────────
-function ExercisesTab({workouts}) {
+function ExercisesTab({workouts, setWorkouts, toast}) {
   const [selected,setSelected]=useState(null);
+  const [renamingEx,setRenamingEx]=useState(false);
+  const [renameExVal,setRenameExVal]=useState("");
+
   const allNames=[...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))].sort((a,b)=>a.localeCompare(b,"ru"));
   const getHistory=(name)=>{
     const lc=name.toLowerCase(),rows=[];
     workouts.forEach(w=>w.exercises.forEach(e=>{if(e.name.trim().toLowerCase()===lc)rows.push({workout:w,exercise:e});}));
-    return rows.reverse();
+    return rows.sort((a,b)=>b.workout.date.localeCompare(a.workout.date));
   };
+
+  const startRenameEx=()=>{setRenameExVal(selected);setRenamingEx(true);};
+  const commitRenameEx=async()=>{
+    const newName=renameExVal.trim();
+    if(!newName||newName===selected){setRenamingEx(false);return;}
+    const lc=selected.toLowerCase();
+    // Update all workouts that contain this exercise name
+    const toUpdate=workouts.filter(w=>w.exercises.some(e=>e.name.trim().toLowerCase()===lc));
+    await Promise.all(toUpdate.map(w=>{
+      const updated={...w,exercises:w.exercises.map(e=>e.name.trim().toLowerCase()===lc?{...e,name:newName}:e)};
+      return api.saveWorkout(updated).then(()=>updated);
+    })).then(updatedList=>{
+      setWorkouts(prev=>prev.map(w=>{
+        const found=updatedList.find(u=>u.id===w.id);
+        return found||w;
+      }));
+    });
+    toast(`«${selected}» → «${newName}» ✓`);
+    setSelected(newName);
+    setRenamingEx(false);
+  };
+
   if(selected){
     const history=getHistory(selected);
     return(
       <div className="page">
         <div className="det-hd">
-          <button className="back-btn" onClick={()=>setSelected(null)}><IconChevron dir="left"/>Назад</button>
-          <span className="det-title">{selected}</span>
+          <button className="back-btn" onClick={()=>{setSelected(null);setRenamingEx(false);}}><IconChevron dir="left"/>Назад</button>
+          {renamingEx
+            ?<input
+                className="rename-inp"
+                value={renameExVal}
+                onChange={e=>setRenameExVal(e.target.value)}
+                onBlur={commitRenameEx}
+                onKeyDown={e=>{if(e.key==="Enter")commitRenameEx();if(e.key==="Escape"){setRenamingEx(false);}}}
+                autoFocus
+              />
+            :<span className="det-title">{selected}</span>}
+          <button className="del-btn" onClick={startRenameEx}><IconEdit/></button>
         </div>
         <div className="sec-lbl">{history.length} записей</div>
         {history.map(({workout,exercise},i)=>(
@@ -413,9 +458,9 @@ function ExercisesTab({workouts}) {
 }
 
 // ── MeasurementSheet ──────────────────────────────────────────────────────
-function MeasurementSheet({count, initial, onSave, onClose}) {
+function MeasurementSheet({measurements, initial, onSave, onClose}) {
   const isEdit=!!initial;
-  const defName=isEdit?initial.name:`Замер ${count}`;
+  const defName=isEdit?initial.name:`Замер ${(measurements?.length||0) + 1}`;
   const [name,setName]=useState(defName);
   const [date,setDate]=useState(isEdit?initial.date:today());
   const [vals,setVals]=useState(()=>{
@@ -428,7 +473,7 @@ function MeasurementSheet({count, initial, onSave, onClose}) {
   const set=(k,v)=>setVals(p=>({...p,[k]:v}));
   const handleSave=async()=>{
     setSaving(true);
-    await onSave({id:isEdit?initial.id:count,name:name.trim()||defName,date,...vals});
+    await onSave({id:isEdit?initial.id:-1,name:name.trim()||defName,date,...vals});
     setSaving(false);
   };
   return(
@@ -436,22 +481,22 @@ function MeasurementSheet({count, initial, onSave, onClose}) {
       <div className="sheet">
         <div className="handle"/>
         <div className="sheet-title-row">
-          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName}/>
+          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName} onFocus={smoothFocus}/>
         </div>
         <div className="field">
           <div className="lbl">Дата</div>
-          <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)}/>
+          <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)} onFocus={smoothFocus}/>
         </div>
         <div className="sec-lbl" style={{marginTop:16}}>Вес тела</div>
         <div className="field" style={{marginTop:8}}>
-          <input onFocus={smoothFocus} className="inp" type="number" inputMode="decimal" placeholder="кг, например 82.5" value={vals["weight"]||""} onChange={e=>set("weight",e.target.value)}/>
+          <input className="inp" type="number" inputMode="decimal" placeholder="кг, например 82.5" value={vals["weight"]||""} onChange={e=>set("weight",e.target.value)} onFocus={smoothFocus}/>
         </div>
         <div className="sec-lbl" style={{marginTop:16}}>Замеры (см)</div>
         <div className="m-grid" style={{marginTop:8}}>
           {MEASUREMENT_FIELDS.slice(1).map(f=>(
             <div key={f.key} className="field">
               <div className="lbl">{f.label}</div>
-              <input onFocus={smoothFocus} className="inp" type="number" inputMode="decimal" placeholder="см" value={vals[f.key]||""} onChange={e=>set(f.key,e.target.value)}/>
+              <input className="inp" type="number" inputMode="decimal" placeholder="см" value={vals[f.key]||""} onChange={e=>set(f.key,e.target.value)} onFocus={smoothFocus}/>
             </div>
           ))}
         </div>
@@ -473,11 +518,12 @@ function MeasurementsTab({measurements,setMeasurements,toast}) {
 
   const detail=detailId!=null?measurements.find(m=>m.id===detailId):null;
   const editTarget=editId!=null?measurements.find(m=>m.id===editId):null;
-  const nextId=measurements.length>0?Math.max(...measurements.map(m=>m.id))+1:1;
+  const nextId = null; // не используется — ID генерирует сервер
 
   const handleCreate=async(m)=>{
-    await api.saveMeasurement(m);
-    setMeasurements(p=>[...p,m]);
+    const res=await api.saveMeasurement(m);
+    const saved={...m,id:res.id};
+    setMeasurements(p=>[...p,saved]);
     setShowNew(false);
     toast("Замер сохранён ✓");
   };
@@ -530,7 +576,7 @@ function MeasurementsTab({measurements,setMeasurements,toast}) {
           ))}
         <hr className="divider"/>
         <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить замер</button>
-        {editTarget&&<MeasurementSheet count={nextId} initial={editTarget} onSave={handleUpdate} onClose={()=>setEditId(null)}/>}
+        {editTarget&&<MeasurementSheet measurements={measurements} initial={editTarget} onSave={handleUpdate} onClose={()=>setEditId(null)}/>}
       </div>
     );
   }
@@ -553,8 +599,8 @@ function MeasurementsTab({measurements,setMeasurements,toast}) {
             </div>
           );
         })}
-      {showNew&&<MeasurementSheet count={nextId} initial={null} onSave={handleCreate} onClose={()=>setShowNew(false)}/>}
-      {editTarget&&<MeasurementSheet count={nextId} initial={editTarget} onSave={handleUpdate} onClose={()=>setEditId(null)}/>}
+      {showNew&&<MeasurementSheet measurements={measurements} initial={null} onSave={handleCreate} onClose={()=>setShowNew(false)}/>}
+      {editTarget&&<MeasurementSheet measurements={measurements} initial={editTarget} onSave={handleUpdate} onClose={()=>setEditId(null)}/>}
     </div>
   );
 }
@@ -617,7 +663,7 @@ export default function App() {
           ))}
         </div>
         {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
-        {tab===1&&<ExercisesTab workouts={workouts}/>}
+        {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
         {tab===2&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast}/>}
         <Toast msg={toastMsg}/>
       </div>
