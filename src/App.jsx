@@ -4,6 +4,8 @@ import { api } from "./api.js";
 const today = () => new Date().toISOString().slice(0, 10);
 const formatDate = (iso) => { try { const [y,m,d]=iso.split("-"); return `${d}.${m}.${y}`; } catch { return iso; } };
 
+function smoothFocus(e){ setTimeout(()=>{ e.target.scrollIntoView({behavior:"smooth", block:"center"}); },300); }
+
 const MEASUREMENT_FIELDS = [
   {key:"weight",label:"Вес тела"},{key:"waist",label:"Талия"},{key:"chest",label:"Грудь"},
   {key:"shoulders",label:"Плечи"},{key:"armRight",label:"Правая рука"},{key:"armLeft",label:"Левая рука"},
@@ -178,12 +180,14 @@ function WorkoutSheet({ workouts, initial, nextId, onSave, onClose }) {
   const getPrev=(exName)=>{
     if(!exName.trim())return null;
     const lc=exName.trim().toLowerCase();
-    const src=isEdit?workouts.filter(w=>w.id!==initial.id):workouts;
-    for(let i=src.length-1;i>=0;i--){
-      const f=src[i].exercises.find(e=>e.name.toLowerCase()===lc);
-      if(f)return{workout:src[i],exercise:f};
-    }
-    return null;
+
+    return workouts
+      .filter(w=>w.id!==initial?.id && w.date < date)
+      .flatMap(w=>w.exercises
+        .filter(e=>e.name.trim().toLowerCase()===lc)
+        .map(e=>({workout:w, exercise:e}))
+      )
+      .sort((a,b)=>b.workout.date.localeCompare(a.workout.date))[0] || null;
   };
 
   const handleSave=async()=>{
@@ -218,15 +222,16 @@ function WorkoutSheet({ workouts, initial, nextId, onSave, onClose }) {
                 <div className="prev">
                   Прошлый раз ({formatDate(prev.workout.date)}):&nbsp;
                   {prev.exercise.sets.map((s,i)=>`${s.weight?s.weight+"кг":"—"}×${s.reps||"—"}${i<prev.exercise.sets.length-1?", ":""}`)}
+                  {prev.exercise.comment && <div style={{marginTop:6,color:"#666"}}>Комментарий: {prev.exercise.comment}</div>}
                 </div>
               )}
               <div className="sets">
                 {ex.sets.map((s,si)=>(
                   <div key={si} className="set-row">
                     <span className="set-n">{si+1}</span>
-                    <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",e.target.value)}/>
+                    <input onFocus={smoothFocus} className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",e.target.value)}/>
                     <span className="set-sep">×</span>
-                    <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)}/>
+                    <input onFocus={smoothFocus} className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)}/>
                     <button className="del-btn" onClick={()=>remSet(ex.id,si)}><IconTrash/></button>
                   </div>
                 ))}
@@ -266,8 +271,8 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
   const nextId=workouts.length>0?Math.max(...workouts.map(w=>w.id))+1:1;
 
   const handleCreate=async(w)=>{
-    await api.saveWorkout(w);
-    setWorkouts(p=>[...p,w]);
+    const saved = await api.saveWorkout({...w, id:-1});
+    setWorkouts(p=>[...p,saved]);
     setShowNew(false);
     toast("Тренировка сохранена ✓");
   };
@@ -439,14 +444,14 @@ function MeasurementSheet({count, initial, onSave, onClose}) {
         </div>
         <div className="sec-lbl" style={{marginTop:16}}>Вес тела</div>
         <div className="field" style={{marginTop:8}}>
-          <input className="inp" type="number" inputMode="decimal" placeholder="кг, например 82.5" value={vals["weight"]||""} onChange={e=>set("weight",e.target.value)}/>
+          <input onFocus={smoothFocus} className="inp" type="number" inputMode="decimal" placeholder="кг, например 82.5" value={vals["weight"]||""} onChange={e=>set("weight",e.target.value)}/>
         </div>
         <div className="sec-lbl" style={{marginTop:16}}>Замеры (см)</div>
         <div className="m-grid" style={{marginTop:8}}>
           {MEASUREMENT_FIELDS.slice(1).map(f=>(
             <div key={f.key} className="field">
               <div className="lbl">{f.label}</div>
-              <input className="inp" type="number" inputMode="decimal" placeholder="см" value={vals[f.key]||""} onChange={e=>set(f.key,e.target.value)}/>
+              <input onFocus={smoothFocus} className="inp" type="number" inputMode="decimal" placeholder="см" value={vals[f.key]||""} onChange={e=>set(f.key,e.target.value)}/>
             </div>
           ))}
         </div>
