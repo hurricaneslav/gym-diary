@@ -34,8 +34,8 @@ body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,
 .btn.ghost{border-color:#333;color:#888}.btn.ghost:active{background:#1A1A1A;color:#FFF}
 .btn.danger{border-color:#FF4444;color:#FF4444}.btn.danger:active{background:#FF4444;color:#FFF}
 .btn:disabled{opacity:.4;cursor:not-allowed}
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;display:flex;flex-direction:column;justify-content:flex-end;max-width:390px;margin:0 auto}
-.sheet{background:#0A0A0A;border-top:1px solid #2A2A2A;max-height:92dvh;overflow-y:auto;padding:0 16px 40px;animation:up .22s ease}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;display:flex;flex-direction:column;justify-content:flex-end;max-width:390px;margin:0 auto;overflow:hidden}
+.sheet{background:#0A0A0A;border-top:1px solid #2A2A2A;max-height:92dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 16px 40px;animation:up .22s ease;scroll-behavior:auto}
 @keyframes up{from{transform:translateY(30px);opacity:0}to{transform:none;opacity:1}}
 .handle{width:36px;height:4px;background:#333;margin:12px auto 16px}
 .sheet-title-row{display:flex;align-items:center;gap:8px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #1E1E1E}
@@ -110,12 +110,44 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 @keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 `;
 
-const smoothFocus = (e) => {
-  const el = e.target;
-  setTimeout(() => {
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, 320);
-};
+// ── Keyboard-aware scroll ─────────────────────────────────────────────────
+// Единственный правильный способ: слушаем visualViewport.resize,
+// когда клавиатура поднимается — плавно подматываем .sheet к активному полю.
+// scrollIntoView НЕ используется — он вызывает прыжки body.
+function useKeyboardScroll(sheetRef) {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    let raf = null;
+    const onResize = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const sheet = sheetRef.current;
+        const active = document.activeElement;
+        if (!sheet || !active || !sheet.contains(active)) return;
+        const sheetRect = sheet.getBoundingClientRect();
+        const elRect = active.getBoundingClientRect();
+        const vpBottom = vv.offsetTop + vv.height;
+        // Сколько пикселей элемент выходит за нижнюю границу viewport
+        const overflow = elRect.bottom + 12 - vpBottom;
+        if (overflow > 0) {
+          sheet.scrollBy({ top: overflow, behavior: "smooth" });
+        }
+      });
+    };
+    vv.addEventListener("resize", onResize);
+    return () => { vv.removeEventListener("resize", onResize); if (raf) cancelAnimationFrame(raf); };
+  }, [sheetRef]);
+}
+
+// Блокируем скролл body пока шторка открыта
+function useLockBodyScroll() {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+}
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function Toast({ msg }) {
@@ -142,7 +174,7 @@ function ExNameInput({ value, onChange, allExNames }) {
   return (
     <div className="ex-name-wrap" ref={wrapRef}>
       <input className="ex-name-inp" placeholder="Название упражнения" value={value}
-        onChange={e=>{onChange(e.target.value);setOpen(true);}} onFocus={(e)=>{setOpen(true);smoothFocus(e);}} autoComplete="off"/>
+        onChange={e=>{onChange(e.target.value);setOpen(true);}} onFocus={()=>setOpen(true)} autoComplete="off"/>
       {open && suggestions.length > 0 && (
         <div className="suggestions">
           {suggestions.map(s => (
@@ -168,6 +200,9 @@ function WorkoutSheet({ workouts, initial, onSave, onClose }) {
       : [newEx()]
   );
   const [saving, setSaving] = useState(false);
+  const sheetRef = useRef(null);
+  useKeyboardScroll(sheetRef);
+  useLockBodyScroll();
 
   const allExNames = [...new Set(
     workouts.filter(w=>!isEdit||w.id!==initial?.id).flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean))
@@ -186,7 +221,6 @@ function WorkoutSheet({ workouts, initial, onSave, onClose }) {
     if(!exName.trim())return null;
     const lc=exName.trim().toLowerCase();
     const src=isEdit?workouts.filter(w=>w.id!==initial.id):workouts;
-    // Find the workout with the latest date strictly before current workout date
     const earlier=src.filter(w=>w.date<date);
     earlier.sort((a,b)=>b.date.localeCompare(a.date));
     for(const w of earlier){
@@ -207,14 +241,14 @@ function WorkoutSheet({ workouts, initial, onSave, onClose }) {
 
   return (
     <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div className="sheet">
+      <div className="sheet" ref={sheetRef}>
         <div className="handle"/>
         <div className="sheet-title-row">
-          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName} onFocus={smoothFocus}/>
+          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName}/>
         </div>
         <div className="field">
           <div className="lbl">Дата</div>
-          <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)} onFocus={smoothFocus}/>
+          <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)}/>
         </div>
         <div className="sec-lbl" style={{marginTop:20,marginBottom:12}}>Упражнения</div>
         {exercises.map((ex,ei)=>{
@@ -237,9 +271,9 @@ function WorkoutSheet({ workouts, initial, onSave, onClose }) {
                 {ex.sets.map((s,si)=>(
                   <div key={si} className="set-row">
                     <span className="set-n">{si+1}</span>
-                    <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",e.target.value)} onFocus={smoothFocus}/>
+                    <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",e.target.value)}/>
                     <span className="set-sep">×</span>
-                    <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)} onFocus={smoothFocus}/>
+                    <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)}/>
                     <button className="del-btn" onClick={()=>remSet(ex.id,si)}><IconTrash/></button>
                   </div>
                 ))}
@@ -253,7 +287,6 @@ function WorkoutSheet({ workouts, initial, onSave, onClose }) {
                   onChange={e=>upEx(ex.id,"comment",e.target.value)}
                   rows={1}
                   onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}}
-                  onFocus={smoothFocus}
                 />
               </div>
             </div>
@@ -470,6 +503,9 @@ function MeasurementSheet({measurements, initial, onSave, onClose}) {
     return v;
   });
   const [saving,setSaving]=useState(false);
+  const sheetRef=useRef(null);
+  useKeyboardScroll(sheetRef);
+  useLockBodyScroll();
   const set=(k,v)=>setVals(p=>({...p,[k]:v}));
   const handleSave=async()=>{
     setSaving(true);
@@ -478,25 +514,25 @@ function MeasurementSheet({measurements, initial, onSave, onClose}) {
   };
   return(
     <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div className="sheet">
+      <div className="sheet" ref={sheetRef}>
         <div className="handle"/>
         <div className="sheet-title-row">
-          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName} onFocus={smoothFocus}/>
+          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName}/>
         </div>
         <div className="field">
           <div className="lbl">Дата</div>
-          <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)} onFocus={smoothFocus}/>
+          <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)}/>
         </div>
         <div className="sec-lbl" style={{marginTop:16}}>Вес тела</div>
         <div className="field" style={{marginTop:8}}>
-          <input className="inp" type="number" inputMode="decimal" placeholder="кг, например 82.5" value={vals["weight"]||""} onChange={e=>set("weight",e.target.value)} onFocus={smoothFocus}/>
+          <input className="inp" type="number" inputMode="decimal" placeholder="кг, например 82.5" value={vals["weight"]||""} onChange={e=>set("weight",e.target.value)}/>
         </div>
         <div className="sec-lbl" style={{marginTop:16}}>Замеры (см)</div>
         <div className="m-grid" style={{marginTop:8}}>
           {MEASUREMENT_FIELDS.slice(1).map(f=>(
             <div key={f.key} className="field">
               <div className="lbl">{f.label}</div>
-              <input className="inp" type="number" inputMode="decimal" placeholder="см" value={vals[f.key]||""} onChange={e=>set(f.key,e.target.value)} onFocus={smoothFocus}/>
+              <input className="inp" type="number" inputMode="decimal" placeholder="см" value={vals[f.key]||""} onChange={e=>set(f.key,e.target.value)}/>
             </div>
           ))}
         </div>
