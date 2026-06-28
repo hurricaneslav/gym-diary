@@ -99,6 +99,11 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .divider{border:none;border-top:1px solid #1E1E1E;margin:16px 0}
 .empty{text-align:center;padding:48px 24px;color:#444;font-size:14px;line-height:1.6}
 .empty-icon{font-size:32px;margin-bottom:12px;opacity:.4}
+.m-prev-hint{display:flex;align-items:center;gap:6px;margin-top:4px}
+.m-prev-val{font-size:11px;color:#555;font-style:italic}
+.m-prev-delta{font-size:11px;font-weight:600}
+.m-prev-delta.pos{color:#4CAF50}
+.m-prev-delta.neg{color:#EF5350}
 .m-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .m-grid .field{margin-bottom:0}
 .edit-badge{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#888;border:1px solid #2A2A2A;padding:3px 8px;cursor:pointer;background:none;font-family:inherit;flex-shrink:0}
@@ -383,14 +388,14 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
       <button className="btn" onClick={()=>setShowNew(true)}><IconPlus/>Новая тренировка</button>
       {workouts.length===0
         ?<div className="empty"><div className="empty-icon">🏋️</div>Тренировок пока нет.<br/>Начни первую!</div>
-        :[...workouts].sort((a,b)=>b.date.localeCompare(a.date)).map(w=>(
+        :[...workouts].sort((a,b)=>b.date.localeCompare(a.date)).map((w,i,arr)=>(
           <div key={w.id} className="card" onClick={()=>setDetailId(w.id)}>
             <div style={{minWidth:0}}>
               <div className="card-title">{w.name}</div>
               <div className="card-sub">{formatDate(w.date)} · {w.exercises.length} упр.</div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
-              <span className="tag">#{w.id}</span><IconChevron/>
+              <span className="tag">#{arr.length-i}</span><IconChevron/>
             </div>
           </div>
         ))}
@@ -507,11 +512,30 @@ function MeasurementSheet({measurements, initial, onSave, onClose}) {
   useKeyboardScroll(sheetRef);
   useLockBodyScroll();
   const set=(k,v)=>setVals(p=>({...p,[k]:v}));
+
+  // Ищем предыдущий замер строго раньше текущей даты
+  const prevMeasurement = (() => {
+    const src = isEdit ? measurements.filter(m=>m.id!==initial.id) : measurements;
+    const earlier = src.filter(m=>m.date < date);
+    if(!earlier.length) return null;
+    return earlier.reduce((best,m)=>m.date>best.date?m:best);
+  })();
+
   const handleSave=async()=>{
     setSaving(true);
     await onSave({id:isEdit?initial.id:-1,name:name.trim()||defName,date,...vals});
     setSaving(false);
   };
+
+  // Показываем дельту: +1.5 кг или -2 см
+  const delta=(key,cur)=>{
+    if(!prevMeasurement||prevMeasurement[key]==null||prevMeasurement[key]==="")return null;
+    if(cur==null||cur==="")return null;
+    const d=(parseFloat(cur)-parseFloat(prevMeasurement[key])).toFixed(1);
+    if(d==0)return null;
+    return d>0?`+${d}`:`${d}`;
+  };
+
   return(
     <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div className="sheet" ref={sheetRef}>
@@ -523,9 +547,22 @@ function MeasurementSheet({measurements, initial, onSave, onClose}) {
           <div className="lbl">Дата</div>
           <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)}/>
         </div>
+        {prevMeasurement&&(
+          <div className="prev" style={{marginBottom:12,fontStyle:"normal"}}>
+            Прошлый замер: <span style={{color:"#666"}}>{formatDate(prevMeasurement.date)}</span>
+          </div>
+        )}
         <div className="sec-lbl" style={{marginTop:16}}>Вес тела</div>
         <div className="field" style={{marginTop:8}}>
-          <input className="inp" type="number" inputMode="decimal" placeholder="кг, например 82.5" value={vals["weight"]||""} onChange={e=>set("weight",e.target.value)}/>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <input className="inp" style={{flex:1}} type="number" inputMode="decimal" placeholder="кг, например 82.5" value={vals["weight"]||""} onChange={e=>set("weight",e.target.value)}/>
+            {prevMeasurement&&prevMeasurement["weight"]&&(
+              <div className="m-prev-hint">
+                <span className="m-prev-val">{prevMeasurement["weight"]} кг</span>
+                {delta("weight",vals["weight"])&&<span className={`m-prev-delta ${parseFloat(delta("weight",vals["weight"]))>0?"pos":"neg"}`}>{delta("weight",vals["weight"])}</span>}
+              </div>
+            )}
+          </div>
         </div>
         <div className="sec-lbl" style={{marginTop:16}}>Замеры (см)</div>
         <div className="m-grid" style={{marginTop:8}}>
@@ -533,6 +570,12 @@ function MeasurementSheet({measurements, initial, onSave, onClose}) {
             <div key={f.key} className="field">
               <div className="lbl">{f.label}</div>
               <input className="inp" type="number" inputMode="decimal" placeholder="см" value={vals[f.key]||""} onChange={e=>set(f.key,e.target.value)}/>
+              {prevMeasurement&&prevMeasurement[f.key]&&(
+                <div className="m-prev-hint" style={{marginTop:4}}>
+                  <span className="m-prev-val">{prevMeasurement[f.key]} см</span>
+                  {delta(f.key,vals[f.key])&&<span className={`m-prev-delta ${parseFloat(delta(f.key,vals[f.key]))>0?"pos":"neg"}`}>{delta(f.key,vals[f.key])}</span>}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -621,7 +664,7 @@ function MeasurementsTab({measurements,setMeasurements,toast}) {
       <button className="btn" onClick={()=>setShowNew(true)}><IconPlus/>Измерить тело</button>
       {measurements.length===0
         ?<div className="empty"><div className="empty-icon">📏</div>Замеров пока нет.<br/>Добавь первый!</div>
-        :[...measurements].reverse().map(m=>{
+        :[...measurements].sort((a,b)=>b.date.localeCompare(a.date)).map((m,i,arr)=>{
           const fc=MEASUREMENT_FIELDS.filter(f=>m[f.key]!==""&&m[f.key]!=null).length;
           return(
             <div key={m.id} className="card" onClick={()=>setDetailId(m.id)}>
@@ -630,7 +673,7 @@ function MeasurementsTab({measurements,setMeasurements,toast}) {
                 <div className="card-sub">{formatDate(m.date)} · {fc} показателей</div>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
-                <span className="tag">#{m.id}</span><IconChevron/>
+                <span className="tag">#{arr.length-i}</span><IconChevron/>
               </div>
             </div>
           );
