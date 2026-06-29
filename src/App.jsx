@@ -17,7 +17,7 @@ const IconTrash = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="no
 const IconChevron = ({dir="right"}) => <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{transform:dir==="left"?"rotate(180deg)":""}}><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 const IconEdit = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 
-const css = `
+const IconBilateral = () => <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 6.5h9M6.5 2v9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="2.5" cy="6.5" r="1.5" fill="currentColor" opacity=".7"/><circle cx="10.5" cy="6.5" r="1.5" fill="currentColor" opacity=".7"/></svg>;
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;-webkit-font-smoothing:antialiased}
 .app-frame{max-width:390px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;background:#0A0A0A}
@@ -61,12 +61,21 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .sug-match{color:#FFF;font-weight:600}
 .prev{margin:0 14px;padding:8px 0 10px;font-size:12px;color:#555;border-bottom:1px solid #1A1A1A;font-style:italic}
 .sets{padding:10px 14px;overflow:hidden;contain:layout}
-.set-row{display:flex;align-items:center;gap:6px;margin-bottom:8px;width:100%;min-width:0}
+.set-row{display:flex;align-items:center;gap:5px;margin-bottom:8px;width:100%;min-width:0}
 .set-n{font-size:11px;color:#444;text-align:center;flex-shrink:0;width:18px}
 .set-inp{background:#1A1A1A;border:1px solid #252525;color:#FFF;font-size:14px;padding:8px 6px;outline:none;font-family:inherit;text-align:center;-webkit-appearance:none;min-width:0;width:0;flex:1}
 .set-inp:focus{border-color:#555}
 .set-inp::placeholder{color:#3A3A3A;font-size:12px}
+.set-inp.sm{font-size:12px;padding:7px 4px}
 .set-sep{color:#444;text-align:center;font-size:13px;flex-shrink:0;width:10px}
+.set-side{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#555;flex-shrink:0;width:14px;text-align:center}
+.set-side.L{color:#5B9CF6}
+.set-side.R{color:#F6845B}
+.set-bi-wrap{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+.set-bi-row{display:flex;align-items:center;gap:4px;min-width:0}
+.btn-bi{background:none;border:none;color:#333;cursor:pointer;padding:3px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:color .15s}
+.btn-bi:active{color:#888}
+.btn-bi.active{color:#5B9CF6}
 .del-btn{background:none;border:none;color:#444;cursor:pointer;padding:4px;display:flex;align-items:center;justify-content:center;line-height:1}
 .del-btn:active{color:#FF4444}
 .ex-comment{padding:0 14px 12px;margin-top:2px}
@@ -214,13 +223,14 @@ function WorkoutSheet({ workouts, initial, onSave, onClose }) {
   )];
 
   function newEx(){return{id:Date.now()+Math.random(),name:"",sets:[newSet()],comment:""};}
-  function newSet(){return{weight:"",reps:""};}
+  function newSet(){return{weight:"",reps:"",bilateral:false,weightL:"",repsL:"",weightR:"",repsR:""};}
   const addEx=()=>setExercises(p=>[...p,newEx()]);
   const upEx=(id,f,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,[f]:v}:e));
   const remEx=(id)=>setExercises(p=>p.filter(e=>e.id!==id));
   const addSet=(id)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:[...e.sets,newSet()]}:e));
   const upSet=(id,si,f,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,[f]:v}:s)}:e));
   const remSet=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.filter((_,i)=>i!==si)}:e));
+  const toggleBilateral=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,bilateral:!s.bilateral}:s)}:e));
 
   const getPrev=(exName)=>{
     if(!exName.trim())return null;
@@ -237,7 +247,10 @@ function WorkoutSheet({ workouts, initial, onSave, onClose }) {
 
   const handleSave=async()=>{
     setSaving(true);
-    const filtered=exercises.filter(e=>e.name.trim()||e.sets.some(s=>s.weight||s.reps)).map(e=>({...e,sets:e.sets.filter(s=>s.weight||s.reps)}));
+    const hasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
+    const filtered=exercises
+      .filter(e=>e.name.trim()||e.sets.some(hasData))
+      .map(e=>({...e,sets:e.sets.filter(hasData)}));
     const payload={id:isEdit?initial.id:-1,name:name.trim()||defName,date,exercises:filtered};
     const res=await onSave(payload);
     setSaving(false);
@@ -268,7 +281,12 @@ function WorkoutSheet({ workouts, initial, onSave, onClose }) {
               {prev&&(
                 <div className="prev">
                   Прошлый раз ({formatDate(prev.workout.date)}):&nbsp;
-                  {prev.exercise.sets.filter(s=>s.weight||s.reps).map((s,i,arr)=>`${s.weight?s.weight+"кг":"—"}×${s.reps||"—"}${i<arr.length-1?", ":""}`)}
+                  {prev.exercise.sets.filter(s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps)).map((s,i,arr)=>{
+                    const str=s.bilateral
+                      ?`Л${s.weightL||"—"}×${s.repsL||"—"} П${s.weightR||"—"}×${s.repsR||"—"}`
+                      :`${s.weight?s.weight+"кг":"—"}×${s.reps||"—"}`;
+                    return str+(i<arr.length-1?", ":"");
+                  })}
                   {prev.exercise.comment?<><br/><span style={{fontStyle:"italic",color:"#555"}}>{prev.exercise.comment}</span></>:null}
                 </div>
               )}
@@ -276,9 +294,29 @@ function WorkoutSheet({ workouts, initial, onSave, onClose }) {
                 {ex.sets.map((s,si)=>(
                   <div key={si} className="set-row">
                     <span className="set-n">{si+1}</span>
-                    <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",e.target.value)}/>
-                    <span className="set-sep">×</span>
-                    <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)}/>
+                    {s.bilateral?(
+                      <div className="set-bi-wrap">
+                        <div className="set-bi-row">
+                          <span className="set-side L">Л</span>
+                          <input className="set-inp sm" type="number" inputMode="decimal" placeholder="кг" value={s.weightL} onChange={e=>upSet(ex.id,si,"weightL",e.target.value)}/>
+                          <span className="set-sep">×</span>
+                          <input className="set-inp sm" type="number" inputMode="numeric" placeholder="повт" value={s.repsL} onChange={e=>upSet(ex.id,si,"repsL",e.target.value)}/>
+                        </div>
+                        <div className="set-bi-row">
+                          <span className="set-side R">П</span>
+                          <input className="set-inp sm" type="number" inputMode="decimal" placeholder="кг" value={s.weightR} onChange={e=>upSet(ex.id,si,"weightR",e.target.value)}/>
+                          <span className="set-sep">×</span>
+                          <input className="set-inp sm" type="number" inputMode="numeric" placeholder="повт" value={s.repsR} onChange={e=>upSet(ex.id,si,"repsR",e.target.value)}/>
+                        </div>
+                      </div>
+                    ):(
+                      <>
+                        <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",e.target.value)}/>
+                        <span className="set-sep">×</span>
+                        <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)}/>
+                      </>
+                    )}
+                    <button className={`btn-bi${s.bilateral?" active":""}`} onClick={()=>toggleBilateral(ex.id,si)} title="Унилатеральный режим"><IconBilateral/></button>
                     <button className="del-btn" onClick={()=>remSet(ex.id,si)}><IconTrash/></button>
                   </div>
                 ))}
@@ -370,7 +408,15 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
               {ex.sets.map((s,si)=>(
                 <div key={si} className="w-set-row">
                   <span className="w-set-n">{si+1}</span>
-                  <span className="w-set-v">{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
+                  {s.bilateral?(
+                    <span className="w-set-v" style={{display:"flex",gap:8}}>
+                      <span><span style={{color:"#5B9CF6",fontSize:10}}>Л </span>{s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}</span>
+                      <span style={{color:"#333"}}>|</span>
+                      <span><span style={{color:"#F6845B",fontSize:10}}>П </span>{s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}</span>
+                    </span>
+                  ):(
+                    <span className="w-set-v">{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
+                  )}
                 </div>
               ))}
             </div>
@@ -462,8 +508,19 @@ function ExercisesTab({workouts, setWorkouts, toast}) {
           <div key={i} className="ex-hist-item">
             <div className="ex-hist-date">{formatDate(workout.date)} · {workout.name}</div>
             <div className="ex-sets-disp">
-              {exercise.sets.filter(s=>s.weight||s.reps).map((s,si)=>(
-                <div key={si}><span style={{color:"#555"}}>{si+1}.</span> {s.weight?`${s.weight} кг`:"—"} × {s.reps?`${s.reps} повт`:"—"}</div>
+              {exercise.sets.filter(s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps)).map((s,si)=>(
+                <div key={si}>
+                  <span style={{color:"#555"}}>{si+1}.</span>{" "}
+                  {s.bilateral?(
+                    <>
+                      <span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}
+                      {" · "}
+                      <span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}
+                    </>
+                  ):(
+                    <>{s.weight?`${s.weight} кг`:"—"} × {s.reps?`${s.reps} повт`:"—"}</>
+                  )}
+                </div>
               ))}
             </div>
             {exercise.comment&&<div className="ex-hist-comment">{exercise.comment}</div>}
