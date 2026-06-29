@@ -18,6 +18,8 @@ const IconChevron = ({dir="right"}) => <svg width="16" height="16" viewBox="0 0 
 const IconEdit = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 
 const IconBilateral = () => <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 6.5h9M6.5 2v9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="2.5" cy="6.5" r="1.5" fill="currentColor" opacity=".7"/><circle cx="10.5" cy="6.5" r="1.5" fill="currentColor" opacity=".7"/></svg>;
+
+const css = `
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;-webkit-font-smoothing:antialiased}
 .app-frame{max-width:390px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;background:#0A0A0A}
