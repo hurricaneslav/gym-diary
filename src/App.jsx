@@ -18,6 +18,8 @@ const IconChevron = ({dir="right"}) => <svg width="16" height="16" viewBox="0 0 
 const IconEdit = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 
 const IconBilateral = () => <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 6.5h9M6.5 2v9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="2.5" cy="6.5" r="1.5" fill="currentColor" opacity=".7"/><circle cx="10.5" cy="6.5" r="1.5" fill="currentColor" opacity=".7"/></svg>;
+const IconClose = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
+const IconMinimize = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 8.5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>;
 
 const css = `
 *{box-sizing:border-box;margin:0;padding:0}
@@ -37,9 +39,12 @@ body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,
 .btn.danger{border-color:#FF4444;color:#FF4444}.btn.danger:active{background:#FF4444;color:#FFF}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;display:flex;flex-direction:column;justify-content:flex-end;max-width:390px;margin:0 auto;overflow:hidden}
-.sheet{background:#0A0A0A;border-top:1px solid #2A2A2A;max-height:92dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 16px 40px;animation:up .22s ease;scroll-behavior:auto}
+.sheet{position:relative;background:#0A0A0A;border-top:1px solid #2A2A2A;max-height:92dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 16px 40px;animation:up .22s ease;scroll-behavior:auto}
 @keyframes up{from{transform:translateY(30px);opacity:0}to{transform:none;opacity:1}}
 .handle{width:36px;height:4px;background:#333;margin:12px auto 16px}
+.sheet-top-actions{position:absolute;top:14px;right:12px;display:flex;gap:4px;z-index:5}
+.sheet-icon-btn{background:none;border:none;color:#666;cursor:pointer;padding:7px;display:flex;align-items:center;justify-content:center}
+.sheet-icon-btn:active{color:#FFF}
 .sheet-title-row{display:flex;align-items:center;gap:8px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #1E1E1E}
 .sheet-title-inp{flex:1;background:none;border:none;border-bottom:1px solid #333;color:#FFF;font-size:18px;font-weight:700;letter-spacing:-.02em;outline:none;font-family:inherit;padding-bottom:3px;min-width:0}
 .sheet-title-inp::placeholder{color:#444;font-weight:400}
@@ -103,8 +108,12 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .w-ex-name{padding:10px 14px;font-weight:600;font-size:14px;border-bottom:1px solid #1A1A1A;color:#DDD}
 .w-sets{padding:10px 14px}
 .w-set-row{display:flex;gap:6px;align-items:center;font-size:13px;color:#888;margin-bottom:4px}
-.w-set-n{color:#444;width:20px}
+.w-set-n{color:#444;width:20px;flex-shrink:0}
 .w-set-v{color:#CCC}
+.w-set-bi{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;width:100%}
+.w-set-bi-side{color:#CCC}
+.w-set-bi-side:last-child{text-align:left}
+.w-set-bi-sep{color:#333;text-align:center}
 .rename-inp{background:none;border:none;border-bottom:1px solid #444;color:#FFF;font-size:17px;font-weight:700;letter-spacing:-.02em;outline:none;font-family:inherit;flex:1;min-width:0;padding-bottom:2px}
 .tag{display:inline-block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#555;border:1px solid #2A2A2A;padding:2px 6px;flex-shrink:0}
 .divider{border:none;border-top:1px solid #1E1E1E;margin:16px 0}
@@ -124,6 +133,14 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;border:1px solid #333;color:#CCC;font-size:13px;padding:10px 18px;z-index:200;white-space:nowrap;animation:fadeIn .2s ease}
 @keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.draft-bar{position:fixed;bottom:0;left:0;right:0;max-width:390px;margin:0 auto;background:#161616;border-top:1px solid #2A2A2A;display:flex;align-items:center;gap:10px;padding:12px 14px;z-index:60;cursor:pointer;animation:up .2s ease}
+.draft-bar-dot{width:7px;height:7px;border-radius:50%;background:#4CAF50;flex-shrink:0;animation:pulse 1.6s ease infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.draft-bar-text{flex:1;min-width:0}
+.draft-bar-title{font-size:13px;font-weight:600;color:#FFF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.draft-bar-sub{font-size:11px;color:#666;margin-top:1px}
+.draft-bar-close{background:none;border:none;color:#666;cursor:pointer;padding:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.draft-bar-close:active{color:#FFF}
 `;
 
 // ── Keyboard-aware scroll ─────────────────────────────────────────────────
@@ -205,16 +222,18 @@ function ExNameInput({ value, onChange, allExNames }) {
 }
 
 // ── WorkoutSheet ──────────────────────────────────────────────────────────
-function WorkoutSheet({ workouts, initial, onSave, onClose }) {
+function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize }) {
   const isEdit = !!initial;
-  const defName = isEdit ? initial.name : `Тренировка ${workouts.length + 1}`;
+  const defName = draft?.name ?? (isEdit ? initial.name : `Тренировка ${workouts.length + 1}`);
   const [name, setName] = useState(defName);
-  const [date, setDate] = useState(isEdit ? initial.date : today());
-  const [exercises, setExercises] = useState(
-    isEdit && initial.exercises.length > 0
-      ? initial.exercises.map(e=>({...e,id:e.id??Date.now()+Math.random(),sets:e.sets.map(s=>({...s}))}))
-      : [newEx()]
-  );
+  const [date, setDate] = useState(draft?.date ?? (isEdit ? initial.date : today()));
+  const [exercises, setExercises] = useState(() => {
+    if (draft?.exercises) return draft.exercises;
+    if (isEdit && initial.exercises.length > 0) {
+      return initial.exercises.map(e=>({...e,id:e.id??Date.now()+Math.random(),sets:e.sets.map(s=>({...s}))}));
+    }
+    return [newEx()];
+  });
   const [saving, setSaving] = useState(false);
   const sheetRef = useRef(null);
   useKeyboardScroll(sheetRef);
@@ -233,6 +252,14 @@ function WorkoutSheet({ workouts, initial, onSave, onClose }) {
   const upSet=(id,si,f,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,[f]:v}:s)}:e));
   const remSet=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.filter((_,i)=>i!==si)}:e));
   const toggleBilateral=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,bilateral:!s.bilateral}:s)}:e));
+
+  // Есть ли реально внесённые данные (не просто пустая заготовка)?
+  const hasRealData = () => {
+    const hasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
+    return exercises.some(e=>e.sets.some(hasData));
+  };
+
+  const buildDraft = () => ({ name, date, exercises });
 
   const getPrev=(exName)=>{
     if(!exName.trim())return null;
@@ -259,10 +286,26 @@ function WorkoutSheet({ workouts, initial, onSave, onClose }) {
     return res;
   };
 
+  // Свернуть: если есть реальные данные — сохраняем черновик, иначе просто закрываем
+  const handleMinimize=()=>{
+    if (hasRealData()) onMinimize(buildDraft());
+    else onClose();
+  };
+
+  // Закрыть крестиком: если есть данные — спросим подтверждение (можно случайно стереть тренировку)
+  const handleCloseClick=()=>{
+    if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+    onClose();
+  };
+
   return (
-    <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&handleMinimize()}>
       <div className="sheet" ref={sheetRef}>
         <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-icon-btn" onClick={handleMinimize} title="Свернуть"><IconMinimize/></button>
+          <button className="sheet-icon-btn" onClick={handleCloseClick} title="Закрыть"><IconClose/></button>
+        </div>
         <div className="sheet-title-row">
           <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName}/>
         </div>
@@ -339,14 +382,14 @@ function WorkoutSheet({ workouts, initial, onSave, onClose }) {
         })}
         <button className="add-ex" onClick={addEx}><IconPlus/>Добавить упражнение</button>
         <button className="btn" onClick={handleSave} disabled={saving}>{saving?"Сохранение...":(isEdit?"Сохранить изменения":"Сохранить тренировку")}</button>
-        <button className="btn ghost" onClick={onClose}>Отмена</button>
+        <button className="btn ghost" onClick={handleCloseClick}>Отмена</button>
       </div>
     </div>
   );
 }
 
 // ── WorkoutsTab ───────────────────────────────────────────────────────────
-function WorkoutsTab({workouts, setWorkouts, toast}) {
+function WorkoutsTab({workouts, setWorkouts, toast, draftState, setDraftState}) {
   const [showNew,setShowNew]=useState(false);
   const [editId,setEditId]=useState(null);
   const [detailId,setDetailId]=useState(null);
@@ -355,19 +398,32 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
 
   const detail=detailId!=null?workouts.find(w=>w.id===detailId):null;
   const editTarget=editId!=null?workouts.find(w=>w.id===editId):null;
-  const nextId = null; // не используется — ID генерирует сервер
+
+  // Если есть свёрнутый черновик именно для тренировок — шторка открыта в режиме восстановления
+  const draft = draftState?.type==="workout" ? draftState : null;
+
+  // Когда черновик восстанавливается (клик по draft-bar), открываем нужную шторку
+  useEffect(()=>{
+    if(draft && draft.restoring){
+      if(draft.editId!=null){ setEditId(draft.editId); setDetailId(null); }
+      else { setShowNew(true); }
+      setDraftState(p=>p?{...p,restoring:false}:p);
+    }
+  },[draft?.restoring]);
 
   const handleCreate=async(w)=>{
     const res=await api.saveWorkout(w);
     const saved={...w,id:res.id};
     setWorkouts(p=>[...p,saved]);
     setShowNew(false);
+    setDraftState(null);
     toast("Тренировка сохранена ✓");
   };
   const handleUpdate=async(w)=>{
     await api.saveWorkout(w);
     setWorkouts(p=>p.map(x=>x.id===w.id?w:x));
     setEditId(null); setDetailId(w.id);
+    setDraftState(null);
     toast("Изменения сохранены ✓");
   };
   const handleDelete=async(id)=>{
@@ -385,6 +441,17 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
     await api.saveWorkout(updated);
     setWorkouts(p=>p.map(x=>x.id===id?updated:x));
     setRenamingId(null);
+  };
+
+  const handleMinimize=(draftData)=>{
+    setShowNew(false);
+    setEditId(null);
+    setDraftState({type:"workout", editId: editTarget?.id ?? null, ...draftData});
+  };
+  const handleSheetClose=()=>{
+    setShowNew(false);
+    setEditId(null);
+    setDraftState(null);
   };
 
   if(detail) return (
@@ -411,10 +478,10 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
                 <div key={si} className="w-set-row">
                   <span className="w-set-n">{si+1}</span>
                   {s.bilateral?(
-                    <span className="w-set-v" style={{display:"flex",gap:8}}>
-                      <span><span style={{color:"#5B9CF6",fontSize:10}}>Л </span>{s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}</span>
-                      <span style={{color:"#333"}}>|</span>
-                      <span><span style={{color:"#F6845B",fontSize:10}}>П </span>{s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}</span>
+                    <span className="w-set-v w-set-bi">
+                      <span className="w-set-bi-side"><span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}</span>
+                      <span className="w-set-bi-sep">|</span>
+                      <span className="w-set-bi-side"><span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}</span>
                     </span>
                   ):(
                     <span className="w-set-v">{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
@@ -427,7 +494,7 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
         ))}
       <hr className="divider"/>
       <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить тренировку</button>
-      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} onSave={handleUpdate} onClose={()=>setEditId(null)}/>}
+      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
     </div>
   );
 
@@ -447,8 +514,8 @@ function WorkoutsTab({workouts, setWorkouts, toast}) {
             </div>
           </div>
         ))}
-      {showNew&&<WorkoutSheet workouts={workouts} initial={null} onSave={handleCreate} onClose={()=>setShowNew(false)}/>}
-      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} onSave={handleUpdate} onClose={()=>setEditId(null)}/>}
+      {showNew&&<WorkoutSheet workouts={workouts} initial={null} draft={draft} onSave={handleCreate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
     </div>
   );
 }
@@ -555,12 +622,13 @@ function ExercisesTab({workouts, setWorkouts, toast}) {
 }
 
 // ── MeasurementSheet ──────────────────────────────────────────────────────
-function MeasurementSheet({measurements, initial, onSave, onClose}) {
+function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMinimize}) {
   const isEdit=!!initial;
-  const defName=isEdit?initial.name:`Замер ${(measurements?.length||0) + 1}`;
+  const defName=draft?.name ?? (isEdit?initial.name:`Замер ${(measurements?.length||0) + 1}`);
   const [name,setName]=useState(defName);
-  const [date,setDate]=useState(isEdit?initial.date:today());
+  const [date,setDate]=useState(draft?.date ?? (isEdit?initial.date:today()));
   const [vals,setVals]=useState(()=>{
+    if(draft?.vals) return draft.vals;
     if(!isEdit)return{};
     const v={};
     MEASUREMENT_FIELDS.forEach(f=>{if(initial[f.key]!=null&&initial[f.key]!=="")v[f.key]=initial[f.key];});
@@ -580,10 +648,22 @@ function MeasurementSheet({measurements, initial, onSave, onClose}) {
     return earlier.reduce((best,m)=>m.date>best.date?m:best);
   })();
 
+  const hasRealData = () => Object.values(vals).some(v=>v!==""&&v!=null);
+  const buildDraft = () => ({ name, date, vals });
+
   const handleSave=async()=>{
     setSaving(true);
     await onSave({id:isEdit?initial.id:-1,name:name.trim()||defName,date,...vals});
     setSaving(false);
+  };
+
+  const handleMinimize=()=>{
+    if (hasRealData()) onMinimize(buildDraft());
+    else onClose();
+  };
+  const handleCloseClick=()=>{
+    if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+    onClose();
   };
 
   // Показываем дельту: +1.5 кг или -2 см
@@ -596,9 +676,13 @@ function MeasurementSheet({measurements, initial, onSave, onClose}) {
   };
 
   return(
-    <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&handleMinimize()}>
       <div className="sheet" ref={sheetRef}>
         <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-icon-btn" onClick={handleMinimize} title="Свернуть"><IconMinimize/></button>
+          <button className="sheet-icon-btn" onClick={handleCloseClick} title="Закрыть"><IconClose/></button>
+        </div>
         <div className="sheet-title-row">
           <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName}/>
         </div>
@@ -640,14 +724,14 @@ function MeasurementSheet({measurements, initial, onSave, onClose}) {
         </div>
         <div style={{height:20}}/>
         <button className="btn" onClick={handleSave} disabled={saving}>{saving?"Сохранение...":(isEdit?"Сохранить изменения":"Сохранить замер")}</button>
-        <button className="btn ghost" onClick={onClose}>Отмена</button>
+        <button className="btn ghost" onClick={handleCloseClick}>Отмена</button>
       </div>
     </div>
   );
 }
 
 // ── MeasurementsTab ───────────────────────────────────────────────────────
-function MeasurementsTab({measurements,setMeasurements,toast}) {
+function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraftState}) {
   const [showNew,setShowNew]=useState(false);
   const [editId,setEditId]=useState(null);
   const [detailId,setDetailId]=useState(null);
@@ -656,19 +740,30 @@ function MeasurementsTab({measurements,setMeasurements,toast}) {
 
   const detail=detailId!=null?measurements.find(m=>m.id===detailId):null;
   const editTarget=editId!=null?measurements.find(m=>m.id===editId):null;
-  const nextId = null; // не используется — ID генерирует сервер
+
+  const draft = draftState?.type==="measurement" ? draftState : null;
+
+  useEffect(()=>{
+    if(draft && draft.restoring){
+      if(draft.editId!=null){ setEditId(draft.editId); setDetailId(null); }
+      else { setShowNew(true); }
+      setDraftState(p=>p?{...p,restoring:false}:p);
+    }
+  },[draft?.restoring]);
 
   const handleCreate=async(m)=>{
     const res=await api.saveMeasurement(m);
     const saved={...m,id:res.id};
     setMeasurements(p=>[...p,saved]);
     setShowNew(false);
+    setDraftState(null);
     toast("Замер сохранён ✓");
   };
   const handleUpdate=async(m)=>{
     await api.saveMeasurement(m);
     setMeasurements(p=>p.map(x=>x.id===m.id?m:x));
     setEditId(null); setDetailId(m.id);
+    setDraftState(null);
     toast("Изменения сохранены ✓");
   };
   const handleDelete=async(id)=>{
@@ -686,6 +781,17 @@ function MeasurementsTab({measurements,setMeasurements,toast}) {
     await api.saveMeasurement(updated);
     setMeasurements(p=>p.map(x=>x.id===id?updated:x));
     setRenamingId(null);
+  };
+
+  const handleMinimize=(draftData)=>{
+    setShowNew(false);
+    setEditId(null);
+    setDraftState({type:"measurement", editId: editTarget?.id ?? null, ...draftData});
+  };
+  const handleSheetClose=()=>{
+    setShowNew(false);
+    setEditId(null);
+    setDraftState(null);
   };
 
   if(detail){
@@ -714,7 +820,7 @@ function MeasurementsTab({measurements,setMeasurements,toast}) {
           ))}
         <hr className="divider"/>
         <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить замер</button>
-        {editTarget&&<MeasurementSheet measurements={measurements} initial={editTarget} onSave={handleUpdate} onClose={()=>setEditId(null)}/>}
+        {editTarget&&<MeasurementSheet measurements={measurements} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
       </div>
     );
   }
@@ -737,8 +843,8 @@ function MeasurementsTab({measurements,setMeasurements,toast}) {
             </div>
           );
         })}
-      {showNew&&<MeasurementSheet measurements={measurements} initial={null} onSave={handleCreate} onClose={()=>setShowNew(false)}/>}
-      {editTarget&&<MeasurementSheet measurements={measurements} initial={editTarget} onSave={handleUpdate} onClose={()=>setEditId(null)}/>}
+      {showNew&&<MeasurementSheet measurements={measurements} initial={null} draft={draft} onSave={handleCreate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+      {editTarget&&<MeasurementSheet measurements={measurements} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
     </div>
   );
 }
@@ -751,6 +857,7 @@ export default function App() {
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState(null);
   const [toastMsg,setToastMsg]=useState("");
+  const [draftState,setDraftState]=useState(null); // {type:'workout'|'measurement', editId, name, date, exercises|vals, restoring}
 
   const showToast=(msg)=>{
     setToastMsg(msg);
@@ -800,9 +907,22 @@ export default function App() {
             <button key={i} className={`tab${tab===i?" active":""}`} onClick={()=>setTab(i)}>{t}</button>
           ))}
         </div>
-        {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
+        {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} draftState={draftState} setDraftState={setDraftState}/>}
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
-        {tab===2&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast}/>}
+        {tab===2&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} draftState={draftState} setDraftState={setDraftState}/>}
+        {draftState&&!draftState.restoring&&(
+          <div className="draft-bar" onClick={()=>{
+            setDraftState(p=>({...p,restoring:true}));
+            setTab(draftState.type==="workout"?0:2);
+          }}>
+            <span className="draft-bar-dot"/>
+            <div className="draft-bar-text">
+              <div className="draft-bar-title">{draftState.name || (draftState.type==="workout"?"Тренировка":"Замер")}</div>
+              <div className="draft-bar-sub">{draftState.type==="workout"?"Тренировка не сохранена · нажми чтобы продолжить":"Замер не сохранён · нажми чтобы продолжить"}</div>
+            </div>
+            <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){setDraftState(null);}}}><IconClose/></button>
+          </div>
+        )}
         <Toast msg={toastMsg}/>
       </div>
     </>
