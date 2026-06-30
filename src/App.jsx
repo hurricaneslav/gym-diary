@@ -395,35 +395,37 @@ function WorkoutsTab({workouts, setWorkouts, toast, draftState, setDraftState}) 
   const [detailId,setDetailId]=useState(null);
   const [renamingId,setRenamingId]=useState(null);
   const [renameVal,setRenameVal]=useState("");
+  const [restoredDraft,setRestoredDraft]=useState(null); // черновик, восстановленный в текущей открытой шторке
 
   const detail=detailId!=null?workouts.find(w=>w.id===detailId):null;
   const editTarget=editId!=null?workouts.find(w=>w.id===editId):null;
 
-  // Если есть свёрнутый черновик именно для тренировок — шторка открыта в режиме восстановления
-  const draft = draftState?.type==="workout" ? draftState : null;
-
-  // Когда черновик восстанавливается (клик по draft-bar), открываем нужную шторку
+  // Когда черновик восстанавливается (клик по draft-bar в App), открываем нужную шторку
+  // и сразу забираем данные локально — глобальный draftState очищается, бар пропадает.
   useEffect(()=>{
-    if(draft && draft.restoring){
-      if(draft.editId!=null){ setEditId(draft.editId); setDetailId(null); }
+    if(draftState?.type==="workout" && draftState.restoring){
+      setRestoredDraft(draftState);
+      if(draftState.editId!=null){ setEditId(draftState.editId); setDetailId(null); }
       else { setShowNew(true); }
-      setDraftState(p=>p?{...p,restoring:false}:p);
+      setDraftState(null);
     }
-  },[draft?.restoring]);
+  },[draftState]);
+
+  const draft = restoredDraft;
 
   const handleCreate=async(w)=>{
     const res=await api.saveWorkout(w);
     const saved={...w,id:res.id};
     setWorkouts(p=>[...p,saved]);
     setShowNew(false);
-    setDraftState(null);
+    setRestoredDraft(null);
     toast("Тренировка сохранена ✓");
   };
   const handleUpdate=async(w)=>{
     await api.saveWorkout(w);
     setWorkouts(p=>p.map(x=>x.id===w.id?w:x));
     setEditId(null); setDetailId(w.id);
-    setDraftState(null);
+    setRestoredDraft(null);
     toast("Изменения сохранены ✓");
   };
   const handleDelete=async(id)=>{
@@ -446,12 +448,13 @@ function WorkoutsTab({workouts, setWorkouts, toast, draftState, setDraftState}) 
   const handleMinimize=(draftData)=>{
     setShowNew(false);
     setEditId(null);
+    setRestoredDraft(null);
     setDraftState({type:"workout", editId: editTarget?.id ?? null, ...draftData});
   };
   const handleSheetClose=()=>{
     setShowNew(false);
     setEditId(null);
-    setDraftState(null);
+    setRestoredDraft(null);
   };
 
   if(detail) return (
@@ -737,33 +740,35 @@ function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraft
   const [detailId,setDetailId]=useState(null);
   const [renamingId,setRenamingId]=useState(null);
   const [renameVal,setRenameVal]=useState("");
+  const [restoredDraft,setRestoredDraft]=useState(null);
 
   const detail=detailId!=null?measurements.find(m=>m.id===detailId):null;
   const editTarget=editId!=null?measurements.find(m=>m.id===editId):null;
 
-  const draft = draftState?.type==="measurement" ? draftState : null;
-
   useEffect(()=>{
-    if(draft && draft.restoring){
-      if(draft.editId!=null){ setEditId(draft.editId); setDetailId(null); }
+    if(draftState?.type==="measurement" && draftState.restoring){
+      setRestoredDraft(draftState);
+      if(draftState.editId!=null){ setEditId(draftState.editId); setDetailId(null); }
       else { setShowNew(true); }
-      setDraftState(p=>p?{...p,restoring:false}:p);
+      setDraftState(null);
     }
-  },[draft?.restoring]);
+  },[draftState]);
+
+  const draft = restoredDraft;
 
   const handleCreate=async(m)=>{
     const res=await api.saveMeasurement(m);
     const saved={...m,id:res.id};
     setMeasurements(p=>[...p,saved]);
     setShowNew(false);
-    setDraftState(null);
+    setRestoredDraft(null);
     toast("Замер сохранён ✓");
   };
   const handleUpdate=async(m)=>{
     await api.saveMeasurement(m);
     setMeasurements(p=>p.map(x=>x.id===m.id?m:x));
     setEditId(null); setDetailId(m.id);
-    setDraftState(null);
+    setRestoredDraft(null);
     toast("Изменения сохранены ✓");
   };
   const handleDelete=async(id)=>{
@@ -786,12 +791,13 @@ function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraft
   const handleMinimize=(draftData)=>{
     setShowNew(false);
     setEditId(null);
+    setRestoredDraft(null);
     setDraftState({type:"measurement", editId: editTarget?.id ?? null, ...draftData});
   };
   const handleSheetClose=()=>{
     setShowNew(false);
     setEditId(null);
-    setDraftState(null);
+    setRestoredDraft(null);
   };
 
   if(detail){
