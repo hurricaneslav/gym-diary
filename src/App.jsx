@@ -802,6 +802,21 @@ function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraft
 
   if(detail){
     const filled=MEASUREMENT_FIELDS.filter(f=>detail[f.key]!==""&&detail[f.key]!=null);
+
+    // Ищем предыдущий замер строго раньше текущего по дате
+    const prevM = (() => {
+      const earlier = measurements.filter(m=>m.id!==detail.id && m.date < detail.date);
+      if(!earlier.length) return null;
+      return earlier.reduce((best,m)=>m.date>best.date?m:best);
+    })();
+    const delta=(key)=>{
+      if(!prevM||prevM[key]==null||prevM[key]==="")return null;
+      if(detail[key]==null||detail[key]==="")return null;
+      const d=(parseFloat(detail[key])-parseFloat(prevM[key])).toFixed(1);
+      if(d==0)return null;
+      return d>0?`+${d}`:`${d}`;
+    };
+
     return(
       <div className="page">
         <div className="det-hd">
@@ -815,15 +830,31 @@ function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraft
           <span style={{color:"#888",fontSize:13,flex:1,alignSelf:"center"}}>{formatDate(detail.date)}</span>
           <button className="edit-badge" onClick={()=>{setDetailId(null);setEditId(detail.id);}}>✎ Редактировать</button>
         </div>
+        {prevM&&(
+          <div className="prev" style={{marginBottom:16,fontStyle:"normal"}}>
+            Сравнение с замером от <span style={{color:"#666"}}>{formatDate(prevM.date)}</span>
+          </div>
+        )}
         <div className="sec-lbl">Показатели</div>
         {filled.length===0
           ?<p style={{color:"#555",fontSize:13}}>Ничего не заполнено</p>
-          :filled.map(f=>(
-            <div key={f.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #1A1A1A"}}>
-              <span style={{color:"#888",fontSize:13}}>{f.label}</span>
-              <span style={{fontWeight:600,fontSize:15}}>{detail[f.key]} <span style={{color:"#555",fontWeight:400,fontSize:12}}>{f.key==="weight"?"кг":"см"}</span></span>
-            </div>
-          ))}
+          :filled.map(f=>{
+            const d=delta(f.key);
+            const hasPrev=prevM&&prevM[f.key]!=null&&prevM[f.key]!=="";
+            return(
+              <div key={f.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #1A1A1A"}}>
+                <span style={{color:"#888",fontSize:13}}>{f.label}</span>
+                <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+                  {hasPrev&&(
+                    <span style={{fontSize:11,color:"#555",fontStyle:"italic"}}>{prevM[f.key]} {f.key==="weight"?"кг":"см"}</span>
+                  )}
+                  {hasPrev&&<span style={{color:"#444",fontSize:11}}>→</span>}
+                  <span style={{fontWeight:600,fontSize:15}}>{detail[f.key]} <span style={{color:"#555",fontWeight:400,fontSize:12}}>{f.key==="weight"?"кг":"см"}</span></span>
+                  {d&&<span className={`m-prev-delta ${parseFloat(d)>0?"pos":"neg"}`} style={{fontSize:12}}>{d}</span>}
+                </div>
+              </div>
+            );
+          })}
         <hr className="divider"/>
         <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить замер</button>
         {editTarget&&<MeasurementSheet measurements={measurements} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
