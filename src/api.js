@@ -1,11 +1,10 @@
 /**
  * api.js — все запросы к серверу
- * ЗАМЕНИ на свой URL после деплоя на Railway
  */
 
-// ← Сюда вставишь ссылку с Railway после деплоя
-// Например: "https://gym-diary-production.up.railway.app"
 export const API_URL = import.meta.env.VITE_API_URL || "";
+// Юзернейм бота (без @) — нужен для генерации ссылки-приглашения. Задаётся через .env / GitHub Secret VITE_BOT_USERNAME
+export const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME || "";
 
 /** Получить initData от Telegram (или заглушку для браузера) */
 function getInitData() {
@@ -22,7 +21,6 @@ async function request(method, path, body) {
     headers: {
       "Content-Type": "application/json",
       "x-init-data": getInitData(),
-      "x-user-id": "placeholder", // бэкенд игнорирует, берёт из initData
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -30,15 +28,16 @@ async function request(method, path, body) {
   return res.json();
 }
 
-// ── Тренировки ────────────────────────────────────────────────────────────────
 export const api = {
+  // ── Тренировки ──────────────────────────────────────────────────────────
   getWorkouts:      ()      => request("GET",    "/workouts"),
   saveWorkout:      (w)     => request("POST",   "/workouts", w),
   deleteWorkout:    (id)    => request("DELETE", `/workouts/${id}`),
+
+  // ── Замеры ──────────────────────────────────────────────────────────────
   getMeasurements:  ()      => request("GET",    "/measurements"),
   saveMeasurement:  (m)     => request("POST",   "/measurements", {
     ...m,
-    // Собираем все замеры в поле data
     data: Object.fromEntries(
       Object.entries(m).filter(([k]) =>
         !["id","name","date"].includes(k) && m[k] !== "" && m[k] != null
@@ -46,4 +45,20 @@ export const api = {
     ),
   }),
   deleteMeasurement: (id)   => request("DELETE", `/measurements/${id}`),
+
+  // ── Профили ─────────────────────────────────────────────────────────────
+  getProfiles:      ()          => request("GET",    "/profiles"),
+  createProfile:    (name)      => request("POST",   "/profiles", { name }),
+  updateProfile:    (id, patch) => request("PUT",    `/profiles/${id}`, patch),
+  deleteProfile:    (id)        => request("DELETE", `/profiles/${id}`),
+  activateProfile:  (id)        => request("POST",   `/profiles/${id}/activate`),
+
+  // ── Друзья ──────────────────────────────────────────────────────────────
+  getInviteCode:      ()         => request("GET",    "/me/invite-link"),
+  getFriends:         ()         => request("GET",    "/friends"),
+  searchFriend:       (q)        => request("GET",    `/friends/search?q=${encodeURIComponent(q)}`),
+  addFriendByUsername:(username) => request("POST",   "/friends/add-by-username", { username }),
+  addFriendByCode:    (code)     => request("POST",   "/friends/add-by-code", { code }),
+  removeFriend:       (id)       => request("DELETE", `/friends/${id}`),
+  getFriendProfile:   (id)       => request("GET",    `/friends/${id}/profile`),
 };

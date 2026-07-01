@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { api } from "./api.js";
+import { api, BOT_USERNAME } from "./api.js";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const formatDate = (iso) => { try { const [y,m,d]=iso.split("-"); return `${d}.${m}.${y}`; } catch { return iso; } };
@@ -20,6 +20,7 @@ const IconEdit = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="non
 const IconBilateral = () => <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 6.5h9M6.5 2v9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="2.5" cy="6.5" r="1.5" fill="currentColor" opacity=".7"/><circle cx="10.5" cy="6.5" r="1.5" fill="currentColor" opacity=".7"/></svg>;
 const IconClose = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
 const IconMinimize = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 8.5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>;
+const IconLink = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M6 8l2-2M5 9.5L3.5 11A2 2 0 111 8.5L2.5 7M9 5l1.5-1.5A2 2 0 1113 6L11.5 7.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 
 const css = `
 *{box-sizing:border-box;margin:0;padding:0}
@@ -141,6 +142,27 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .draft-bar-sub{font-size:11px;color:#666;margin-top:1px}
 .draft-bar-close{background:none;border:none;color:#666;cursor:pointer;padding:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .draft-bar-close:active{color:#FFF}
+.badge-active{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#4CAF50;border:1px solid #2E4A2E;padding:2px 6px;flex-shrink:0}
+.badge-main{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#5B9CF6;border:1px solid #2A3A4A;padding:2px 6px;flex-shrink:0}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #1A1A1A;gap:12px}
+.toggle-row:last-child{border-bottom:none}
+.toggle-label{font-size:14px;color:#DDD}
+.toggle-sub{font-size:11px;color:#555;margin-top:2px;line-height:1.4}
+.switch{position:relative;width:42px;height:24px;flex-shrink:0;background:#242424;border:1px solid #2A2A2A;cursor:pointer;transition:background .15s,border-color .15s;padding:0}
+.switch.on{background:#2E4A2E;border-color:#4CAF50}
+.switch-knob{position:absolute;top:2px;left:2px;width:18px;height:18px;background:#888;transition:left .15s,background .15s}
+.switch.on .switch-knob{left:22px;background:#4CAF50}
+.avatar{width:36px;height:36px;background:#1A1A1A;border:1px solid #2A2A2A;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;color:#888;flex-shrink:0}
+.friend-row{display:flex;align-items:center;gap:12px}
+.search-row{display:flex;gap:8px;margin-bottom:14px}
+.search-row .inp{flex:1}
+.search-btn{background:none;border:1px solid #2A2A2A;color:#FFF;padding:0 16px;cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0}
+.search-btn:active{border-color:#FFF}
+.search-btn:disabled{opacity:.4}
+.search-result{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid #2A2A2A;background:#111;margin-bottom:14px;gap:10px}
+.sub-tabs{display:flex;border-bottom:1px solid #2A2A2A;margin-bottom:16px}
+.sub-tabs button{flex:1;padding:10px 4px;text-align:center;font-size:11px;font-weight:500;letter-spacing:.02em;text-transform:uppercase;color:#555;cursor:pointer;border-bottom:2px solid transparent;background:none;border-left:none;border-right:none;border-top:none;font-family:inherit}
+.sub-tabs button.active{color:#FFF;border-bottom-color:#FFF}
 `;
 
 // ── Keyboard-aware scroll ─────────────────────────────────────────────────
@@ -886,6 +908,412 @@ function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraft
   );
 }
 
+// ── ToggleRow ─────────────────────────────────────────────────────────────
+function ToggleRow({label, sub, checked, onChange}) {
+  return (
+    <div className="toggle-row">
+      <div style={{flex:1,minWidth:0}}>
+        <div className="toggle-label">{label}</div>
+        {sub&&<div className="toggle-sub">{sub}</div>}
+      </div>
+      <button className={`switch${checked?" on":""}`} onClick={()=>onChange(!checked)}>
+        <span className="switch-knob"/>
+      </button>
+    </div>
+  );
+}
+
+// ── ProfileCreateSheet ────────────────────────────────────────────────────
+function ProfileCreateSheet({onSave, onClose}) {
+  const [name,setName]=useState("");
+  const [saving,setSaving]=useState(false);
+  const sheetRef=useRef(null);
+  useKeyboardScroll(sheetRef);
+  useLockBodyScroll();
+  const handleSave=async()=>{
+    setSaving(true);
+    await onSave(name.trim()||"Новый профиль");
+    setSaving(false);
+  };
+  return(
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="sheet" ref={sheetRef}>
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-icon-btn" onClick={onClose} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder="Название профиля" autoFocus/>
+        </div>
+        <p style={{color:"#666",fontSize:13,marginBottom:20,lineHeight:1.5}}>
+          Новый профиль — это отдельный чистый дневник: тренировки, упражнения и замеры не будут пересекаться с другими профилями. Удобно, если ведёшь дневник за кого-то ещё.
+        </p>
+        <button className="btn" onClick={handleSave} disabled={saving}>{saving?"Создание...":"Создать профиль"}</button>
+        <button className="btn ghost" onClick={onClose}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+// ── FriendProfileView (только просмотр) ──────────────────────────────────
+function FriendProfileView({friendId, onBack, onRemove}) {
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [subTab,setSubTab]=useState(0);
+  const [selectedEx,setSelectedEx]=useState(null);
+
+  useEffect(()=>{
+    api.getFriendProfile(friendId).then(d=>{setData(d);setLoading(false);}).catch(()=>setLoading(false));
+  },[friendId]);
+
+  if(loading) return (
+    <div className="page">
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button></div>
+      <div className="loading"><div className="spinner"/><div>Загрузка...</div></div>
+    </div>
+  );
+  if(!data) return (
+    <div className="page">
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button></div>
+      <div className="empty">Не удалось загрузить профиль</div>
+    </div>
+  );
+
+  const workouts = data.workouts || [];
+  const hasNothing = !data.show_workouts && !data.show_exercises;
+  const allNames = data.show_exercises
+    ? [...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))].sort((a,b)=>a.localeCompare(b,"ru"))
+    : [];
+
+  if(selectedEx){
+    const lc=selectedEx.toLowerCase();
+    const rows=[];
+    workouts.forEach(w=>w.exercises.forEach(e=>{if(e.name.trim().toLowerCase()===lc)rows.push({workout:w,exercise:e});}));
+    rows.sort((a,b)=>b.workout.date.localeCompare(a.workout.date));
+    return(
+      <div className="page">
+        <div className="det-hd">
+          <button className="back-btn" onClick={()=>setSelectedEx(null)}><IconChevron dir="left"/>Назад</button>
+          <span className="det-title">{selectedEx}</span>
+        </div>
+        <div className="sec-lbl">{rows.length} записей</div>
+        {rows.map(({workout,exercise},i)=>(
+          <div key={i} className="ex-hist-item">
+            <div className="ex-hist-date">{formatDate(workout.date)} · {workout.name}</div>
+            <div className="ex-sets-disp">
+              {exercise.sets.filter(s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps)).map((s,si)=>(
+                <div key={si}>
+                  <span style={{color:"#555"}}>{si+1}.</span>{" "}
+                  {s.bilateral?(
+                    <>
+                      <span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}
+                      {" · "}
+                      <span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}
+                    </>
+                  ):(
+                    <>{s.weight?`${s.weight} кг`:"—"} × {s.reps?`${s.reps} повт`:"—"}</>
+                  )}
+                </div>
+              ))}
+            </div>
+            {exercise.comment&&<div className="ex-hist-comment">{exercise.comment}</div>}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return(
+    <div className="page">
+      <div className="det-hd">
+        <button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button>
+        <span className="det-title">{data.name}</span>
+      </div>
+      {hasNothing
+        ?<div className="empty"><div className="empty-icon">🔒</div>Профиль скрыт<br/>Пользователь не открыл доступ к просмотру</div>
+        :(
+          <>
+            <div className="sub-tabs">
+              {data.show_workouts&&<button className={subTab===0?"active":""} onClick={()=>setSubTab(0)}>Тренировки</button>}
+              {data.show_exercises&&<button className={subTab===1?"active":""} onClick={()=>setSubTab(1)}>Упражнения</button>}
+            </div>
+            {subTab===0&&data.show_workouts&&(
+              workouts.length===0
+                ?<div className="empty"><div className="empty-icon">🏋️</div>Тренировок пока нет</div>
+                :[...workouts].sort((a,b)=>b.date.localeCompare(a.date)).map(w=>(
+                  <div key={w.id} className="w-ex" style={{marginBottom:10}}>
+                    <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between"}}>
+                      <span>{w.name}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(w.date)}</span>
+                    </div>
+                    <div className="w-sets">
+                      {w.exercises.map((ex,ei)=>(
+                        <div key={ei} style={{marginBottom:12}}>
+                          <div style={{fontSize:13,color:"#AAA",marginBottom:4,fontWeight:600}}>{ex.name||`Упражнение ${ei+1}`}</div>
+                          {ex.sets.map((s,si)=>(
+                            <div key={si} className="w-set-row">
+                              <span className="w-set-n">{si+1}</span>
+                              {s.bilateral?(
+                                <span className="w-set-v w-set-bi">
+                                  <span className="w-set-bi-side"><span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}</span>
+                                  <span className="w-set-bi-sep">|</span>
+                                  <span className="w-set-bi-side"><span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}</span>
+                                </span>
+                              ):(
+                                <span className="w-set-v">{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
+                              )}
+                            </div>
+                          ))}
+                          {ex.comment&&<div className="w-ex-comment" style={{borderTop:"none",paddingLeft:0}}>{ex.comment}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+            )}
+            {subTab===1&&data.show_exercises&&(
+              allNames.length===0
+                ?<div className="empty"><div className="empty-icon">📝</div>Упражнений пока нет</div>
+                :allNames.map(name=>{
+                  const count=workouts.filter(w=>w.exercises.some(e=>e.name.trim().toLowerCase()===name.toLowerCase())).length;
+                  return(
+                    <div key={name} className="card" onClick={()=>setSelectedEx(name)}>
+                      <div style={{minWidth:0}}>
+                        <div className="card-title">{name}</div>
+                        <div className="card-sub">{count} {count===1?"запись":count<5?"записи":"записей"}</div>
+                      </div>
+                      <IconChevron/>
+                    </div>
+                  );
+                })
+            )}
+          </>
+        )}
+      <hr className="divider"/>
+      <button className="btn danger" onClick={onRemove}>Удалить из друзей</button>
+    </div>
+  );
+}
+
+// ── ProfileTab ────────────────────────────────────────────────────────────
+function ProfileTab({onProfileSwitch, toast}) {
+  const [profiles,setProfiles]=useState([]);
+  const [loadingProfiles,setLoadingProfiles]=useState(true);
+  const [detailId,setDetailId]=useState(null);
+  const [renamingId,setRenamingId]=useState(null);
+  const [renameVal,setRenameVal]=useState("");
+  const [showCreate,setShowCreate]=useState(false);
+
+  const [friends,setFriends]=useState([]);
+  const [loadingFriends,setLoadingFriends]=useState(true);
+  const [friendQuery,setFriendQuery]=useState("");
+  const [friendResults,setFriendResults]=useState(null);
+  const [searching,setSearching]=useState(false);
+  const [openFriendId,setOpenFriendId]=useState(null);
+  const [inviteBusy,setInviteBusy]=useState(false);
+
+  const loadProfiles=()=>{
+    setLoadingProfiles(true);
+    api.getProfiles().then(p=>{setProfiles(p);setLoadingProfiles(false);}).catch(()=>setLoadingProfiles(false));
+  };
+  const loadFriends=()=>{
+    setLoadingFriends(true);
+    api.getFriends().then(f=>{setFriends(f);setLoadingFriends(false);}).catch(()=>setLoadingFriends(false));
+  };
+  useEffect(()=>{ loadProfiles(); loadFriends(); },[]);
+
+  const detail=detailId!=null?profiles.find(p=>p.id===detailId):null;
+
+  const startRename=(p)=>{setRenamingId(p.id);setRenameVal(p.name);};
+  const commitRename=async(id)=>{
+    if(!renameVal.trim()){setRenamingId(null);return;}
+    await api.updateProfile(id,{name:renameVal.trim()});
+    setProfiles(prev=>prev.map(p=>p.id===id?{...p,name:renameVal.trim()}:p));
+    setRenamingId(null);
+  };
+
+  const handleToggle=async(id,field,value)=>{
+    await api.updateProfile(id,{[field]:value});
+    if(field==="is_main"&&value){
+      setProfiles(prev=>prev.map(p=>p.id===id?{...p,is_main:true}:{...p,is_main:false}));
+    }else{
+      setProfiles(prev=>prev.map(p=>p.id===id?{...p,[field]:value}:p));
+    }
+    toast("Сохранено ✓");
+  };
+
+  const handleActivate=async(id)=>{
+    await api.activateProfile(id);
+    setProfiles(prev=>prev.map(p=>({...p,is_active:p.id===id})));
+    onProfileSwitch();
+    setDetailId(null);
+    toast("Профиль активен ✓");
+  };
+
+  const handleDelete=async(id)=>{
+    if(!window.confirm("Удалить профиль? Все его тренировки, упражнения и замеры удалятся без возможности восстановления."))return;
+    try{
+      const wasActive=profiles.find(p=>p.id===id)?.is_active;
+      await api.deleteProfile(id);
+      setProfiles(prev=>prev.filter(p=>p.id!==id));
+      setDetailId(null);
+      if(wasActive) onProfileSwitch();
+      toast("Профиль удалён");
+    }catch(e){
+      window.alert("Нельзя удалить последний профиль");
+    }
+  };
+
+  const handleCreate=async(name)=>{
+    const res=await api.createProfile(name);
+    setProfiles(prev=>[...prev,{id:res.id,name,is_main:false,is_active:false,show_workouts:true,show_exercises:true,show_comments:true}]);
+    setShowCreate(false);
+    toast("Профиль создан ✓");
+  };
+
+  const handleInvite=async()=>{
+    if(!BOT_USERNAME){
+      window.alert("Юзернейм бота не настроен. Добавь VITE_BOT_USERNAME в переменные окружения фронтенда.");
+      return;
+    }
+    setInviteBusy(true);
+    try{
+      const {code}=await api.getInviteCode();
+      const link=`https://t.me/${BOT_USERNAME}?startapp=add_${code}`;
+      const shareUrl=`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Присоединяйся к моему дневнику тренировок 💪")}`;
+      if(window.Telegram?.WebApp?.openTelegramLink){
+        window.Telegram.WebApp.openTelegramLink(shareUrl);
+      }else{
+        window.open(shareUrl,"_blank");
+      }
+    }catch(e){
+      toast("Не удалось создать ссылку");
+    }
+    setInviteBusy(false);
+  };
+
+  const handleSearch=async()=>{
+    if(!friendQuery.trim())return;
+    setSearching(true);
+    try{
+      const res=await api.searchFriend(friendQuery.trim());
+      setFriendResults(res);
+    }catch(e){
+      setFriendResults([]);
+    }
+    setSearching(false);
+  };
+
+  const handleAddByUsername=async(username)=>{
+    try{
+      await api.addFriendByUsername(username);
+      setFriendResults(null);
+      setFriendQuery("");
+      loadFriends();
+      toast("Друг добавлен ✓");
+    }catch(e){
+      window.alert("Не удалось добавить — возможно пользователь ещё не открывал приложение");
+    }
+  };
+
+  const handleRemoveFriend=async(id)=>{
+    if(!window.confirm("Удалить из друзей?"))return;
+    await api.removeFriend(id);
+    setFriends(prev=>prev.filter(f=>f.id!==id));
+  };
+
+  if(openFriendId) return (
+    <FriendProfileView
+      friendId={openFriendId}
+      onBack={()=>setOpenFriendId(null)}
+      onRemove={async()=>{await handleRemoveFriend(openFriendId);setOpenFriendId(null);}}
+    />
+  );
+
+  if(detail){
+    return(
+      <div className="page">
+        <div className="det-hd">
+          <button className="back-btn" onClick={()=>{setDetailId(null);setRenamingId(null);}}><IconChevron dir="left"/>Назад</button>
+          {renamingId===detail.id
+            ?<input className="rename-inp" value={renameVal} onChange={e=>setRenameVal(e.target.value)} onBlur={()=>commitRename(detail.id)} onKeyDown={e=>e.key==="Enter"&&commitRename(detail.id)} autoFocus/>
+            :<span className="det-title">{detail.name}</span>}
+          <button className="del-btn" onClick={()=>startRename(detail)}><IconEdit/></button>
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:20}}>
+          {detail.is_active&&<span className="badge-active">Активен</span>}
+          {detail.is_main&&<span className="badge-main">Основной</span>}
+        </div>
+        <div className="sec-lbl">Настройки видимости для друзей</div>
+        <ToggleRow label="Сделать профиль основным" sub="Именно этот профиль будут видеть друзья" checked={detail.is_main} onChange={v=>handleToggle(detail.id,"is_main",v)}/>
+        <ToggleRow label="Отображать тренировки" checked={detail.show_workouts} onChange={v=>handleToggle(detail.id,"show_workouts",v)}/>
+        <ToggleRow label="Отображать упражнения" checked={detail.show_exercises} onChange={v=>handleToggle(detail.id,"show_exercises",v)}/>
+        <ToggleRow label="Отображать комментарии к упражнениям" checked={detail.show_comments} onChange={v=>handleToggle(detail.id,"show_comments",v)}/>
+        <div style={{height:20}}/>
+        {!detail.is_active&&<button className="btn" onClick={()=>handleActivate(detail.id)}>Сделать активным</button>}
+        {profiles.length>1&&<button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить профиль</button>}
+      </div>
+    );
+  }
+
+  return(
+    <div className="page">
+      <button className="btn" onClick={()=>setShowCreate(true)}><IconPlus/>Новый профиль</button>
+      {loadingProfiles
+        ?<div className="loading"><div className="spinner"/></div>
+        :profiles.map(p=>(
+          <div key={p.id} className="card" onClick={()=>setDetailId(p.id)}>
+            <div style={{minWidth:0}}>
+              <div className="card-title">{p.name}</div>
+              <div className="card-sub" style={{display:"flex",gap:6,marginTop:5}}>
+                {p.is_active&&<span className="badge-active">Активен</span>}
+                {p.is_main&&<span className="badge-main">Основной</span>}
+              </div>
+            </div>
+            <IconChevron/>
+          </div>
+        ))}
+
+      <div className="sec-lbl" style={{marginTop:32}}>Друзья</div>
+      <button className="btn ghost" onClick={handleInvite} disabled={inviteBusy}>
+        <IconLink/>{inviteBusy?"Готовим ссылку...":"Пригласить друга"}
+      </button>
+      <div className="search-row">
+        <input className="inp" placeholder="Юзернейм друга" value={friendQuery} onChange={e=>setFriendQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSearch()}/>
+        <button className="search-btn" onClick={handleSearch} disabled={searching}>{searching?"...":"Найти"}</button>
+      </div>
+      {friendResults&&(
+        friendResults.length===0
+          ?<p style={{color:"#555",fontSize:13,marginBottom:14}}>Никого не нашли</p>
+          :friendResults.map(r=>(
+            <div key={r.id} className="search-result">
+              <span>{r.name}{r.username&&<span style={{color:"#555"}}> · @{r.username}</span>}</span>
+              <button className="edit-badge" onClick={()=>handleAddByUsername(r.username)}>Добавить</button>
+            </div>
+          ))
+      )}
+
+      {loadingFriends
+        ?null
+        :friends.length===0
+          ?<p style={{color:"#555",fontSize:13,marginTop:4}}>Пока нет друзей — пригласи через ссылку или найди по юзернейму</p>
+          :friends.map(f=>(
+            <div key={f.id} className="card" onClick={()=>setOpenFriendId(f.id)}>
+              <div className="friend-row" style={{minWidth:0}}>
+                <div className="avatar">{(f.name||"?")[0].toUpperCase()}</div>
+                <div style={{minWidth:0}}>
+                  <div className="card-title">{f.name}</div>
+                  {f.username&&<div className="card-sub">@{f.username}</div>}
+                </div>
+              </div>
+              <IconChevron/>
+            </div>
+          ))}
+
+      {showCreate&&<ProfileCreateSheet onSave={handleCreate} onClose={()=>setShowCreate(false)}/>}
+    </div>
+  );
+}
+
 // ── Root App ──────────────────────────────────────────────────────────────
 export default function App() {
   const [tab,setTab]=useState(0);
@@ -901,7 +1329,8 @@ export default function App() {
     setTimeout(()=>setToastMsg(""),2200);
   };
 
-  useEffect(()=>{
+  const reloadData=()=>{
+    setLoading(true);
     Promise.all([api.getWorkouts(), api.getMeasurements()])
       .then(([w,m])=>{
         setWorkouts([...w].reverse()); // сервер даёт DESC, нам нужен ASC для логики
@@ -912,7 +1341,25 @@ export default function App() {
         setError("Не удалось подключиться к серверу.\nПроверь что бэкенд запущен.");
         setLoading(false);
       });
+  };
+
+  useEffect(()=>{
+    reloadData();
+    // Если приложение открыто по ссылке-приглашению (t.me/bot?startapp=add_XXXX) —
+    // автоматически добавляем того, кто поделился ссылкой, в друзья.
+    const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+    if(startParam && startParam.startsWith("add_")){
+      const code = startParam.slice(4);
+      api.addFriendByCode(code).then(()=>showToast("Вы добавлены в друзья ✓")).catch(()=>{});
+    }
   },[]);
+
+  // После переключения/удаления/создания профиля — черновики теряют смысл
+  // (принадлежат другому профилю), перезагружаем тренировки и замеры.
+  const handleProfileSwitch=()=>{
+    setDraftState(null);
+    reloadData();
+  };
 
   if(loading) return(
     <>
@@ -940,13 +1387,14 @@ export default function App() {
       <style>{css}</style>
       <div className="app-frame">
         <div className="tab-bar">
-          {["Тренировки","Упражнения","Замеры"].map((t,i)=>(
+          {["Тренировки","Упражнения","Замеры","Профиль"].map((t,i)=>(
             <button key={i} className={`tab${tab===i?" active":""}`} onClick={()=>setTab(i)}>{t}</button>
           ))}
         </div>
         {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} draftState={draftState} setDraftState={setDraftState}/>}
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
         {tab===2&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} draftState={draftState} setDraftState={setDraftState}/>}
+        {tab===3&&<ProfileTab onProfileSwitch={handleProfileSwitch} toast={showToast}/>}
         {draftState&&!draftState.restoring&&(
           <div className="draft-bar" onClick={()=>{
             setDraftState(p=>({...p,restoring:true}));
