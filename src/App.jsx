@@ -1316,21 +1316,6 @@ export default function App() {
   // Загружаем вообще всё один раз при старте: тренировки, замеры, профили, друзей.
   // Вкладка "Профиль" больше не делает свой отдельный запрос при каждом открытии —
   // она просто показывает то, что уже лежит в памяти приложения.
-  const reloadAll=()=>{
-    setLoading(true);
-    Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends()])
-      .then(([w,m,p,f])=>{
-        setWorkouts([...w].reverse()); // сервер даёт DESC, нам нужен ASC для логики
-        setMeasurements([...m].reverse());
-        setProfiles(p);
-        setFriends(f);
-        setLoading(false);
-      })
-      .catch(()=>{
-        setError("Не удалось подключиться к серверу.\nПроверь что бэкенд запущен.");
-        setLoading(false);
-      });
-  };
 
   // Только дневник (тренировки/замеры) — используется при переключении активного
   // профиля, когда список профилей и друзей не изменился, менять их незачем.
@@ -1349,21 +1334,46 @@ export default function App() {
   };
 
   useEffect(()=>{
-    reloadAll();
-    // Если приложение открыто по ссылке-приглашению (бот прокидывает ?invite=add_XXXX
-    // в URL мини-аппа после перехода по t.me/бот?start=add_XXXX) — добавляем автора
-    // ссылки в друзья и обновляем список друзей.
-    const invite = new URLSearchParams(window.location.search).get("invite");
-    if(invite && invite.startsWith("add_")){
-      const code = invite.slice(4);
-      api.addFriendByCode(code)
-        .then(()=>{
-          showToast("Вы добавлены в друзья ✓");
-          return api.getFriends();
-        })
-        .then(f=>setFriends(f))
-        .catch(()=>{});
-    }
+    (async () => {
+      // Если приложение открыто по ссылке-приглашению (бот прокидывает ?invite=add_XXXX
+      // в URL мини-аппа после перехода по t.me/бот?start=add_XXXX) — добавляем автора
+      // ссылки в друзья ДО основной загрузки, чтобы список друзей сразу пришёл актуальным.
+      const params = new URLSearchParams(window.location.search);
+      const invite = params.get("invite");
+      let justAddedFriend = false;
+
+      if(invite && invite.startsWith("add_")){
+        const code = invite.slice(4);
+        // Сразу убираем параметр из адресной строки — иначе при каждом повторном
+        // открытии этой же кнопки в боте приглашение будет "срабатывать" заново.
+        params.delete("invite");
+        const cleanUrl = window.location.pathname + (params.toString()?`?${params.toString()}`:"") + window.location.hash;
+        window.history.replaceState({}, "", cleanUrl);
+
+        try{
+          const before = await api.getFriends();
+          await api.addFriendByCode(code);
+          const after = await api.getFriends();
+          justAddedFriend = after.length > before.length;
+        }catch(e){
+          // ссылка невалидна или уже друзья — молча игнорируем
+        }
+      }
+
+      setLoading(true);
+      try{
+        const [w,m,p,f] = await Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends()]);
+        setWorkouts([...w].reverse()); // сервер даёт DESC, нам нужен ASC для логики
+        setMeasurements([...m].reverse());
+        setProfiles(p);
+        setFriends(f);
+        setLoading(false);
+        if(justAddedFriend) showToast("Вы добавлены в друзья ✓");
+      }catch(e){
+        setError("Не удалось подключиться к серверу.\nПроверь что бэкенд запущен.");
+        setLoading(false);
+      }
+    })();
   },[]);
 
   // После переключения/удаления активного профиля дневник меняется —
