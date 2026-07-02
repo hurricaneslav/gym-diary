@@ -27,7 +27,7 @@ const css = `
 body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;-webkit-font-smoothing:antialiased}
 .app-frame{max-width:390px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;background:#0A0A0A}
 .tab-bar{display:flex;border-bottom:1px solid #2A2A2A;background:#0A0A0A;position:sticky;top:0;z-index:10}
-.tab{flex:1;padding:14px 4px;text-align:center;font-size:12px;font-weight:500;letter-spacing:.02em;text-transform:uppercase;color:#555;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;background:none;border-left:none;border-right:none;border-top:none;user-select:none}
+.tab{flex:1 1 0;min-width:0;padding:14px 2px;text-align:center;font-size:11px;font-weight:500;letter-spacing:.01em;text-transform:uppercase;color:#555;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;background:none;border-left:none;border-right:none;border-top:none;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tab.active{color:#FFF;border-bottom-color:#FFF}
 .page{flex:1;overflow-y:auto;padding:16px;padding-bottom:32px}
 .card{border:1px solid #2A2A2A;padding:14px 16px;margin-bottom:10px;cursor:pointer;background:#111;display:flex;align-items:center;justify-content:space-between;gap:12px;transition:border-color .15s}
@@ -1095,31 +1095,17 @@ function FriendProfileView({friendId, onBack, onRemove}) {
 }
 
 // ── ProfileTab ────────────────────────────────────────────────────────────
-function ProfileTab({onProfileSwitch, toast}) {
-  const [profiles,setProfiles]=useState([]);
-  const [loadingProfiles,setLoadingProfiles]=useState(true);
+function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch, toast}) {
   const [detailId,setDetailId]=useState(null);
   const [renamingId,setRenamingId]=useState(null);
   const [renameVal,setRenameVal]=useState("");
   const [showCreate,setShowCreate]=useState(false);
 
-  const [friends,setFriends]=useState([]);
-  const [loadingFriends,setLoadingFriends]=useState(true);
   const [friendQuery,setFriendQuery]=useState("");
   const [friendResults,setFriendResults]=useState(null);
   const [searching,setSearching]=useState(false);
   const [openFriendId,setOpenFriendId]=useState(null);
   const [inviteBusy,setInviteBusy]=useState(false);
-
-  const loadProfiles=()=>{
-    setLoadingProfiles(true);
-    api.getProfiles().then(p=>{setProfiles(p);setLoadingProfiles(false);}).catch(()=>setLoadingProfiles(false));
-  };
-  const loadFriends=()=>{
-    setLoadingFriends(true);
-    api.getFriends().then(f=>{setFriends(f);setLoadingFriends(false);}).catch(()=>setLoadingFriends(false));
-  };
-  useEffect(()=>{ loadProfiles(); loadFriends(); },[]);
 
   const detail=detailId!=null?profiles.find(p=>p.id===detailId):null;
 
@@ -1178,7 +1164,7 @@ function ProfileTab({onProfileSwitch, toast}) {
     setInviteBusy(true);
     try{
       const {code}=await api.getInviteCode();
-      const link=`https://t.me/${BOT_USERNAME}?startapp=add_${code}`;
+      const link=`https://t.me/${BOT_USERNAME}?start=add_${code}`;
       const shareUrl=`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Присоединяйся к моему дневнику тренировок 💪")}`;
       if(window.Telegram?.WebApp?.openTelegramLink){
         window.Telegram.WebApp.openTelegramLink(shareUrl);
@@ -1203,12 +1189,12 @@ function ProfileTab({onProfileSwitch, toast}) {
     setSearching(false);
   };
 
-  const handleAddByUsername=async(username)=>{
+  const handleAddByUsername=async(result)=>{
     try{
-      await api.addFriendByUsername(username);
+      await api.addFriendByUsername(result.username);
       setFriendResults(null);
       setFriendQuery("");
-      loadFriends();
+      setFriends(prev=>[...prev, {id:result.id, username:result.username, name:result.name}]);
       toast("Друг добавлен ✓");
     }catch(e){
       window.alert("Не удалось добавить — возможно пользователь ещё не открывал приложение");
@@ -1258,20 +1244,18 @@ function ProfileTab({onProfileSwitch, toast}) {
   return(
     <div className="page">
       <button className="btn" onClick={()=>setShowCreate(true)}><IconPlus/>Новый профиль</button>
-      {loadingProfiles
-        ?<div className="loading"><div className="spinner"/></div>
-        :profiles.map(p=>(
-          <div key={p.id} className="card" onClick={()=>setDetailId(p.id)}>
-            <div style={{minWidth:0}}>
-              <div className="card-title">{p.name}</div>
-              <div className="card-sub" style={{display:"flex",gap:6,marginTop:5}}>
-                {p.is_active&&<span className="badge-active">Активен</span>}
-                {p.is_main&&<span className="badge-main">Основной</span>}
-              </div>
+      {profiles.map(p=>(
+        <div key={p.id} className="card" onClick={()=>setDetailId(p.id)}>
+          <div style={{minWidth:0}}>
+            <div className="card-title">{p.name}</div>
+            <div className="card-sub" style={{display:"flex",gap:6,marginTop:5}}>
+              {p.is_active&&<span className="badge-active">Активен</span>}
+              {p.is_main&&<span className="badge-main">Основной</span>}
             </div>
-            <IconChevron/>
           </div>
-        ))}
+          <IconChevron/>
+        </div>
+      ))}
 
       <div className="sec-lbl" style={{marginTop:32}}>Друзья</div>
       <button className="btn ghost" onClick={handleInvite} disabled={inviteBusy}>
@@ -1287,27 +1271,25 @@ function ProfileTab({onProfileSwitch, toast}) {
           :friendResults.map(r=>(
             <div key={r.id} className="search-result">
               <span>{r.name}{r.username&&<span style={{color:"#555"}}> · @{r.username}</span>}</span>
-              <button className="edit-badge" onClick={()=>handleAddByUsername(r.username)}>Добавить</button>
+              <button className="edit-badge" onClick={()=>handleAddByUsername(r)}>Добавить</button>
             </div>
           ))
       )}
 
-      {loadingFriends
-        ?null
-        :friends.length===0
-          ?<p style={{color:"#555",fontSize:13,marginTop:4}}>Пока нет друзей — пригласи через ссылку или найди по юзернейму</p>
-          :friends.map(f=>(
-            <div key={f.id} className="card" onClick={()=>setOpenFriendId(f.id)}>
-              <div className="friend-row" style={{minWidth:0}}>
-                <div className="avatar">{(f.name||"?")[0].toUpperCase()}</div>
-                <div style={{minWidth:0}}>
-                  <div className="card-title">{f.name}</div>
-                  {f.username&&<div className="card-sub">@{f.username}</div>}
-                </div>
+      {friends.length===0
+        ?<p style={{color:"#555",fontSize:13,marginTop:4}}>Пока нет друзей — пригласи через ссылку или найди по юзернейму</p>
+        :friends.map(f=>(
+          <div key={f.id} className="card" onClick={()=>setOpenFriendId(f.id)}>
+            <div className="friend-row" style={{minWidth:0}}>
+              <div className="avatar">{(f.name||"?")[0].toUpperCase()}</div>
+              <div style={{minWidth:0}}>
+                <div className="card-title">{f.name}</div>
+                {f.username&&<div className="card-sub">@{f.username}</div>}
               </div>
-              <IconChevron/>
             </div>
-          ))}
+            <IconChevron/>
+          </div>
+        ))}
 
       {showCreate&&<ProfileCreateSheet onSave={handleCreate} onClose={()=>setShowCreate(false)}/>}
     </div>
@@ -1319,6 +1301,8 @@ export default function App() {
   const [tab,setTab]=useState(0);
   const [workouts,setWorkouts]=useState([]);
   const [measurements,setMeasurements]=useState([]);
+  const [profiles,setProfiles]=useState([]);
+  const [friends,setFriends]=useState([]);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState(null);
   const [toastMsg,setToastMsg]=useState("");
@@ -1329,11 +1313,32 @@ export default function App() {
     setTimeout(()=>setToastMsg(""),2200);
   };
 
-  const reloadData=()=>{
+  // Загружаем вообще всё один раз при старте: тренировки, замеры, профили, друзей.
+  // Вкладка "Профиль" больше не делает свой отдельный запрос при каждом открытии —
+  // она просто показывает то, что уже лежит в памяти приложения.
+  const reloadAll=()=>{
+    setLoading(true);
+    Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends()])
+      .then(([w,m,p,f])=>{
+        setWorkouts([...w].reverse()); // сервер даёт DESC, нам нужен ASC для логики
+        setMeasurements([...m].reverse());
+        setProfiles(p);
+        setFriends(f);
+        setLoading(false);
+      })
+      .catch(()=>{
+        setError("Не удалось подключиться к серверу.\nПроверь что бэкенд запущен.");
+        setLoading(false);
+      });
+  };
+
+  // Только дневник (тренировки/замеры) — используется при переключении активного
+  // профиля, когда список профилей и друзей не изменился, менять их незачем.
+  const reloadDiaryOnly=()=>{
     setLoading(true);
     Promise.all([api.getWorkouts(), api.getMeasurements()])
       .then(([w,m])=>{
-        setWorkouts([...w].reverse()); // сервер даёт DESC, нам нужен ASC для логики
+        setWorkouts([...w].reverse());
         setMeasurements([...m].reverse());
         setLoading(false);
       })
@@ -1344,21 +1349,28 @@ export default function App() {
   };
 
   useEffect(()=>{
-    reloadData();
-    // Если приложение открыто по ссылке-приглашению (t.me/bot?startapp=add_XXXX) —
-    // автоматически добавляем того, кто поделился ссылкой, в друзья.
-    const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
-    if(startParam && startParam.startsWith("add_")){
-      const code = startParam.slice(4);
-      api.addFriendByCode(code).then(()=>showToast("Вы добавлены в друзья ✓")).catch(()=>{});
+    reloadAll();
+    // Если приложение открыто по ссылке-приглашению (бот прокидывает ?invite=add_XXXX
+    // в URL мини-аппа после перехода по t.me/бот?start=add_XXXX) — добавляем автора
+    // ссылки в друзья и обновляем список друзей.
+    const invite = new URLSearchParams(window.location.search).get("invite");
+    if(invite && invite.startsWith("add_")){
+      const code = invite.slice(4);
+      api.addFriendByCode(code)
+        .then(()=>{
+          showToast("Вы добавлены в друзья ✓");
+          return api.getFriends();
+        })
+        .then(f=>setFriends(f))
+        .catch(()=>{});
     }
   },[]);
 
-  // После переключения/удаления/создания профиля — черновики теряют смысл
-  // (принадлежат другому профилю), перезагружаем тренировки и замеры.
+  // После переключения/удаления активного профиля дневник меняется —
+  // перезагружаем только его, список профилей/друзей уже актуален локально.
   const handleProfileSwitch=()=>{
     setDraftState(null);
-    reloadData();
+    reloadDiaryOnly();
   };
 
   if(loading) return(
@@ -1394,7 +1406,7 @@ export default function App() {
         {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} draftState={draftState} setDraftState={setDraftState}/>}
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
         {tab===2&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} draftState={draftState} setDraftState={setDraftState}/>}
-        {tab===3&&<ProfileTab onProfileSwitch={handleProfileSwitch} toast={showToast}/>}
+        {tab===3&&<ProfileTab profiles={profiles} setProfiles={setProfiles} friends={friends} setFriends={setFriends} onProfileSwitch={handleProfileSwitch} toast={showToast}/>}
         {draftState&&!draftState.restoring&&(
           <div className="draft-bar" onClick={()=>{
             setDraftState(p=>({...p,restoring:true}));
