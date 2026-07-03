@@ -165,6 +165,25 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .sub-tabs button.active{color:#FFF;border-bottom-color:#FFF}
 `;
 
+// ── Аварийное сохранение черновика в localStorage ────────────────────────
+// В отличие от draftState (живёт только в памяти вкладки), это переживает
+// полное убийство процесса Telegram Mini App в фоне — самый частый сценарий
+// потери несохранённой тренировки на телефоне.
+const DRAFT_STORAGE_KEY = "gym_diary_draft_v1";
+
+function saveDraftToStorage(draft) {
+  try { localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft)); } catch(e) {}
+}
+function loadDraftFromStorage() {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+function clearDraftFromStorage() {
+  try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch(e) {}
+}
+
 // ── Keyboard-aware scroll ─────────────────────────────────────────────────
 // Единственный правильный способ: слушаем visualViewport.resize,
 // когда клавиатура поднимается — плавно подматываем .sheet к активному полю.
@@ -283,6 +302,17 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
 
   const buildDraft = () => ({ name, date, exercises });
 
+  // Аварийное автосохранение: пишем в localStorage с небольшой задержкой после
+  // каждого изменения (не на каждую букву), только если реально что-то внесено.
+  // Переживает убийство процесса Telegram в фоне — не только сворачивание внутри приложения.
+  useEffect(() => {
+    if (!hasRealData()) return;
+    const t = setTimeout(() => {
+      saveDraftToStorage({ type:"workout", editId: isEdit?initial.id:null, name, date, exercises });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [name, date, exercises]);
+
   const getPrev=(exName)=>{
     if(!exName.trim())return null;
     const lc=exName.trim().toLowerCase();
@@ -304,19 +334,27 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
       .map(e=>({...e,sets:e.sets.filter(hasData)}));
     const payload={id:isEdit?initial.id:-1,name:name.trim()||defName,date,exercises:filtered};
     const res=await onSave(payload);
+    clearDraftFromStorage();
     setSaving(false);
     return res;
   };
 
-  // Свернуть: если есть реальные данные — сохраняем черновик, иначе просто закрываем
+  // Свернуть: если есть реальные данные — сохраняем черновик (и в память, и на диск), иначе просто закрываем
   const handleMinimize=()=>{
-    if (hasRealData()) onMinimize(buildDraft());
-    else onClose();
+    if (hasRealData()) {
+      const d = buildDraft();
+      saveDraftToStorage({ type:"workout", editId: isEdit?initial.id:null, ...d });
+      onMinimize(d);
+    } else {
+      clearDraftFromStorage();
+      onClose();
+    }
   };
 
   // Закрыть крестиком: если есть данные — спросим подтверждение (можно случайно стереть тренировку)
   const handleCloseClick=()=>{
     if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+    clearDraftFromStorage();
     onClose();
   };
 
@@ -676,18 +714,34 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
   const hasRealData = () => Object.values(vals).some(v=>v!==""&&v!=null);
   const buildDraft = () => ({ name, date, vals });
 
+  useEffect(() => {
+    if (!hasRealData()) return;
+    const t = setTimeout(() => {
+      saveDraftToStorage({ type:"measurement", editId: isEdit?initial.id:null, name, date, vals });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [name, date, vals]);
+
   const handleSave=async()=>{
     setSaving(true);
     await onSave({id:isEdit?initial.id:-1,name:name.trim()||defName,date,...vals});
+    clearDraftFromStorage();
     setSaving(false);
   };
 
   const handleMinimize=()=>{
-    if (hasRealData()) onMinimize(buildDraft());
-    else onClose();
+    if (hasRealData()) {
+      const d = buildDraft();
+      saveDraftToStorage({ type:"measurement", editId: isEdit?initial.id:null, ...d });
+      onMinimize(d);
+    } else {
+      clearDraftFromStorage();
+      onClose();
+    }
   };
   const handleCloseClick=()=>{
     if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+    clearDraftFromStorage();
     onClose();
   };
 
@@ -1369,6 +1423,12 @@ export default function App() {
         setFriends(f);
         setLoading(false);
         if(justAddedFriend) showToast("Вы добавлены в друзья ✓");
+
+        // Если процесс приложения был убит в фоне до того, как незавершённая
+        // тренировка/замер была сохранена или явно закрыта — предлагаем её
+        // восстановить (тем же плавающим блоком, что и при обычном сворачивании).
+        const stored = loadDraftFromStorage();
+        if(stored) setDraftState({...stored, restoring:false});
       }catch(e){
         setError("Не удалось подключиться к серверу.\nПроверь что бэкенд запущен.");
         setLoading(false);
@@ -1427,7 +1487,7 @@ export default function App() {
               <div className="draft-bar-title">{draftState.name || (draftState.type==="workout"?"Тренировка":"Замер")}</div>
               <div className="draft-bar-sub">{draftState.type==="workout"?"Тренировка не сохранена · нажми чтобы продолжить":"Замер не сохранён · нажми чтобы продолжить"}</div>
             </div>
-            <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){setDraftState(null);}}}><IconClose/></button>
+            <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage();setDraftState(null);}}}><IconClose/></button>
           </div>
         )}
         <Toast msg={toastMsg}/>
