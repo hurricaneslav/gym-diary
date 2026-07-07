@@ -15,16 +15,46 @@ function getInitData() {
   return "user=%7B%22id%22%3A12345%2C%22first_name%22%3A%22Test%22%7D&hash=dev";
 }
 
-async function request(method, path, body) {
-  const res = await fetch(`${API_URL}${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "x-init-data": getInitData(),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Делает запрос с автоматическими повторами при сетевых сбоях или холодном
+ * старте бэкенда (Railway иногда "просыпается" несколько секунд — первый
+ * запрос может не дождаться ответа, особенно на нестабильном соединении/VPN).
+ * Повторяем только при сетевых ошибках и 502/503/504 — не при 4xx, там
+ * повтор не поможет (это ошибка запроса, а не временная недоступность).
+ */
+async function request(method, path, body, attempt = 1) {
+  const MAX_ATTEMPTS = 3;
+  let res;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "x-init-data": getInitData(),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (networkErr) {
+    // fetch сам бросает исключение при обрыве соединения/недоступности сервера
+    if (attempt < MAX_ATTEMPTS) {
+      await sleep(attempt * 800);
+      return request(method, path, body, attempt + 1);
+    }
+    throw networkErr;
+  }
+
+  if (!res.ok) {
+    const isRetryable = [502, 503, 504].includes(res.status);
+    if (isRetryable && attempt < MAX_ATTEMPTS) {
+      await sleep(attempt * 800);
+      return request(method, path, body, attempt + 1);
+    }
+    throw new Error(`HTTP ${res.status}`);
+  }
   return res.json();
 }
 

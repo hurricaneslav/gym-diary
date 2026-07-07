@@ -1477,54 +1477,57 @@ export default function App() {
       });
   };
 
-  useEffect(()=>{
-    (async () => {
-      // Если приложение открыто по ссылке-приглашению (бот прокидывает ?invite=add_XXXX
-      // в URL мини-аппа после перехода по t.me/бот?start=add_XXXX) — добавляем автора
-      // ссылки в друзья ДО основной загрузки, чтобы список друзей сразу пришёл актуальным.
-      const params = new URLSearchParams(window.location.search);
-      const invite = params.get("invite");
-      let justAddedFriend = false;
+  const initialLoad = async () => {
+    // Если приложение открыто по ссылке-приглашению (бот прокидывает ?invite=add_XXXX
+    // в URL мини-аппа после перехода по t.me/бот?start=add_XXXX) — добавляем автора
+    // ссылки в друзья ДО основной загрузки, чтобы список друзей сразу пришёл актуальным.
+    const params = new URLSearchParams(window.location.search);
+    const invite = params.get("invite");
+    let justAddedFriend = false;
 
-      if(invite && invite.startsWith("add_")){
-        const code = invite.slice(4);
-        // Сразу убираем параметр из адресной строки — иначе при каждом повторном
-        // открытии этой же кнопки в боте приглашение будет "срабатывать" заново.
-        params.delete("invite");
-        const cleanUrl = window.location.pathname + (params.toString()?`?${params.toString()}`:"") + window.location.hash;
-        window.history.replaceState({}, "", cleanUrl);
+    if(invite && invite.startsWith("add_")){
+      const code = invite.slice(4);
+      // Сразу убираем параметр из адресной строки — иначе при каждом повторном
+      // открытии этой же кнопки в боте приглашение будет "срабатывать" заново.
+      params.delete("invite");
+      const cleanUrl = window.location.pathname + (params.toString()?`?${params.toString()}`:"") + window.location.hash;
+      window.history.replaceState({}, "", cleanUrl);
 
-        try{
-          const before = await api.getFriends();
-          await api.addFriendByCode(code);
-          const after = await api.getFriends();
-          justAddedFriend = after.length > before.length;
-        }catch(e){
-          // ссылка невалидна или уже друзья — молча игнорируем
-        }
-      }
-
-      setLoading(true);
       try{
-        const [w,m,p,f] = await Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends()]);
-        setWorkouts([...w].reverse()); // сервер даёт DESC, нам нужен ASC для логики
-        setMeasurements([...m].reverse());
-        setProfiles(p);
-        setFriends(f);
-        setLoading(false);
-        if(justAddedFriend) showToast("Вы добавлены в друзья ✓");
-
-        // Если процесс приложения был убит в фоне до того, как незавершённая
-        // тренировка/замер была сохранена или явно закрыта — предлагаем её
-        // восстановить (тем же плавающим блоком, что и при обычном сворачивании).
-        const stored = loadDraftFromStorage();
-        if(stored) setDraftState({...stored, restoring:false});
+        const before = await api.getFriends();
+        await api.addFriendByCode(code);
+        const after = await api.getFriends();
+        justAddedFriend = after.length > before.length;
       }catch(e){
-        setError("Не удалось подключиться к серверу.\nПроверь что бэкенд запущен.");
-        setLoading(false);
+        // ссылка невалидна или уже друзья — молча игнорируем
       }
-    })();
-  },[]);
+    }
+
+    setError(null);
+    setLoading(true);
+    try{
+      const [w,m,p,f] = await Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends()]);
+      setWorkouts([...w].reverse()); // сервер даёт DESC, нам нужен ASC для логики
+      setMeasurements([...m].reverse());
+      setProfiles(p);
+      setFriends(f);
+      setLoading(false);
+      if(justAddedFriend) showToast("Вы добавлены в друзья ✓");
+
+      // Если процесс приложения был убит в фоне до того, как незавершённая
+      // тренировка/замер была сохранена или явно закрыта — предлагаем её
+      // восстановить (тем же плавающим блоком, что и при обычном сворачивании).
+      const stored = loadDraftFromStorage();
+      if(stored) setDraftState({...stored, restoring:false});
+    }catch(e){
+      // Бэкенд на Railway может "просыпаться" несколько секунд после простоя —
+      // api.js уже делает несколько попыток сам, это резервный случай на будущее.
+      setError("Не удалось подключиться к серверу.\nЭто может занять несколько секунд, если сервер долго не использовался — попробуй ещё раз.");
+      setLoading(false);
+    }
+  };
+
+  useEffect(()=>{ initialLoad(); },[]);
 
   // После переключения/удаления активного профиля дневник меняется —
   // перезагружаем только его, список профилей/друзей уже актуален локально.
@@ -1548,7 +1551,8 @@ export default function App() {
       <div className="app-frame">
         <div className="empty" style={{paddingTop:80}}>
           <div className="empty-icon">⚠️</div>
-          <div style={{whiteSpace:"pre-line"}}>{error}</div>
+          <div style={{whiteSpace:"pre-line",marginBottom:20}}>{error}</div>
+          <button className="btn" style={{maxWidth:200,margin:"0 auto"}} onClick={initialLoad}>Попробовать снова</button>
         </div>
       </div>
     </>
