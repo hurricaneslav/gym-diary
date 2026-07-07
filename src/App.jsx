@@ -43,9 +43,13 @@ body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,
 .sheet{position:relative;background:#0A0A0A;border-top:1px solid #2A2A2A;max-height:92dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 16px 40px;animation:up .22s ease;scroll-behavior:auto}
 @keyframes up{from{transform:translateY(30px);opacity:0}to{transform:none;opacity:1}}
 .handle{width:36px;height:4px;background:#333;margin:12px auto 16px}
-.sheet-top-actions{position:absolute;top:14px;right:12px;display:flex;gap:4px;z-index:5}
+.sheet-top-actions{position:absolute;top:14px;right:12px;display:flex;align-items:center;gap:6px;z-index:5}
 .sheet-icon-btn{background:none;border:none;color:#666;cursor:pointer;padding:7px;display:flex;align-items:center;justify-content:center}
 .sheet-icon-btn:active{color:#FFF}
+.sheet-minimize-btn{background:none;border:1px solid #2A2A2A;color:#AAA;cursor:pointer;padding:6px 12px;font-size:12px;font-family:inherit;display:flex;align-items:center;gap:5px}
+.sheet-minimize-btn:active{border-color:#FFF;color:#FFF}
+.draft-card{border-color:#3A3220;background:#161208}
+.draft-pill{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#E0A030;border:1px solid #4A3A1A;padding:2px 6px;flex-shrink:0}
 .sheet-title-row{display:flex;align-items:center;gap:8px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #1E1E1E}
 .sheet-title-inp{flex:1;background:none;border:none;border-bottom:1px solid #333;color:#FFF;font-size:18px;font-weight:700;letter-spacing:-.02em;outline:none;font-family:inherit;padding-bottom:3px;min-width:0}
 .sheet-title-inp::placeholder{color:#444;font-weight:400}
@@ -134,13 +138,13 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;border:1px solid #333;color:#CCC;font-size:13px;padding:10px 18px;z-index:200;white-space:nowrap;animation:fadeIn .2s ease}
 @keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
-.draft-bar{position:fixed;bottom:0;left:0;right:0;max-width:390px;margin:0 auto;background:#161616;border-top:1px solid #2A2A2A;display:flex;align-items:center;gap:10px;padding:12px 14px;z-index:60;cursor:pointer;animation:up .2s ease}
-.draft-bar-dot{width:7px;height:7px;border-radius:50%;background:#4CAF50;flex-shrink:0;animation:pulse 1.6s ease infinite}
+.draft-bar{position:fixed;bottom:0;left:0;right:0;max-width:390px;margin:0 auto;background:#1A1608;border-top:2px solid #E0A030;display:flex;align-items:center;gap:12px;padding:16px;z-index:60;cursor:pointer;animation:up .2s ease;box-shadow:0 -4px 20px rgba(0,0,0,.4)}
+.draft-bar-dot{width:9px;height:9px;background:#E0A030;flex-shrink:0;animation:pulse 1.6s ease infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .draft-bar-text{flex:1;min-width:0}
-.draft-bar-title{font-size:13px;font-weight:600;color:#FFF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.draft-bar-sub{font-size:11px;color:#666;margin-top:1px}
-.draft-bar-close{background:none;border:none;color:#666;cursor:pointer;padding:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.draft-bar-title{font-size:15px;font-weight:700;color:#FFF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.draft-bar-sub{font-size:12px;color:#C08A30;margin-top:2px;font-weight:500}
+.draft-bar-close{background:none;border:none;color:#8A7050;cursor:pointer;padding:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .draft-bar-close:active{color:#FFF}
 .badge-active{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#4CAF50;border:1px solid #2E4A2E;padding:2px 6px;flex-shrink:0}
 .badge-main{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#5B9CF6;border:1px solid #2A3A4A;padding:2px 6px;flex-shrink:0}
@@ -363,7 +367,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
       <div className="sheet" ref={sheetRef}>
         <div className="handle"/>
         <div className="sheet-top-actions">
-          <button className="sheet-icon-btn" onClick={handleMinimize} title="Свернуть"><IconMinimize/></button>
+          <button className="sheet-minimize-btn" onClick={handleMinimize} title="Свернуть"><IconMinimize/>Свернуть</button>
           <button className="sheet-icon-btn" onClick={handleCloseClick} title="Закрыть"><IconClose/></button>
         </div>
         <div className="sheet-title-row">
@@ -517,6 +521,26 @@ function WorkoutsTab({workouts, setWorkouts, toast, draftState, setDraftState}) 
     setRestoredDraft(null);
   };
 
+  // Черновик, свёрнутый именно здесь (тренировка) — показываем прямо в списке,
+  // на том месте, где он был бы, если бы уже был сохранён, вместо плавающего
+  // блока внизу (чтобы не путать со старой уже сохранённой версией при редактировании).
+  const listDraft = draftState?.type==="workout" && !draftState.restoring ? draftState : null;
+
+  let listItems = [...workouts].sort((a,b)=>b.date.localeCompare(a.date)).map(w=>({isDraft:false,w}));
+  if(listDraft){
+    const foundIdx = listDraft.editId!=null ? listItems.findIndex(item=>item.w.id===listDraft.editId) : -1;
+    if(foundIdx!==-1){
+      listItems[foundIdx] = {isDraft:true,draft:listDraft};
+    }else{
+      listItems.push({isDraft:true,draft:listDraft});
+      listItems.sort((a,b)=>{
+        const da=a.isDraft?a.draft.date:a.w.date;
+        const db=b.isDraft?b.draft.date:b.w.date;
+        return db.localeCompare(da);
+      });
+    }
+  }
+
   if(detail) return (
     <div className="page">
       <div className="det-hd">
@@ -564,13 +588,23 @@ function WorkoutsTab({workouts, setWorkouts, toast, draftState, setDraftState}) 
   return (
     <div className="page">
       <button className="btn" onClick={()=>setShowNew(true)}><IconPlus/>Новая тренировка</button>
-      {workouts.length===0
+      {workouts.length===0 && !listDraft
         ?<div className="empty"><div className="empty-icon">🏋️</div>Тренировок пока нет.<br/>Начни первую!</div>
-        :[...workouts].sort((a,b)=>b.date.localeCompare(a.date)).map((w,i,arr)=>(
-          <div key={w.id} className="card" onClick={()=>setDetailId(w.id)}>
+        :listItems.map((item,i,arr)=>item.isDraft?(
+          <div key="draft-card" className="card draft-card" onClick={()=>setDraftState(prev=>({...prev,restoring:true}))}>
             <div style={{minWidth:0}}>
-              <div className="card-title">{w.name}</div>
-              <div className="card-sub">{formatDate(w.date)} · {w.exercises.length} упр.</div>
+              <div className="card-title">{item.draft.name||"Тренировка"}</div>
+              <div className="card-sub">{formatDate(item.draft.date)} · не сохранено</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+              <span className="draft-pill">Черновик</span><IconChevron/>
+            </div>
+          </div>
+        ):(
+          <div key={item.w.id} className="card" onClick={()=>setDetailId(item.w.id)}>
+            <div style={{minWidth:0}}>
+              <div className="card-title">{item.w.name}</div>
+              <div className="card-sub">{formatDate(item.w.date)} · {item.w.exercises.length} упр.</div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
               <span className="tag">#{arr.length-i}</span><IconChevron/>
@@ -759,7 +793,7 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
       <div className="sheet" ref={sheetRef}>
         <div className="handle"/>
         <div className="sheet-top-actions">
-          <button className="sheet-icon-btn" onClick={handleMinimize} title="Свернуть"><IconMinimize/></button>
+          <button className="sheet-minimize-btn" onClick={handleMinimize} title="Свернуть"><IconMinimize/>Свернуть</button>
           <button className="sheet-icon-btn" onClick={handleCloseClick} title="Закрыть"><IconClose/></button>
         </div>
         <div className="sheet-title-row">
@@ -876,6 +910,25 @@ function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraft
     setRestoredDraft(null);
   };
 
+  // Черновик, свёрнутый именно здесь (замер) — показываем прямо в списке на
+  // правильном месте, вместо плавающего блока внизу.
+  const listDraft = draftState?.type==="measurement" && !draftState.restoring ? draftState : null;
+
+  let listItems = [...measurements].sort((a,b)=>b.date.localeCompare(a.date)).map(m=>({isDraft:false,m}));
+  if(listDraft){
+    const foundIdx = listDraft.editId!=null ? listItems.findIndex(item=>item.m.id===listDraft.editId) : -1;
+    if(foundIdx!==-1){
+      listItems[foundIdx] = {isDraft:true,draft:listDraft};
+    }else{
+      listItems.push({isDraft:true,draft:listDraft});
+      listItems.sort((a,b)=>{
+        const da=a.isDraft?a.draft.date:a.m.date;
+        const db=b.isDraft?b.draft.date:b.m.date;
+        return db.localeCompare(da);
+      });
+    }
+  }
+
   if(detail){
     const filled=MEASUREMENT_FIELDS.filter(f=>detail[f.key]!==""&&detail[f.key]!=null);
 
@@ -940,9 +993,21 @@ function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraft
   return(
     <div className="page">
       <button className="btn" onClick={()=>setShowNew(true)}><IconPlus/>Измерить тело</button>
-      {measurements.length===0
+      {measurements.length===0 && !listDraft
         ?<div className="empty"><div className="empty-icon">📏</div>Замеров пока нет.<br/>Добавь первый!</div>
-        :[...measurements].sort((a,b)=>b.date.localeCompare(a.date)).map((m,i,arr)=>{
+        :listItems.map((item,i,arr)=>{
+          if(item.isDraft) return(
+            <div key="draft-card" className="card draft-card" onClick={()=>setDraftState(prev=>({...prev,restoring:true}))}>
+              <div style={{minWidth:0}}>
+                <div className="card-title">{item.draft.name||"Замер"}</div>
+                <div className="card-sub">{formatDate(item.draft.date)} · не сохранено</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+                <span className="draft-pill">Черновик</span><IconChevron/>
+              </div>
+            </div>
+          );
+          const m=item.m;
           const fc=MEASUREMENT_FIELDS.filter(f=>m[f.key]!==""&&m[f.key]!=null).length;
           return(
             <div key={m.id} className="card" onClick={()=>setDetailId(m.id)}>
@@ -1034,7 +1099,8 @@ function FriendProfileView({friendId, onBack, onRemove}) {
   );
 
   const workouts = data.workouts || [];
-  const hasNothing = !data.show_workouts && !data.show_exercises;
+  const friendMeasurements = data.measurements || [];
+  const hasNothing = !data.show_workouts && !data.show_exercises && !data.show_measurements;
   const allNames = data.show_exercises
     ? [...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))].sort((a,b)=>a.localeCompare(b,"ru"))
     : [];
@@ -1090,6 +1156,7 @@ function FriendProfileView({friendId, onBack, onRemove}) {
             <div className="sub-tabs">
               {data.show_workouts&&<button className={subTab===0?"active":""} onClick={()=>setSubTab(0)}>Тренировки</button>}
               {data.show_exercises&&<button className={subTab===1?"active":""} onClick={()=>setSubTab(1)}>Упражнения</button>}
+              {data.show_measurements&&<button className={subTab===2?"active":""} onClick={()=>setSubTab(2)}>Замеры</button>}
             </div>
             {subTab===0&&data.show_workouts&&(
               workouts.length===0
@@ -1136,6 +1203,28 @@ function FriendProfileView({friendId, onBack, onRemove}) {
                         <div className="card-sub">{count} {count===1?"запись":count<5?"записи":"записей"}</div>
                       </div>
                       <IconChevron/>
+                    </div>
+                  );
+                })
+            )}
+            {subTab===2&&data.show_measurements&&(
+              friendMeasurements.length===0
+                ?<div className="empty"><div className="empty-icon">📏</div>Замеров пока нет</div>
+                :[...friendMeasurements].sort((a,b)=>b.date.localeCompare(a.date)).map(m=>{
+                  const filled=MEASUREMENT_FIELDS.filter(f=>m[f.key]!==""&&m[f.key]!=null);
+                  return(
+                    <div key={m.id} className="w-ex" style={{marginBottom:10}}>
+                      <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between"}}>
+                        <span>{m.name}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(m.date)}</span>
+                      </div>
+                      {filled.length===0
+                        ?<p style={{color:"#555",fontSize:12,marginTop:8}}>Ничего не заполнено</p>
+                        :filled.map(f=>(
+                          <div key={f.key} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"1px solid #1A1A1A"}}>
+                            <span style={{color:"#888",fontSize:12}}>{f.label}</span>
+                            <span style={{fontSize:13,fontWeight:600}}>{m[f.key]} <span style={{color:"#555",fontWeight:400,fontSize:11}}>{f.key==="weight"?"кг":"см"}</span></span>
+                          </div>
+                        ))}
                     </div>
                   );
                 })
@@ -1205,7 +1294,7 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
 
   const handleCreate=async(name)=>{
     const res=await api.createProfile(name);
-    setProfiles(prev=>[...prev,{id:res.id,name,is_main:false,is_active:false,show_workouts:true,show_exercises:true,show_comments:true}]);
+    setProfiles(prev=>[...prev,{id:res.id,name,is_main:false,is_active:false,show_workouts:true,show_exercises:true,show_comments:true,show_measurements:true}]);
     setShowCreate(false);
     toast("Профиль создан ✓");
   };
@@ -1287,6 +1376,7 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
         <ToggleRow label="Сделать профиль основным" sub="Именно этот профиль будут видеть друзья" checked={detail.is_main} onChange={v=>handleToggle(detail.id,"is_main",v)}/>
         <ToggleRow label="Отображать тренировки" checked={detail.show_workouts} onChange={v=>handleToggle(detail.id,"show_workouts",v)}/>
         <ToggleRow label="Отображать упражнения" checked={detail.show_exercises} onChange={v=>handleToggle(detail.id,"show_exercises",v)}/>
+        <ToggleRow label="Отображать замеры" checked={detail.show_measurements} onChange={v=>handleToggle(detail.id,"show_measurements",v)}/>
         <ToggleRow label="Отображать комментарии к упражнениям" checked={detail.show_comments} onChange={v=>handleToggle(detail.id,"show_comments",v)}/>
         <div style={{height:20}}/>
         {!detail.is_active&&<button className="btn" onClick={()=>handleActivate(detail.id)}>Сделать активным</button>}
@@ -1477,7 +1567,7 @@ export default function App() {
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
         {tab===2&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} draftState={draftState} setDraftState={setDraftState}/>}
         {tab===3&&<ProfileTab profiles={profiles} setProfiles={setProfiles} friends={friends} setFriends={setFriends} onProfileSwitch={handleProfileSwitch} toast={showToast}/>}
-        {draftState&&!draftState.restoring&&(
+        {draftState&&!draftState.restoring&&!((draftState.type==="workout"&&tab===0)||(draftState.type==="measurement"&&tab===2))&&(
           <div className="draft-bar" onClick={()=>{
             setDraftState(p=>({...p,restoring:true}));
             setTab(draftState.type==="workout"?0:2);
