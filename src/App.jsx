@@ -26,7 +26,7 @@ const css = `
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;-webkit-font-smoothing:antialiased}
 .app-frame{max-width:390px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;background:#0A0A0A}
-.tab-bar{display:flex;border-bottom:1px solid #2A2A2A;background:#0A0A0A;position:sticky;top:0;z-index:10}
+.tab-bar{display:flex;border-bottom:1px solid #2A2A2A;background:#0A0A0A;position:sticky;top:0;z-index:10;padding-top:env(safe-area-inset-top)}
 .tab{flex:1 1 0;min-width:0;padding:14px 2px;text-align:center;font-size:11px;font-weight:500;letter-spacing:.01em;text-transform:uppercase;color:#555;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;background:none;border-left:none;border-right:none;border-top:none;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tab.active{color:#FFF;border-bottom-color:#FFF}
 .page{flex:1;overflow-y:auto;padding:16px;padding-bottom:32px}
@@ -40,7 +40,7 @@ body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,
 .btn.danger{border-color:#FF4444;color:#FF4444}.btn.danger:active{background:#FF4444;color:#FFF}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;display:flex;flex-direction:column;justify-content:flex-end;max-width:390px;margin:0 auto;overflow:hidden}
-.sheet{position:relative;background:#0A0A0A;border-top:1px solid #2A2A2A;max-height:92dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 16px 40px;animation:up .22s ease;scroll-behavior:auto}
+.sheet{position:relative;background:#0A0A0A;border-top:1px solid #2A2A2A;max-height:92dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 16px calc(40px + env(safe-area-inset-bottom));animation:up .22s ease;scroll-behavior:auto}
 @keyframes up{from{transform:translateY(30px);opacity:0}to{transform:none;opacity:1}}
 .handle{width:36px;height:4px;background:#333;margin:12px auto 16px}
 .sheet-top-actions{position:absolute;top:14px;right:12px;display:flex;align-items:center;gap:6px;z-index:5}
@@ -138,7 +138,7 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;border:1px solid #333;color:#CCC;font-size:13px;padding:10px 18px;z-index:200;white-space:nowrap;animation:fadeIn .2s ease}
 @keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
-.draft-bar{position:fixed;bottom:0;left:0;right:0;max-width:390px;margin:0 auto;background:#1A1608;border-top:2px solid #E0A030;display:flex;align-items:center;gap:12px;padding:16px;z-index:60;cursor:pointer;animation:up .2s ease;box-shadow:0 -4px 20px rgba(0,0,0,.4)}
+.draft-bar{position:fixed;bottom:0;left:0;right:0;max-width:390px;margin:0 auto;background:#1A1608;border-top:2px solid #E0A030;display:flex;align-items:center;gap:12px;padding:16px 16px calc(16px + env(safe-area-inset-bottom));z-index:60;cursor:pointer;animation:up .2s ease;box-shadow:0 -4px 20px rgba(0,0,0,.4)}
 .draft-bar-dot{width:9px;height:9px;background:#E0A030;flex-shrink:0;animation:pulse 1.6s ease infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .draft-bar-text{flex:1;min-width:0}
@@ -298,7 +298,8 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
   const remSet=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.filter((_,i)=>i!==si)}:e));
   const toggleBilateral=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,bilateral:!s.bilateral}:s)}:e));
 
-  // Есть ли реально внесённые данные (не просто пустая заготовка)?
+  // Есть ли реально внесённые данные (используется только для решения — нужно
+  // ли спрашивать подтверждение при явном закрытии крестиком, не для сворачивания).
   const hasRealData = () => {
     const hasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
     return exercises.some(e=>e.sets.some(hasData));
@@ -307,10 +308,10 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
   const buildDraft = () => ({ name, date, exercises });
 
   // Аварийное автосохранение: пишем в localStorage с небольшой задержкой после
-  // каждого изменения (не на каждую букву), только если реально что-то внесено.
+  // каждого изменения (не на каждую букву). Сохраняем всегда, даже если пока
+  // ничего не внесено — свернуть/потерять процесс можно на любом этапе.
   // Переживает убийство процесса Telegram в фоне — не только сворачивание внутри приложения.
   useEffect(() => {
-    if (!hasRealData()) return;
     const t = setTimeout(() => {
       saveDraftToStorage({ type:"workout", editId: isEdit?initial.id:null, name, date, exercises });
     }, 600);
@@ -343,16 +344,12 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
     return res;
   };
 
-  // Свернуть: если есть реальные данные — сохраняем черновик (и в память, и на диск), иначе просто закрываем
+  // Свернуть: всегда сохраняем черновик (и в память, и на диск) — даже пустую
+  // заготовку, чтобы ничего не терялось на любом этапе заполнения.
   const handleMinimize=()=>{
-    if (hasRealData()) {
-      const d = buildDraft();
-      saveDraftToStorage({ type:"workout", editId: isEdit?initial.id:null, ...d });
-      onMinimize(d);
-    } else {
-      clearDraftFromStorage();
-      onClose();
-    }
+    const d = buildDraft();
+    saveDraftToStorage({ type:"workout", editId: isEdit?initial.id:null, ...d });
+    onMinimize(d);
   };
 
   // Закрыть крестиком: если есть данные — спросим подтверждение (можно случайно стереть тренировку)
@@ -749,7 +746,6 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
   const buildDraft = () => ({ name, date, vals });
 
   useEffect(() => {
-    if (!hasRealData()) return;
     const t = setTimeout(() => {
       saveDraftToStorage({ type:"measurement", editId: isEdit?initial.id:null, name, date, vals });
     }, 600);
@@ -763,15 +759,11 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
     setSaving(false);
   };
 
+  // Свернуть: всегда сохраняем черновик, даже пустую заготовку.
   const handleMinimize=()=>{
-    if (hasRealData()) {
-      const d = buildDraft();
-      saveDraftToStorage({ type:"measurement", editId: isEdit?initial.id:null, ...d });
-      onMinimize(d);
-    } else {
-      clearDraftFromStorage();
-      onClose();
-    }
+    const d = buildDraft();
+    saveDraftToStorage({ type:"measurement", editId: isEdit?initial.id:null, ...d });
+    onMinimize(d);
   };
   const handleCloseClick=()=>{
     if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
@@ -1307,7 +1299,7 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
     setInviteBusy(true);
     try{
       const {code}=await api.getInviteCode();
-      const link=`https://t.me/${BOT_USERNAME}?start=add_${code}`;
+      const link=`https://t.me/${BOT_USERNAME}?startapp=add_${code}`;
       const shareUrl=`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Присоединяйся к моему дневнику тренировок 💪")}`;
       if(window.Telegram?.WebApp?.openTelegramLink){
         window.Telegram.WebApp.openTelegramLink(shareUrl);
@@ -1457,6 +1449,19 @@ export default function App() {
     setTimeout(()=>setToastMsg(""),2200);
   };
 
+  // Инициализация Telegram Mini App: сообщаем что приложение готово, разворачиваем
+  // на всю доступную высоту и по возможности включаем настоящий полноэкранный режим
+  // (Bot API 8.0+; на старых клиентах метода просто не будет — optional chaining).
+  // Отступы от чёлки/островка камеры и home indicator обрабатываются в CSS через
+  // env(safe-area-inset-*).
+  useEffect(()=>{
+    const tg = window.Telegram?.WebApp;
+    if(!tg) return;
+    tg.ready?.();
+    tg.expand?.();
+    tg.requestFullscreen?.();
+  },[]);
+
   // Загружаем вообще всё один раз при старте: тренировки, замеры, профили, друзей.
   // Вкладка "Профиль" больше не делает свой отдельный запрос при каждом открытии —
   // она просто показывает то, что уже лежит в памяти приложения.
@@ -1478,20 +1483,27 @@ export default function App() {
   };
 
   const initialLoad = async () => {
-    // Если приложение открыто по ссылке-приглашению (бот прокидывает ?invite=add_XXXX
-    // в URL мини-аппа после перехода по t.me/бот?start=add_XXXX) — добавляем автора
-    // ссылки в друзья ДО основной загрузки, чтобы список друзей сразу пришёл актуальным.
+    // Приглашение может прийти двумя путями:
+    // 1. Нативно — через Menu Button/Direct Link (t.me/бот?startapp=add_XXXX),
+    //    тогда код лежит в Telegram.WebApp.initDataUnsafe.start_param.
+    // 2. По старинке — если у кого-то ещё сохранена старая ссылка вида
+    //    t.me/бот?start=add_XXXX, бот прокидывает код через ?invite=... в URL.
+    // Проверяем оба источника, отдаём приоритет нативному.
     const params = new URLSearchParams(window.location.search);
-    const invite = params.get("invite");
+    const nativeParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+    const legacyParam = params.get("invite");
+    const rawInvite = nativeParam || legacyParam;
     let justAddedFriend = false;
 
-    if(invite && invite.startsWith("add_")){
-      const code = invite.slice(4);
-      // Сразу убираем параметр из адресной строки — иначе при каждом повторном
-      // открытии этой же кнопки в боте приглашение будет "срабатывать" заново.
-      params.delete("invite");
-      const cleanUrl = window.location.pathname + (params.toString()?`?${params.toString()}`:"") + window.location.hash;
-      window.history.replaceState({}, "", cleanUrl);
+    if(rawInvite && rawInvite.startsWith("add_")){
+      const code = rawInvite.slice(4);
+      if(legacyParam){
+        // Старый способ оставлял след в адресной строке — вычищаем, иначе при
+        // повторном открытии той же кнопки приглашение будет "срабатывать" заново.
+        params.delete("invite");
+        const cleanUrl = window.location.pathname + (params.toString()?`?${params.toString()}`:"") + window.location.hash;
+        window.history.replaceState({}, "", cleanUrl);
+      }
 
       try{
         const before = await api.getFriends();
