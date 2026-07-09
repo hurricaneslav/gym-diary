@@ -138,7 +138,8 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;border:1px solid #333;color:#CCC;font-size:13px;padding:10px 18px;z-index:200;white-space:nowrap;animation:fadeIn .2s ease}
 @keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
-.draft-bar{position:fixed;bottom:0;left:0;right:0;max-width:390px;margin:0 auto;background:#1A1608;border-top:2px solid #E0A030;display:flex;align-items:center;gap:12px;padding:16px;z-index:60;cursor:pointer;animation:up .2s ease;box-shadow:0 -4px 20px rgba(0,0,0,.4)}
+.draft-bars-wrap{position:fixed;bottom:0;left:0;right:0;max-width:390px;margin:0 auto;z-index:45;display:flex;flex-direction:column}
+.draft-bar{background:#1A1608;border-top:2px solid #E0A030;display:flex;align-items:center;gap:12px;padding:16px;cursor:pointer;animation:up .2s ease;box-shadow:0 -4px 20px rgba(0,0,0,.4)}
 .draft-bar-dot{width:9px;height:9px;background:#E0A030;flex-shrink:0;animation:pulse 1.6s ease infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .draft-bar-text{flex:1;min-width:0}
@@ -170,22 +171,27 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 `;
 
 // ── Аварийное сохранение черновика в localStorage ────────────────────────
-// В отличие от draftState (живёт только в памяти вкладки), это переживает
+// В отличие от React-стейта (живёт только в памяти вкладки), это переживает
 // полное убийство процесса Telegram Mini App в фоне — самый частый сценарий
 // потери несохранённой тренировки на телефоне.
-const DRAFT_STORAGE_KEY = "gym_diary_draft_v1";
+// Два независимых слота — тренировка и замер можно вести одновременно,
+// не затирая черновик друг друга.
+const DRAFT_STORAGE_KEYS = {
+  workout: "gym_diary_draft_workout_v1",
+  measurement: "gym_diary_draft_measurement_v1",
+};
 
-function saveDraftToStorage(draft) {
-  try { localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft)); } catch(e) {}
+function saveDraftToStorage(type, draft) {
+  try { localStorage.setItem(DRAFT_STORAGE_KEYS[type], JSON.stringify(draft)); } catch(e) {}
 }
-function loadDraftFromStorage() {
+function loadDraftFromStorage(type) {
   try {
-    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEYS[type]);
     return raw ? JSON.parse(raw) : null;
   } catch(e) { return null; }
 }
-function clearDraftFromStorage() {
-  try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch(e) {}
+function clearDraftFromStorage(type) {
+  try { localStorage.removeItem(DRAFT_STORAGE_KEYS[type]); } catch(e) {}
 }
 
 // ── Keyboard-aware scroll ─────────────────────────────────────────────────
@@ -313,7 +319,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
   // Переживает убийство процесса Telegram в фоне — не только сворачивание внутри приложения.
   useEffect(() => {
     const t = setTimeout(() => {
-      saveDraftToStorage({ type:"workout", editId: isEdit?initial.id:null, name, date, exercises });
+      saveDraftToStorage("workout", { editId: isEdit?initial.id:null, name, date, exercises });
     }, 600);
     return () => clearTimeout(t);
   }, [name, date, exercises]);
@@ -339,7 +345,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
       .map(e=>({...e,sets:e.sets.filter(hasData)}));
     const payload={id:isEdit?initial.id:-1,name:name.trim()||defName,date,exercises:filtered};
     const res=await onSave(payload);
-    clearDraftFromStorage();
+    clearDraftFromStorage("workout");
     setSaving(false);
     return res;
   };
@@ -348,14 +354,14 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
   // заготовку, чтобы ничего не терялось на любом этапе заполнения.
   const handleMinimize=()=>{
     const d = buildDraft();
-    saveDraftToStorage({ type:"workout", editId: isEdit?initial.id:null, ...d });
+    saveDraftToStorage("workout", { editId: isEdit?initial.id:null, ...d });
     onMinimize(d);
   };
 
   // Закрыть крестиком: если есть данные — спросим подтверждение (можно случайно стереть тренировку)
   const handleCloseClick=()=>{
     if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
-    clearDraftFromStorage();
+    clearDraftFromStorage("workout");
     onClose();
   };
 
@@ -450,7 +456,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
 }
 
 // ── WorkoutsTab ───────────────────────────────────────────────────────────
-function WorkoutsTab({workouts, setWorkouts, toast, draftState, setDraftState}) {
+function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraft}) {
   const [showNew,setShowNew]=useState(false);
   const [editId,setEditId]=useState(null);
   const [detailId,setDetailId]=useState(null);
@@ -461,16 +467,16 @@ function WorkoutsTab({workouts, setWorkouts, toast, draftState, setDraftState}) 
   const detail=detailId!=null?workouts.find(w=>w.id===detailId):null;
   const editTarget=editId!=null?workouts.find(w=>w.id===editId):null;
 
-  // Когда черновик восстанавливается (клик по draft-bar в App), открываем нужную шторку
-  // и сразу забираем данные локально — глобальный draftState очищается, бар пропадает.
+  // Когда черновик восстанавливается (клик по draft-bar/карточке), открываем нужную
+  // шторку и сразу забираем данные локально — глобальный workoutDraft очищается, бар пропадает.
   useEffect(()=>{
-    if(draftState?.type==="workout" && draftState.restoring){
-      setRestoredDraft(draftState);
-      if(draftState.editId!=null){ setEditId(draftState.editId); setDetailId(null); }
+    if(workoutDraft?.restoring){
+      setRestoredDraft(workoutDraft);
+      if(workoutDraft.editId!=null){ setEditId(workoutDraft.editId); setDetailId(null); }
       else { setShowNew(true); }
-      setDraftState(null);
+      setWorkoutDraft(null);
     }
-  },[draftState]);
+  },[workoutDraft]);
 
   const draft = restoredDraft;
 
@@ -510,7 +516,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, draftState, setDraftState}) 
     setShowNew(false);
     setEditId(null);
     setRestoredDraft(null);
-    setDraftState({type:"workout", editId: editTarget?.id ?? null, ...draftData});
+    setWorkoutDraft({editId: editTarget?.id ?? null, ...draftData});
   };
   const handleSheetClose=()=>{
     setShowNew(false);
@@ -518,10 +524,20 @@ function WorkoutsTab({workouts, setWorkouts, toast, draftState, setDraftState}) 
     setRestoredDraft(null);
   };
 
+  // Пока есть незавершённый черновик (тренировка) — запрещаем открывать
+  // новую или другую тренировку на редактирование, чтобы старую не потерять.
+  const guardOpen=(openFn)=>{
+    if(workoutDraft && !workoutDraft.restoring){
+      window.alert("Сначала заверши текущую тренировку — она ещё не сохранена. Нажми на неё в списке, чтобы продолжить.");
+      return;
+    }
+    openFn();
+  };
+
   // Черновик, свёрнутый именно здесь (тренировка) — показываем прямо в списке,
   // на том месте, где он был бы, если бы уже был сохранён, вместо плавающего
   // блока внизу (чтобы не путать со старой уже сохранённой версией при редактировании).
-  const listDraft = draftState?.type==="workout" && !draftState.restoring ? draftState : null;
+  const listDraft = workoutDraft && !workoutDraft.restoring ? workoutDraft : null;
 
   let listItems = [...workouts].sort((a,b)=>b.date.localeCompare(a.date)).map(w=>({isDraft:false,w}));
   if(listDraft){
@@ -549,7 +565,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, draftState, setDraftState}) 
       </div>
       <div style={{display:"flex",gap:8,marginBottom:20}}>
         <span style={{color:"#888",fontSize:13,flex:1,alignSelf:"center"}}>{formatDate(detail.date)}</span>
-        <button className="edit-badge" onClick={()=>{setDetailId(null);setEditId(detail.id);}}>✎ Редактировать</button>
+        <button className="edit-badge" onClick={()=>guardOpen(()=>{setDetailId(null);setEditId(detail.id);})}>✎ Редактировать</button>
       </div>
       <div className="sec-lbl">Упражнения — {detail.exercises.length}</div>
       {detail.exercises.length===0
@@ -584,11 +600,11 @@ function WorkoutsTab({workouts, setWorkouts, toast, draftState, setDraftState}) 
 
   return (
     <div className="page">
-      <button className="btn" onClick={()=>setShowNew(true)}><IconPlus/>Новая тренировка</button>
+      <button className="btn" onClick={()=>guardOpen(()=>setShowNew(true))}><IconPlus/>Новая тренировка</button>
       {workouts.length===0 && !listDraft
         ?<div className="empty"><div className="empty-icon">🏋️</div>Тренировок пока нет.<br/>Начни первую!</div>
         :listItems.map((item,i,arr)=>item.isDraft?(
-          <div key="draft-card" className="card draft-card" onClick={()=>setDraftState(prev=>({...prev,restoring:true}))}>
+          <div key="draft-card" className="card draft-card" onClick={()=>setWorkoutDraft(prev=>({...prev,restoring:true}))}>
             <div style={{minWidth:0}}>
               <div className="card-title">{item.draft.name||"Тренировка"}</div>
               <div className="card-sub">{formatDate(item.draft.date)} · не сохранено</div>
@@ -747,7 +763,7 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
 
   useEffect(() => {
     const t = setTimeout(() => {
-      saveDraftToStorage({ type:"measurement", editId: isEdit?initial.id:null, name, date, vals });
+      saveDraftToStorage("measurement", { editId: isEdit?initial.id:null, name, date, vals });
     }, 600);
     return () => clearTimeout(t);
   }, [name, date, vals]);
@@ -755,19 +771,19 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
   const handleSave=async()=>{
     setSaving(true);
     await onSave({id:isEdit?initial.id:-1,name:name.trim()||defName,date,...vals});
-    clearDraftFromStorage();
+    clearDraftFromStorage("measurement");
     setSaving(false);
   };
 
   // Свернуть: всегда сохраняем черновик, даже пустую заготовку.
   const handleMinimize=()=>{
     const d = buildDraft();
-    saveDraftToStorage({ type:"measurement", editId: isEdit?initial.id:null, ...d });
+    saveDraftToStorage("measurement", { editId: isEdit?initial.id:null, ...d });
     onMinimize(d);
   };
   const handleCloseClick=()=>{
     if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
-    clearDraftFromStorage();
+    clearDraftFromStorage("measurement");
     onClose();
   };
 
@@ -836,7 +852,7 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
 }
 
 // ── MeasurementsTab ───────────────────────────────────────────────────────
-function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraftState}) {
+function MeasurementsTab({measurements,setMeasurements,toast,measurementDraft,setMeasurementDraft}) {
   const [showNew,setShowNew]=useState(false);
   const [editId,setEditId]=useState(null);
   const [detailId,setDetailId]=useState(null);
@@ -848,13 +864,13 @@ function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraft
   const editTarget=editId!=null?measurements.find(m=>m.id===editId):null;
 
   useEffect(()=>{
-    if(draftState?.type==="measurement" && draftState.restoring){
-      setRestoredDraft(draftState);
-      if(draftState.editId!=null){ setEditId(draftState.editId); setDetailId(null); }
+    if(measurementDraft?.restoring){
+      setRestoredDraft(measurementDraft);
+      if(measurementDraft.editId!=null){ setEditId(measurementDraft.editId); setDetailId(null); }
       else { setShowNew(true); }
-      setDraftState(null);
+      setMeasurementDraft(null);
     }
-  },[draftState]);
+  },[measurementDraft]);
 
   const draft = restoredDraft;
 
@@ -894,7 +910,7 @@ function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraft
     setShowNew(false);
     setEditId(null);
     setRestoredDraft(null);
-    setDraftState({type:"measurement", editId: editTarget?.id ?? null, ...draftData});
+    setMeasurementDraft({editId: editTarget?.id ?? null, ...draftData});
   };
   const handleSheetClose=()=>{
     setShowNew(false);
@@ -902,9 +918,19 @@ function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraft
     setRestoredDraft(null);
   };
 
+  // Пока есть незавершённый черновик (замер) — запрещаем открывать новый
+  // или другой замер на редактирование, чтобы старый не потерять.
+  const guardOpen=(openFn)=>{
+    if(measurementDraft && !measurementDraft.restoring){
+      window.alert("Сначала заверши текущий замер — он ещё не сохранён. Нажми на него в списке, чтобы продолжить.");
+      return;
+    }
+    openFn();
+  };
+
   // Черновик, свёрнутый именно здесь (замер) — показываем прямо в списке на
   // правильном месте, вместо плавающего блока внизу.
-  const listDraft = draftState?.type==="measurement" && !draftState.restoring ? draftState : null;
+  const listDraft = measurementDraft && !measurementDraft.restoring ? measurementDraft : null;
 
   let listItems = [...measurements].sort((a,b)=>b.date.localeCompare(a.date)).map(m=>({isDraft:false,m}));
   if(listDraft){
@@ -949,7 +975,7 @@ function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraft
         </div>
         <div style={{display:"flex",gap:8,marginBottom:20}}>
           <span style={{color:"#888",fontSize:13,flex:1,alignSelf:"center"}}>{formatDate(detail.date)}</span>
-          <button className="edit-badge" onClick={()=>{setDetailId(null);setEditId(detail.id);}}>✎ Редактировать</button>
+          <button className="edit-badge" onClick={()=>guardOpen(()=>{setDetailId(null);setEditId(detail.id);})}>✎ Редактировать</button>
         </div>
         {prevM&&(
           <div className="prev" style={{marginBottom:16,fontStyle:"normal"}}>
@@ -984,12 +1010,12 @@ function MeasurementsTab({measurements,setMeasurements,toast,draftState,setDraft
   }
   return(
     <div className="page">
-      <button className="btn" onClick={()=>setShowNew(true)}><IconPlus/>Измерить тело</button>
+      <button className="btn" onClick={()=>guardOpen(()=>setShowNew(true))}><IconPlus/>Измерить тело</button>
       {measurements.length===0 && !listDraft
         ?<div className="empty"><div className="empty-icon">📏</div>Замеров пока нет.<br/>Добавь первый!</div>
         :listItems.map((item,i,arr)=>{
           if(item.isDraft) return(
-            <div key="draft-card" className="card draft-card" onClick={()=>setDraftState(prev=>({...prev,restoring:true}))}>
+            <div key="draft-card" className="card draft-card" onClick={()=>setMeasurementDraft(prev=>({...prev,restoring:true}))}>
               <div style={{minWidth:0}}>
                 <div className="card-title">{item.draft.name||"Замер"}</div>
                 <div className="card-sub">{formatDate(item.draft.date)} · не сохранено</div>
@@ -1299,7 +1325,7 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
     setInviteBusy(true);
     try{
       const {code}=await api.getInviteCode();
-      const link=`https://t.me/${BOT_USERNAME}?startapp=add_${code}`;
+      const link=`https://t.me/${BOT_USERNAME}?start=add_${code}`;
       const shareUrl=`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Присоединяйся к моему дневнику тренировок 💪")}`;
       if(window.Telegram?.WebApp?.openTelegramLink){
         window.Telegram.WebApp.openTelegramLink(shareUrl);
@@ -1442,7 +1468,8 @@ export default function App() {
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState(null);
   const [toastMsg,setToastMsg]=useState("");
-  const [draftState,setDraftState]=useState(null); // {type:'workout'|'measurement', editId, name, date, exercises|vals, restoring}
+  const [workoutDraft,setWorkoutDraft]=useState(null); // {editId, name, date, exercises, restoring}
+  const [measurementDraft,setMeasurementDraft]=useState(null); // {editId, name, date, vals, restoring}
 
   const showToast=(msg)=>{
     setToastMsg(msg);
@@ -1480,23 +1507,23 @@ export default function App() {
   };
 
   const initialLoad = async () => {
-    // Приглашение может прийти двумя путями:
-    // 1. Нативно — через Menu Button/Direct Link (t.me/бот?startapp=add_XXXX),
-    //    тогда код лежит в Telegram.WebApp.initDataUnsafe.start_param.
-    // 2. По старинке — если у кого-то ещё сохранена старая ссылка вида
-    //    t.me/бот?start=add_XXXX, бот прокидывает код через ?invite=... в URL.
-    // Проверяем оба источника, отдаём приоритет нативному.
+    // Ссылка-приглашение всегда в формате t.me/бот?start=add_XXXX (обычный
+    // диплинк бота) — он гарантированно создаёт/открывает диалог с ботом и
+    // тот присылает сообщение с кнопкой запуска. Формат ?startapp= технически
+    // тоже поддерживается (Menu Button настроен), но открывает Mini App в
+    // обход чата с ботом — диалог не создаётся, поэтому для инвайтов не используется.
+    // Проверяем оба источника на случай если где-то всё же попадётся startapp-ссылка.
     const params = new URLSearchParams(window.location.search);
     const nativeParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
     const legacyParam = params.get("invite");
-    const rawInvite = nativeParam || legacyParam;
+    const rawInvite = legacyParam || nativeParam;
     let justAddedFriend = false;
 
     if(rawInvite && rawInvite.startsWith("add_")){
       const code = rawInvite.slice(4);
       if(legacyParam){
-        // Старый способ оставлял след в адресной строке — вычищаем, иначе при
-        // повторном открытии той же кнопки приглашение будет "срабатывать" заново.
+        // Оставляет след в адресной строке — вычищаем, иначе при повторном
+        // открытии той же кнопки приглашение будет "срабатывать" заново.
         params.delete("invite");
         const cleanUrl = window.location.pathname + (params.toString()?`?${params.toString()}`:"") + window.location.hash;
         window.history.replaceState({}, "", cleanUrl);
@@ -1526,8 +1553,12 @@ export default function App() {
       // Если процесс приложения был убит в фоне до того, как незавершённая
       // тренировка/замер была сохранена или явно закрыта — предлагаем её
       // восстановить (тем же плавающим блоком, что и при обычном сворачивании).
-      const stored = loadDraftFromStorage();
-      if(stored) setDraftState({...stored, restoring:false});
+      // Тренировка и замер проверяются независимо — оба черновика могут
+      // существовать одновременно.
+      const storedWorkout = loadDraftFromStorage("workout");
+      if(storedWorkout) setWorkoutDraft({...storedWorkout, restoring:false});
+      const storedMeasurement = loadDraftFromStorage("measurement");
+      if(storedMeasurement) setMeasurementDraft({...storedMeasurement, restoring:false});
     }catch(e){
       // Бэкенд на Railway может "просыпаться" несколько секунд после простоя —
       // api.js уже делает несколько попыток сам, это резервный случай на будущее.
@@ -1538,10 +1569,11 @@ export default function App() {
 
   useEffect(()=>{ initialLoad(); },[]);
 
-  // После переключения/удаления активного профиля дневник меняется —
-  // перезагружаем только его, список профилей/друзей уже актуален локально.
+  // После переключения/удаления активного профиля дневник меняется — оба
+  // черновика относятся к старому профилю и больше не актуальны, сбрасываем их.
   const handleProfileSwitch=()=>{
-    setDraftState(null);
+    setWorkoutDraft(null);
+    setMeasurementDraft(null);
     reloadDiaryOnly();
   };
 
@@ -1567,6 +1599,12 @@ export default function App() {
     </>
   );
 
+  // Показываем плавающий блок для черновика тренировки, только если мы НЕ на
+  // вкладке Тренировки (там он уже виден прямо в списке на своём месте).
+  const showWorkoutBar = workoutDraft && !workoutDraft.restoring && tab!==0;
+  // Аналогично для замера — прячем на вкладке Замеры.
+  const showMeasurementBar = measurementDraft && !measurementDraft.restoring && tab!==2;
+
   return(
     <>
       <style>{css}</style>
@@ -1576,21 +1614,38 @@ export default function App() {
             <button key={i} className={`tab${tab===i?" active":""}`} onClick={()=>setTab(i)}>{t}</button>
           ))}
         </div>
-        {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} draftState={draftState} setDraftState={setDraftState}/>}
+        {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft}/>}
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
-        {tab===2&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} draftState={draftState} setDraftState={setDraftState}/>}
+        {tab===2&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
         {tab===3&&<ProfileTab profiles={profiles} setProfiles={setProfiles} friends={friends} setFriends={setFriends} onProfileSwitch={handleProfileSwitch} toast={showToast}/>}
-        {draftState&&!draftState.restoring&&!((draftState.type==="workout"&&tab===0)||(draftState.type==="measurement"&&tab===2))&&(
-          <div className="draft-bar" onClick={()=>{
-            setDraftState(p=>({...p,restoring:true}));
-            setTab(draftState.type==="workout"?0:2);
-          }}>
-            <span className="draft-bar-dot"/>
-            <div className="draft-bar-text">
-              <div className="draft-bar-title">{draftState.name || (draftState.type==="workout"?"Тренировка":"Замер")}</div>
-              <div className="draft-bar-sub">{draftState.type==="workout"?"Тренировка не сохранена · нажми чтобы продолжить":"Замер не сохранён · нажми чтобы продолжить"}</div>
-            </div>
-            <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage();setDraftState(null);}}}><IconClose/></button>
+        {(showWorkoutBar||showMeasurementBar)&&(
+          <div className="draft-bars-wrap">
+            {showWorkoutBar&&(
+              <div className="draft-bar" onClick={()=>{
+                setWorkoutDraft(p=>({...p,restoring:true}));
+                setTab(0);
+              }}>
+                <span className="draft-bar-dot"/>
+                <div className="draft-bar-text">
+                  <div className="draft-bar-title">{workoutDraft.name || "Тренировка"}</div>
+                  <div className="draft-bar-sub">Тренировка не сохранена · нажми чтобы продолжить</div>
+                </div>
+                <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage("workout");setWorkoutDraft(null);}}}><IconClose/></button>
+              </div>
+            )}
+            {showMeasurementBar&&(
+              <div className="draft-bar" onClick={()=>{
+                setMeasurementDraft(p=>({...p,restoring:true}));
+                setTab(2);
+              }}>
+                <span className="draft-bar-dot"/>
+                <div className="draft-bar-text">
+                  <div className="draft-bar-title">{measurementDraft.name || "Замер"}</div>
+                  <div className="draft-bar-sub">Замер не сохранён · нажми чтобы продолжить</div>
+                </div>
+                <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage("measurement");setMeasurementDraft(null);}}}><IconClose/></button>
+              </div>
+            )}
           </div>
         )}
         <Toast msg={toastMsg}/>
