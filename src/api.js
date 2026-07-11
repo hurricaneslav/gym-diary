@@ -83,6 +83,11 @@ export const api = {
   deleteProfile:    (id)        => request("DELETE", `/profiles/${id}`),
   activateProfile:  (id)        => request("POST",   `/profiles/${id}/activate`),
 
+  // ── Заметки к упражнениям (техника/сетап) ─────────────────────────────────
+  getExerciseNotes:   ()               => request("GET", "/exercise-notes"),
+  saveExerciseNote:   (name, note)     => request("PUT", "/exercise-notes", { name, note }),
+  renameExerciseNote: (oldName, newName) => request("PUT", "/exercise-notes/rename", { old_name: oldName, new_name: newName }),
+
   // ── Друзья ──────────────────────────────────────────────────────────────
   getInviteCode:      ()         => request("GET",    "/me/invite-link"),
   getFriends:         ()         => request("GET",    "/friends"),

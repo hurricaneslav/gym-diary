@@ -4,6 +4,14 @@ import { api, BOT_USERNAME } from "./api.js";
 const today = () => new Date().toISOString().slice(0, 10);
 const formatDate = (iso) => { try { const [y,m,d]=iso.split("-"); return `${d}.${m}.${y}`; } catch { return iso; } };
 
+// Есть ли в черновике тренировки/замера реально внесённые данные (не просто
+// пустая заготовка) — используется при предупреждении о переключении профиля.
+const workoutDraftHasData = (exercises=[]) => {
+  const hasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
+  return exercises.some(e=>e.sets?.some(hasData));
+};
+const measurementDraftHasData = (vals={}) => Object.values(vals).some(v=>v!==""&&v!=null);
+
 const MEASUREMENT_FIELDS = [
   {key:"weight",label:"Вес тела"},{key:"waist",label:"Талия"},{key:"chest",label:"Грудь"},
   {key:"shoulders",label:"Плечи"},{key:"armRight",label:"Правая рука"},{key:"armLeft",label:"Левая рука"},
@@ -60,6 +68,10 @@ body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,
 .inp:focus{border-color:#FFF}
 .inp::placeholder{color:#444}
 input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
+.ex-note-inp{width:100%;background:#111;border:1px solid #2A2A2A;color:#FFF;font-size:14px;padding:11px 13px;outline:none;font-family:inherit;transition:border-color .15s;resize:vertical;min-height:84px;line-height:1.5;margin-bottom:20px;-webkit-appearance:none}
+.ex-note-inp:focus{border-color:#FFF}
+.ex-note-inp::placeholder{color:#444}
+.ex-note-inp:disabled{opacity:.5}
 .ex-block{border:1px solid #2A2A2A;margin-bottom:14px;background:#111}
 .ex-hd{padding:12px 14px;border-bottom:1px solid #1E1E1E;display:flex;align-items:center;gap:10px;position:relative}
 .ex-num{font-size:11px;color:#555;flex-shrink:0;width:22px}
@@ -636,6 +648,25 @@ function ExercisesTab({workouts, setWorkouts, toast}) {
   const [renamingEx,setRenamingEx]=useState(false);
   const [renameExVal,setRenameExVal]=useState("");
 
+  // Общие описания упражнений (техника, сетап и т.д.) — по имени, не по конкретной тренировке.
+  const [notes,setNotes]=useState({});
+  const [notesLoaded,setNotesLoaded]=useState(false);
+  useEffect(()=>{
+    api.getExerciseNotes().then(d=>{setNotes(d||{});setNotesLoaded(true);}).catch(()=>setNotesLoaded(true));
+  },[]);
+  const noteKey = selected ? selected.trim().toLowerCase() : null;
+  const noteVal = noteKey!=null ? (notes[noteKey] ?? "") : "";
+  const setNoteVal = (v) => setNotes(prev=>({...prev,[noteKey]:v}));
+  // Автосохранение с задержкой, как и остальные черновики в приложении — но
+  // только после того, как исходные заметки уже загружены (иначе можем
+  // случайно затереть существующую заметку пустой строкой до загрузки).
+  useEffect(()=>{
+    if(!selected || !notesLoaded) return;
+    const t=setTimeout(()=>{ api.saveExerciseNote(selected, notes[noteKey] ?? "").catch(()=>{}); }, 600);
+    return ()=>clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[selected, notesLoaded, notes[noteKey]]);
+
   const allNames=[...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))].sort((a,b)=>a.localeCompare(b,"ru"));
   const getHistory=(name)=>{
     const lc=name.toLowerCase(),rows=[];
@@ -658,6 +689,14 @@ function ExercisesTab({workouts, setWorkouts, toast}) {
         const found=updatedList.find(u=>u.id===w.id);
         return found||w;
       }));
+    });
+    // Переносим заметку с описанием техники на новое имя вместе с самим упражнением
+    const newLc=newName.trim().toLowerCase();
+    api.renameExerciseNote(selected,newName).catch(()=>{});
+    setNotes(prev=>{
+      if(!(lc in prev)) return prev;
+      const {[lc]:val,...rest}=prev;
+      return {...rest,[newLc]:val};
     });
     toast(`«${selected}» → «${newName}» ✓`);
     setSelected(newName);
@@ -682,6 +721,14 @@ function ExercisesTab({workouts, setWorkouts, toast}) {
             :<span className="det-title">{selected}</span>}
           <button className="del-btn" onClick={startRenameEx}><IconEdit/></button>
         </div>
+        <div className="sec-lbl" style={{marginTop:0}}>Описание · техника выполнения</div>
+        <textarea
+          className="ex-note-inp"
+          placeholder="Сетап, техника выполнения, на что обратить внимание..."
+          value={noteVal}
+          onChange={e=>setNoteVal(e.target.value)}
+          disabled={!notesLoaded}
+        />
         <div className="sec-lbl">{history.length} записей</div>
         {history.map(({workout,exercise},i)=>(
           <div key={i} className="ex-hist-item">
@@ -1256,7 +1303,7 @@ function FriendProfileView({friendId, onBack, onRemove}) {
 }
 
 // ── ProfileTab ────────────────────────────────────────────────────────────
-function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch, toast}) {
+function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch, toast, hasUnsavedDrafts}) {
   const [detailId,setDetailId]=useState(null);
   const [renamingId,setRenamingId]=useState(null);
   const [renameVal,setRenameVal]=useState("");
@@ -1289,6 +1336,7 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
   };
 
   const handleActivate=async(id)=>{
+    if(hasUnsavedDrafts && !window.confirm("У тебя есть несохранённая тренировка или замер — при переключении профиля они будут потеряны. Переключить профиль?")) return;
     await api.activateProfile(id);
     setProfiles(prev=>prev.map(p=>({...p,is_active:p.id===id})));
     onProfileSwitch();
@@ -1297,9 +1345,12 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
   };
 
   const handleDelete=async(id)=>{
-    if(!window.confirm("Удалить профиль? Все его тренировки, упражнения и замеры удалятся без возможности восстановления."))return;
+    const wasActiveBefore=profiles.find(p=>p.id===id)?.is_active;
+    let msg="Удалить профиль? Все его тренировки, упражнения и замеры удалятся без возможности восстановления.";
+    if(wasActiveBefore && hasUnsavedDrafts) msg+="\n\nТакже у тебя есть несохранённая тренировка или замер — они будут потеряны.";
+    if(!window.confirm(msg))return;
     try{
-      const wasActive=profiles.find(p=>p.id===id)?.is_active;
+      const wasActive=wasActiveBefore;
       await api.deleteProfile(id);
       setProfiles(prev=>prev.filter(p=>p.id!==id));
       setDetailId(null);
@@ -1605,6 +1656,12 @@ export default function App() {
   // Аналогично для замера — прячем на вкладке Замеры.
   const showMeasurementBar = measurementDraft && !measurementDraft.restoring && tab!==2;
 
+  // Есть ли несохранённые данные в черновиках — если да, при переключении
+  // профиля (или удалении активного) предупреждаем, что они будут потеряны.
+  const hasUnsavedDrafts =
+    (!!workoutDraft && workoutDraftHasData(workoutDraft.exercises)) ||
+    (!!measurementDraft && measurementDraftHasData(measurementDraft.vals));
+
   return(
     <>
       <style>{css}</style>
@@ -1617,7 +1674,7 @@ export default function App() {
         {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft}/>}
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
         {tab===2&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
-        {tab===3&&<ProfileTab profiles={profiles} setProfiles={setProfiles} friends={friends} setFriends={setFriends} onProfileSwitch={handleProfileSwitch} toast={showToast}/>}
+        {tab===3&&<ProfileTab profiles={profiles} setProfiles={setProfiles} friends={friends} setFriends={setFriends} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
         {(showWorkoutBar||showMeasurementBar)&&(
           <div className="draft-bars-wrap">
             {showWorkoutBar&&(
