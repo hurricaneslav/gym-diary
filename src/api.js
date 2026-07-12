@@ -82,6 +82,14 @@ export const api = {
   updateProfile:    (id, patch) => request("PUT",    `/profiles/${id}`, patch),
   deleteProfile:    (id)        => request("DELETE", `/profiles/${id}`),
   activateProfile:  (id)        => request("POST",   `/profiles/${id}/activate`),
+  // Текстовый экспорт (тренировки+замеры) — не JSON, поэтому не через общий request()
+  exportProfile: async (id) => {
+    const res = await fetch(`${API_URL}/profiles/${id}/export`, {
+      headers: { "x-init-data": getInitData() },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.text();
+  },
 
   // ── Заметки к упражнениям (техника/сетап) ─────────────────────────────────
   getExerciseNotes:   ()               => request("GET", "/exercise-notes"),

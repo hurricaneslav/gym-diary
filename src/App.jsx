@@ -1335,6 +1335,26 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
     toast("Сохранено ✓");
   };
 
+  const [exportBusy,setExportBusy]=useState(false);
+  const handleExport=async(profile)=>{
+    setExportBusy(true);
+    try{
+      const text=await api.exportProfile(profile.id);
+      const blob=new Blob([text],{type:"text/plain;charset=utf-8"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url;
+      a.download=`${(profile.name||"профиль").replace(/[\\/:*?"<>|]/g,"_")}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }catch(e){
+      window.alert("Не удалось выгрузить данные");
+    }
+    setExportBusy(false);
+  };
+
   const handleActivate=async(id)=>{
     if(hasUnsavedDrafts && !window.confirm("У тебя есть несохранённая тренировка или замер — при переключении профиля они будут потеряны. Переключить профиль?")) return;
     await api.activateProfile(id);
@@ -1448,6 +1468,9 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
         <ToggleRow label="Отображать замеры" checked={detail.show_measurements} onChange={v=>handleToggle(detail.id,"show_measurements",v)}/>
         <ToggleRow label="Отображать комментарии к упражнениям" checked={detail.show_comments} onChange={v=>handleToggle(detail.id,"show_comments",v)}/>
         <div style={{height:20}}/>
+        <button className="btn ghost" onClick={()=>handleExport(detail)} disabled={exportBusy}>
+          {exportBusy?"Готовим файл...":"Выгрузить тренировки и замеры (.txt)"}
+        </button>
         {!detail.is_active&&<button className="btn" onClick={()=>handleActivate(detail.id)}>Сделать активным</button>}
         {profiles.length>1&&<button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить профиль</button>}
       </div>
