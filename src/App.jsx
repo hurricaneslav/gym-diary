@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { api, API_URL, BOT_USERNAME } from "./api.js";
+import { api, BOT_USERNAME } from "./api.js";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const formatDate = (iso) => { try { const [y,m,d]=iso.split("-"); return `${d}.${m}.${y}`; } catch { return iso; } };
@@ -1338,18 +1338,17 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
   const [exportBusy,setExportBusy]=useState(false);
   const handleExport=async(profile)=>{
     setExportBusy(true);
-    const fileName=`${(profile.name||"профиль").replace(/[\\/:*?"<>|]/g,"_")}.txt`;
     try{
       const tg=window.Telegram?.WebApp;
-      if(tg && typeof tg.downloadFile==="function"){
-        // Внутри Telegram (особенно на iOS) обычная Blob-ссылка не скачивается —
-        // файл просто открывается на просмотр, без возможности сохранить/скопировать.
-        // downloadFile просит скачать сам клиент Telegram — для этого нужна прямая
-        // ссылка без наших кастомных заголовков, поэтому берём одноразовый токен.
-        const {token}=await api.createExportToken(profile.id);
-        const url=`${API_URL}/profiles/${profile.id}/export?token=${token}`;
-        tg.downloadFile({url,file_name:fileName},()=>{});
+      if(tg){
+        // Внутри Telegram (в том числе на iOS, где Blob-ссылки внутри веб-вью не
+        // скачиваются) — самый надёжный способ отдать файл: попросить бота
+        // прислать его документом прямо в чат. Сохранить/переслать документ из
+        // чата Telegram умеет всегда и везде, без всяких версионных нюансов.
+        await api.exportToChat(profile.id);
+        toast("Файл отправлен в чат с ботом ✓");
       }else{
+        const fileName=`${(profile.name||"профиль").replace(/[\\/:*?"<>|]/g,"_")}.txt`;
         const text=await api.exportProfile(profile.id);
         const blob=new Blob([text],{type:"text/plain;charset=utf-8"});
         const url=URL.createObjectURL(blob);

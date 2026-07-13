@@ -90,8 +90,8 @@ export const api = {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.text();
   },
-  // Одноразовая ссылка на скачивание без заголовков — нужна для Telegram.WebApp.downloadFile
-  createExportToken: (id) => request("POST", `/profiles/${id}/export-token`),
+  // Отправить экспорт документом в чат с ботом — надёжный способ на телефоне
+  exportToChat: (id) => request("POST", `/profiles/${id}/export-to-chat`),
 
   // ── Заметки к упражнениям (техника/сетап) ─────────────────────────────────
   getExerciseNotes:   ()               => request("GET", "/exercise-notes"),
