@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { api, BOT_USERNAME } from "./api.js";
+import { api, API_URL, BOT_USERNAME } from "./api.js";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const formatDate = (iso) => { try { const [y,m,d]=iso.split("-"); return `${d}.${m}.${y}`; } catch { return iso; } };
@@ -1338,17 +1338,29 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
   const [exportBusy,setExportBusy]=useState(false);
   const handleExport=async(profile)=>{
     setExportBusy(true);
+    const fileName=`${(profile.name||"профиль").replace(/[\\/:*?"<>|]/g,"_")}.txt`;
     try{
-      const text=await api.exportProfile(profile.id);
-      const blob=new Blob([text],{type:"text/plain;charset=utf-8"});
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement("a");
-      a.href=url;
-      a.download=`${(profile.name||"профиль").replace(/[\\/:*?"<>|]/g,"_")}.txt`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const tg=window.Telegram?.WebApp;
+      if(tg && typeof tg.downloadFile==="function"){
+        // Внутри Telegram (особенно на iOS) обычная Blob-ссылка не скачивается —
+        // файл просто открывается на просмотр, без возможности сохранить/скопировать.
+        // downloadFile просит скачать сам клиент Telegram — для этого нужна прямая
+        // ссылка без наших кастомных заголовков, поэтому берём одноразовый токен.
+        const {token}=await api.createExportToken(profile.id);
+        const url=`${API_URL}/profiles/${profile.id}/export?token=${token}`;
+        tg.downloadFile({url,file_name:fileName},()=>{});
+      }else{
+        const text=await api.exportProfile(profile.id);
+        const blob=new Blob([text],{type:"text/plain;charset=utf-8"});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url;
+        a.download=fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
     }catch(e){
       window.alert("Не удалось выгрузить данные");
     }
