@@ -37,7 +37,7 @@ body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,
 .tab-bar{display:flex;border-bottom:1px solid #2A2A2A;background:#0A0A0A;position:sticky;top:0;z-index:10}
 .tab{flex:1 1 0;min-width:0;padding:14px 2px;text-align:center;font-size:11px;font-weight:500;letter-spacing:.01em;text-transform:uppercase;color:#555;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;background:none;border-left:none;border-right:none;border-top:none;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tab.active{color:#FFF;border-bottom-color:#FFF}
-.page{flex:1;overflow-y:auto;padding:16px;padding-bottom:32px}
+.page{flex:1;overflow-y:auto;padding:16px;padding-bottom:calc(32px + var(--draft-bars-h, 0px))}
 .card{border:1px solid #2A2A2A;padding:14px 16px;margin-bottom:10px;cursor:pointer;background:#111;display:flex;align-items:center;justify-content:space-between;gap:12px;transition:border-color .15s}
 .card:active{border-color:#555}
 .card-title{font-weight:600;font-size:15px}
@@ -310,7 +310,14 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
   function newSet(){return{weight:"",reps:"",bilateral:false,weightL:"",repsL:"",weightR:"",repsR:""};}
   const addEx=()=>setExercises(p=>[...p,newEx()]);
   const upEx=(id,f,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,[f]:v}:e));
-  const remEx=(id)=>setExercises(p=>p.filter(e=>e.id!==id));
+  const setHasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
+  // Если в упражнении уже есть внесённые подходы — спрашиваем подтверждение
+  // (случайное нажатие иначе стирает записанные данные без возможности отменить).
+  const remEx=(id)=>{
+    const ex=exercises.find(e=>e.id===id);
+    if(ex && ex.sets.some(setHasData) && !window.confirm("Удалить упражнение? Внесённые подходы будут потеряны."))return;
+    setExercises(p=>p.filter(e=>e.id!==id));
+  };
   const addSet=(id)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:[...e.sets,newSet()]}:e));
   const upSet=(id,si,f,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,[f]:v}:s)}:e));
   const remSet=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.filter((_,i)=>i!==si)}:e));
@@ -318,10 +325,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
 
   // Есть ли реально внесённые данные (используется только для решения — нужно
   // ли спрашивать подтверждение при явном закрытии крестиком, не для сворачивания).
-  const hasRealData = () => {
-    const hasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
-    return exercises.some(e=>e.sets.some(hasData));
-  };
+  const hasRealData = () => exercises.some(e=>e.sets.some(setHasData));
 
   const buildDraft = () => ({ name, date, exercises });
 
@@ -1689,6 +1693,11 @@ export default function App() {
   const showWorkoutBar = workoutDraft && !workoutDraft.restoring && tab!==0;
   // Аналогично для замера — прячем на вкладке Замеры.
   const showMeasurementBar = measurementDraft && !measurementDraft.restoring && tab!==2;
+  // Сколько плашек-черновиков сейчас реально показано внизу экрана — их высота
+  // (позиционированы position:fixed) резервируется отступом снизу в контенте
+  // вкладок (.page), чтобы плашки не перекрывали последние элементы списков.
+  // 80px — высота одной плашки с запасом (padding+контент+бордер, см. .draft-bar).
+  const draftBarsCount = (showWorkoutBar?1:0) + (showMeasurementBar?1:0);
 
   // Есть ли несохранённые данные в черновиках — если да, при переключении
   // профиля (или удалении активного) предупреждаем, что они будут потеряны.
@@ -1699,7 +1708,7 @@ export default function App() {
   return(
     <>
       <style>{css}</style>
-      <div className="app-frame">
+      <div className="app-frame" style={draftBarsCount?{"--draft-bars-h":`${draftBarsCount*80}px`}:undefined}>
         <div className="tab-bar">
           {["Тренировки","Упражнения","Замеры","Профиль"].map((t,i)=>(
             <button key={i} className={`tab${tab===i?" active":""}`} onClick={()=>setTab(i)}>{t}</button>
