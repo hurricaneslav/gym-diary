@@ -32,7 +32,6 @@ const IconLink = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="non
 
 const css = `
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;-webkit-font-smoothing:antialiased}
 .app-frame{max-width:390px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;background:#0A0A0A}
 .tab-bar{display:flex;border-bottom:1px solid #3A3A3A;background:#0A0A0A;position:sticky;top:0;z-index:10}
@@ -49,7 +48,7 @@ body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,
 .btn.danger{border-color:#FF4444;color:#FF4444}.btn.danger:active{background:#FF4444;color:#FFF}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;display:flex;flex-direction:column;justify-content:flex-end;max-width:390px;margin:0 auto;overflow:hidden}
-.sheet{position:relative;background:#0A0A0A;border-top:1px solid #3A3A3A;max-height:92vh;max-height:92dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 16px 40px;animation:up .22s ease;scroll-behavior:auto}
+.sheet{position:relative;background:#0A0A0A;border-top:1px solid #3A3A3A;max-height:92dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 16px 40px;animation:up .22s ease;scroll-behavior:auto}
 @keyframes up{from{transform:translateY(30px);opacity:0}to{transform:none;opacity:1}}
 .handle{width:36px;height:4px;background:#444;margin:12px auto 16px}
 .sheet-top-actions{position:absolute;top:14px;right:12px;display:flex;align-items:center;gap:6px;z-index:5}
@@ -207,55 +206,33 @@ function clearDraftFromStorage(type) {
   try { localStorage.removeItem(DRAFT_STORAGE_KEYS[type]); } catch(e) {}
 }
 
-// ── Keyboard-aware скролл ───────────────────────────────────────────────────
-// Размер шторки теперь целиком на CSS (92dvh с фолбэком на 92vh) — раньше
-// JS пересчитывал max-height в пикселях на каждый resize, и это, судя по
-// всему, и было причиной "сползающей строки": на промежуточном кадре
-// анимации клавиатуры высота на секунду считалась неверно, шторка на
-// мгновение схлопывалась не так, как надо.
-// Здесь только докручиваем активное поле, чтобы оно было видно над
-// клавиатурой — и ждём, пока высота видимой области "устоится" (клавиатура
-// доехала), а не реагируем на каждый промежуточный кадр её анимации.
-// Внутри Telegram Mini App предпочитаем их собственное событие
-// viewportChanged — общий visualViewport.resize внутри их WebView не всегда
-// стабилен (отсюда и более резкие/лишние прыжки от прошлой правки).
+// ── Keyboard-aware scroll ─────────────────────────────────────────────────
+// Единственный правильный способ: слушаем visualViewport.resize,
+// когда клавиатура поднимается — плавно подматываем .sheet к активному полю.
+// scrollIntoView НЕ используется — он вызывает прыжки body.
 function useKeyboardScroll(sheetRef) {
   useEffect(() => {
-    const tg = window.Telegram?.WebApp;
     const vv = window.visualViewport;
+    if (!vv) return;
     let raf = null;
-    let settleTimer = null;
-    const adjust = () => {
-      const sheet = sheetRef.current;
-      const active = document.activeElement;
-      if (!sheet || !active || !sheet.contains(active)) return;
-      const elRect = active.getBoundingClientRect();
-      const visibleHeight = tg?.viewportHeight || vv?.height || window.innerHeight;
-      const vpTop = vv?.offsetTop || 0;
-      // Сколько пикселей элемент выходит за нижнюю границу видимой области
-      const overflow = elRect.bottom + 12 - (vpTop + visibleHeight);
-      if (overflow > 0) {
-        sheet.scrollBy({ top: overflow, behavior: "smooth" });
-      }
-    };
-    const scheduleAdjust = () => {
-      if (settleTimer) clearTimeout(settleTimer);
-      settleTimer = setTimeout(() => {
-        if (raf) cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(adjust);
-      }, 120);
-    };
-    if (tg?.onEvent) {
-      tg.onEvent("viewportChanged", scheduleAdjust);
-    } else if (vv) {
-      vv.addEventListener("resize", scheduleAdjust);
-    }
-    return () => {
-      if (tg?.offEvent) tg.offEvent("viewportChanged", scheduleAdjust);
-      else if (vv) vv.removeEventListener("resize", scheduleAdjust);
+    const onResize = () => {
       if (raf) cancelAnimationFrame(raf);
-      if (settleTimer) clearTimeout(settleTimer);
+      raf = requestAnimationFrame(() => {
+        const sheet = sheetRef.current;
+        const active = document.activeElement;
+        if (!sheet || !active || !sheet.contains(active)) return;
+        const sheetRect = sheet.getBoundingClientRect();
+        const elRect = active.getBoundingClientRect();
+        const vpBottom = vv.offsetTop + vv.height;
+        // Сколько пикселей элемент выходит за нижнюю границу viewport
+        const overflow = elRect.bottom + 12 - vpBottom;
+        if (overflow > 0) {
+          sheet.scrollBy({ top: overflow, behavior: "smooth" });
+        }
+      });
     };
+    vv.addEventListener("resize", onResize);
+    return () => { vv.removeEventListener("resize", onResize); if (raf) cancelAnimationFrame(raf); };
   }, [sheetRef]);
 }
 
