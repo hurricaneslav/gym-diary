@@ -32,8 +32,9 @@ const IconLink = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="non
 
 const css = `
 *{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;position:fixed;top:0;left:0;width:100%}
 body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;-webkit-font-smoothing:antialiased}
-.app-frame{max-width:390px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;background:#0A0A0A}
+.app-frame{max-width:390px;margin:0 auto;height:100%;overflow:hidden;display:flex;flex-direction:column;background:#0A0A0A}
 .tab-bar{display:flex;border-bottom:1px solid #3A3A3A;background:#0A0A0A;position:sticky;top:0;z-index:10}
 .tab{flex:1 1 0;min-width:0;padding:14px 2px;text-align:center;font-size:11px;font-weight:500;letter-spacing:.01em;text-transform:uppercase;color:#666;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;background:none;border-left:none;border-right:none;border-top:none;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tab.active{color:#FFF;border-bottom-color:#FFF}
@@ -48,7 +49,7 @@ body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,
 .btn.danger{border-color:#FF4444;color:#FF4444}.btn.danger:active{background:#FF4444;color:#FFF}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;display:flex;flex-direction:column;justify-content:flex-end;max-width:390px;margin:0 auto;overflow:hidden}
-.sheet{position:relative;background:#0A0A0A;border-top:1px solid #3A3A3A;max-height:92dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 16px 40px;animation:up .22s ease;scroll-behavior:auto}
+.sheet{position:relative;background:#0A0A0A;border-top:1px solid #3A3A3A;max-height:92vh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 16px 40px;animation:up .22s ease;scroll-behavior:auto}
 @keyframes up{from{transform:translateY(30px);opacity:0}to{transform:none;opacity:1}}
 .handle{width:36px;height:4px;background:#444;margin:12px auto 16px}
 .sheet-top-actions{position:absolute;top:14px;right:12px;display:flex;align-items:center;gap:6px;z-index:5}
@@ -206,33 +207,51 @@ function clearDraftFromStorage(type) {
   try { localStorage.removeItem(DRAFT_STORAGE_KEYS[type]); } catch(e) {}
 }
 
-// ── Keyboard-aware scroll ─────────────────────────────────────────────────
-// Единственный правильный способ: слушаем visualViewport.resize,
-// когда клавиатура поднимается — плавно подматываем .sheet к активному полю.
-// scrollIntoView НЕ используется — он вызывает прыжки body.
+// ── Keyboard-aware sizing и скролл ─────────────────────────────────────────
+// Раньше высота шторки задавалась через 92dvh, а подстройка скролла реагировала
+// на КАЖДЫЙ промежуточный resize во время анимации клавиатуры. У клавиатуры
+// анимация длится 200-300мс и visualViewport.resize стреляет несколько раз с
+// промежуточной высотой — если сразу подстраиваться под неё, получается
+// "прыгнул — вернулся" (сначала подстроились под неверную промежуточную
+// высоту, потом досчитали заново под финальную). Плюс dvh в некоторых WebView
+// (особенно внутри Telegram) на середине анимации ведёт себя нестабильно.
+// Решение: ждём ~100мс без новых resize (клавиатура доехала), и только тогда
+// один раз считаем и высоту шторки, и докручиваем активное поле — в пикселях
+// от реального visualViewport, а не в единицах, зависящих от браузера.
 function useKeyboardScroll(sheetRef) {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
     let raf = null;
+    let settleTimer = null;
+    const apply = () => {
+      const sheet = sheetRef.current;
+      if (!sheet) return;
+      sheet.style.maxHeight = `${Math.round(vv.height * 0.92)}px`;
+      const active = document.activeElement;
+      if (!active || !sheet.contains(active)) return;
+      const elRect = active.getBoundingClientRect();
+      const vpBottom = vv.offsetTop + vv.height;
+      // Сколько пикселей элемент выходит за нижнюю границу видимой области
+      const overflow = elRect.bottom + 12 - vpBottom;
+      if (overflow > 0) {
+        sheet.scrollBy({ top: overflow, behavior: "smooth" });
+      }
+    };
+    apply();
     const onResize = () => {
-      if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        const sheet = sheetRef.current;
-        const active = document.activeElement;
-        if (!sheet || !active || !sheet.contains(active)) return;
-        const sheetRect = sheet.getBoundingClientRect();
-        const elRect = active.getBoundingClientRect();
-        const vpBottom = vv.offsetTop + vv.height;
-        // Сколько пикселей элемент выходит за нижнюю границу viewport
-        const overflow = elRect.bottom + 12 - vpBottom;
-        if (overflow > 0) {
-          sheet.scrollBy({ top: overflow, behavior: "smooth" });
-        }
-      });
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        if (raf) cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(apply);
+      }, 100);
     };
     vv.addEventListener("resize", onResize);
-    return () => { vv.removeEventListener("resize", onResize); if (raf) cancelAnimationFrame(raf); };
+    return () => {
+      vv.removeEventListener("resize", onResize);
+      if (raf) cancelAnimationFrame(raf);
+      if (settleTimer) clearTimeout(settleTimer);
+    };
   }, [sheetRef]);
 }
 
