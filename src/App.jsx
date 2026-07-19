@@ -207,19 +207,33 @@ function clearDraftFromStorage(type) {
 }
 
 // ── Keyboard-aware scroll ─────────────────────────────────────────────────
-// ЭКСПЕРИМЕНТ (19.07.26): раньше здесь был JS, который слушал
-// visualViewport.resize и сам докручивал .sheet к активному полю.
-// По записи экрана видно, что именно это и провоцирует дрожание/мигание:
-// клавиатура анимируется не мгновенно, resize прилетает несколько раз с
-// промежуточными значениями высоты, и наш scrollBy начинает спорить с тем,
-// что и так делает браузер + CSS-высота шторки (92dvh), которая тоже meняется
-// в этот момент. Две попытки "умнее" подстроить JS (debounce, пересчёт
-// высоты, событие Telegram) сделали только хуже. Пробуем убрать JS
-// вмешательство совсем и оставить только dvh + штатное поведение WebView.
-// Если полю всё равно нужно помогать всплывать над клавиатурой — вернуть
-// сюда точечную, ОДНОРАЗОВУЮ (не на каждый resize) докрутку.
+// Единственный правильный способ: слушаем visualViewport.resize,
+// когда клавиатура поднимается — плавно подматываем .sheet к активному полю.
+// scrollIntoView НЕ используется — он вызывает прыжки body.
 function useKeyboardScroll(sheetRef) {
-  // no-op — см. комментарий выше
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    let raf = null;
+    const onResize = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const sheet = sheetRef.current;
+        const active = document.activeElement;
+        if (!sheet || !active || !sheet.contains(active)) return;
+        const sheetRect = sheet.getBoundingClientRect();
+        const elRect = active.getBoundingClientRect();
+        const vpBottom = vv.offsetTop + vv.height;
+        // Сколько пикселей элемент выходит за нижнюю границу viewport
+        const overflow = elRect.bottom + 12 - vpBottom;
+        if (overflow > 0) {
+          sheet.scrollBy({ top: overflow, behavior: "smooth" });
+        }
+      });
+    };
+    vv.addEventListener("resize", onResize);
+    return () => { vv.removeEventListener("resize", onResize); if (raf) cancelAnimationFrame(raf); };
+  }, [sheetRef]);
 }
 
 // Блокируем скролл body пока шторка открыта
