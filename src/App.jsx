@@ -30,6 +30,28 @@ const IconClose = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="no
 const IconMinimize = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 8.5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>;
 const IconLink = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M6 8l2-2M5 9.5L3.5 11A2 2 0 111 8.5L2.5 7M9 5l1.5-1.5A2 2 0 1113 6L11.5 7.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 
+// ── Прогрессия: справочники (дублируют main.py по необходимости — как и
+// MEASUREMENT_FIELDS, это чисто визуальные подписи/дефолты, при правке
+// логики на бэкенде сюда лезть не нужно, они не участвуют в расчёте) ──────
+const ROLE_LABELS = { heavy: "Тяжёлая", light: "Лёгкая", medium: "Средняя", volume: "Объёмная" };
+const EXERCISE_TYPE_LABELS = {
+  main_compound: "Основное базовое",
+  accessory_compound: "Вспомогательное многосуставное",
+  isolation: "Изоляция",
+  isometric: "Изометрическое",
+  custom: "Произвольное",
+};
+const GOAL_LABELS = { strength: "Сила", hypertrophy: "Гипертрофия", strength_hypertrophy: "Сила + гипертрофия" };
+const VARYING_EX_TYPES = ["main_compound", "accessory_compound"];
+const REP_RANGE_DEFAULTS = {
+  main_compound:      { strength: [3,5],  hypertrophy: [6,10], strength_hypertrophy: [5,8]  },
+  accessory_compound: { strength: [5,8],  hypertrophy: [8,12], strength_hypertrophy: [6,10] },
+  isolation:          { strength: [8,12], hypertrophy: [10,15], strength_hypertrophy: [10,15] },
+  isometric:          { strength: [15,30],hypertrophy: [20,45], strength_hypertrophy: [20,45] },
+};
+const INCREMENT_PRESETS = [1, 2, 2.5, 5];
+const WEEKS_PRESETS = [4, 6, 8, 10, 12];
+
 const css = `
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;-webkit-font-smoothing:antialiased}
@@ -180,6 +202,36 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .sub-tabs{display:flex;border-bottom:1px solid #3A3A3A;margin-bottom:16px}
 .sub-tabs button{flex:1;padding:10px 4px;text-align:center;font-size:11px;font-weight:500;letter-spacing:.02em;text-transform:uppercase;color:#666;cursor:pointer;border-bottom:2px solid transparent;background:none;border-left:none;border-right:none;border-top:none;font-family:inherit}
 .sub-tabs button.active{color:#FFF;border-bottom-color:#FFF}
+.choice-grid{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.choice-btn{flex:1 1 auto;min-width:90px;border:1px solid #3A3A3A;background:#111;color:#CCC;padding:12px 10px;font-size:13px;font-family:inherit;cursor:pointer;text-align:center;transition:border-color .15s,color .15s}
+.choice-btn:active{border-color:#777}
+.choice-btn.active{border-color:#FFF;color:#FFF;background:#1A1A1A}
+.choice-big-btn{display:block;width:100%;text-align:left;border:1px solid #3A3A3A;background:#111;color:#FFF;padding:16px;margin-bottom:12px;cursor:pointer;font-family:inherit}
+.choice-big-btn:active{border-color:#777}
+.wizard-dots{display:flex;justify-content:center;gap:6px;margin-bottom:22px}
+.wizard-dot{width:6px;height:6px;background:#3A3A3A;flex-shrink:0}
+.wizard-dot.active{background:#FFF}
+.wizard-dot.done{background:#666}
+.role-tag{font-size:9px;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;flex-shrink:0;border:1px solid;white-space:nowrap}
+.role-heavy{color:#FF8A5B;border-color:#4A2E1E}
+.role-light{color:#5B9CF6;border-color:#2A3A4A}
+.role-medium{color:#E0C030;border-color:#4A4020}
+.role-volume{color:#B47CE0;border-color:#3A2A4A}
+.sess-row{display:flex;align-items:flex-start;gap:10px;border:1px solid #282828;background:#111;padding:10px 12px;margin-bottom:8px}
+.sess-row.done{border-color:#2E4A2E}
+.sess-row.skipped{opacity:.5}
+.sess-idx{font-size:11px;color:#585858;font-weight:600;flex-shrink:0;width:16px;padding-top:2px}
+.sess-body{flex:1;min-width:0}
+.sess-plan{font-size:13px;color:#CCC}
+.sess-fact{font-size:12px;color:#4CAF50;margin-top:2px}
+.sess-actions{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
+.mini-btn{background:none;border:1px solid #3A3A3A;color:#FFF;padding:6px 10px;font-size:12px;cursor:pointer;font-family:inherit;flex-shrink:0;white-space:nowrap}
+.mini-btn:active{border-color:#FFF}
+.mini-btn.ghost{border-color:#333;color:#888}
+.log-form{border:1px solid #3A3A3A;background:#0D0D0D;padding:12px;margin:0 0 10px}
+.prog-hint{margin:0 14px 10px;padding:10px 12px;font-size:12px;color:#CCC;border:1px solid #333;background:#141414;cursor:pointer;line-height:1.5}
+.prog-hint b{color:#FFF}
+.prog-lock-detail{font-size:13px;color:#6E6E6E;margin-top:14px;line-height:1.6;text-align:center}
 `;
 
 // ── Аварийное сохранение черновика в localStorage ────────────────────────
@@ -285,7 +337,7 @@ function ExNameInput({ value, onChange, allExNames }) {
 }
 
 // ── WorkoutSheet ──────────────────────────────────────────────────────────
-function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize }) {
+function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, progressions = [] }) {
   const isEdit = !!initial;
   const defName = draft?.name ?? (isEdit ? initial.name : `Тренировка ${workouts.length + 1}`);
   const [name, setName] = useState(defName);
@@ -353,6 +405,25 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
     return null;
   };
 
+  // Цель активной прогрессии по названию упражнения (без учёта регистра) — если
+  // есть совпадение и ближайшая невыполненная сессия, показываем подсказку и даём
+  // заполнить подходы одним тапом. Никак не влияет на тех, у кого прогрессий нет —
+  // progressions в этом случае просто пустой массив, getProg всегда возвращает null.
+  const getProg=(exName)=>{
+    if(!exName.trim())return null;
+    const lc=exName.trim().toLowerCase();
+    return progressions.find(p=>p.exercise_name_lc===lc && p.status==="active" && p.next_session) || null;
+  };
+  const fillFromProgression=(exId, session)=>{
+    setExercises(p=>p.map(e=>e.id===exId?{
+      ...e,
+      sets: Array.from({length:session.planned_sets},()=>({
+        weight:String(session.planned_weight), reps:String(session.planned_reps),
+        bilateral:false, weightL:"", repsL:"", weightR:"", repsR:"",
+      })),
+    }:e));
+  };
+
   const handleSave=async()=>{
     setSaving(true);
     const hasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
@@ -399,6 +470,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
         <div className="sec-lbl" style={{marginTop:20,marginBottom:12}}>Упражнения</div>
         {exercises.map((ex,ei)=>{
           const prev=getPrev(ex.name);
+          const prog=getProg(ex.name);
           return(
             <div key={ex.id} className="ex-block">
               <div className="ex-hd">
@@ -406,6 +478,12 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
                 <ExNameInput value={ex.name} onChange={v=>upEx(ex.id,"name",v)} allExNames={allExNames}/>
                 {exercises.length>1&&<button className="del-btn" onClick={()=>remEx(ex.id)}><IconTrash/></button>}
               </div>
+              {prog&&(
+                <div className="prog-hint" onClick={()=>fillFromProgression(ex.id,prog.next_session)}>
+                  {prog.next_session.role&&<span className={`role-tag role-${prog.next_session.role}`} style={{marginRight:6}}>{ROLE_LABELS[prog.next_session.role]}</span>}
+                  Цель прогрессии: <b>{prog.next_session.planned_weight} кг × {prog.next_session.planned_reps}{prog.rep_unit==="seconds"?" сек":""} × {prog.next_session.planned_sets} подх.</b> — нажми, чтобы заполнить
+                </div>
+              )}
               {prev&&(
                 <div className="prev">
                   Прошлый раз ({formatDate(prev.workout.date)}):&nbsp;
@@ -472,7 +550,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize })
 }
 
 // ── WorkoutsTab ───────────────────────────────────────────────────────────
-function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraft}) {
+function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraft, progressions=[], onProgressionsChange}) {
   const [showNew,setShowNew]=useState(false);
   const [editId,setEditId]=useState(null);
   const [detailId,setDetailId]=useState(null);
@@ -496,6 +574,41 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
 
   const draft = restoredDraft;
 
+  // Сверка сохранённых упражнений с активными прогрессиями по имени и
+  // автологирование факта. Осознанно только на СОЗДАНИИ тренировки, не на
+  // редактировании — иначе правка старой тренировки могла бы задвоить лог.
+  // Ничего не блокирует и не бросает ошибку наружу: если прогрессий нет
+  // (progressions=[]) — цикл просто не находит совпадений и не делает ничего.
+  const autoLogProgress = async (workoutId, savedExercises) => {
+    if(!progressions.length) return;
+    let touched = false;
+    for(const ex of savedExercises){
+      const lc = ex.name.trim().toLowerCase();
+      const prog = progressions.find(p=>p.exercise_name_lc===lc && p.status==="active" && p.next_session);
+      if(!prog) continue;
+      // билатеральные (Л/П) подходы прогрессией не учитываются — см. дизайн-документ
+      const workingSets = ex.sets.filter(s=>!s.bilateral && s.weight!=="" && s.reps!=="");
+      if(!workingSets.length) continue;
+      const plannedSets = prog.next_session.planned_sets;
+      const used = workingSets.slice(0, plannedSets);
+      const weight = Number(used[0].weight);
+      const reps = Math.min(...used.map(s=>Number(s.reps)));
+      const plannedW = prog.next_session.planned_weight;
+      if(plannedW && Math.abs(weight-plannedW)/plannedW > 0.2){
+        if(!window.confirm(`Вес по прогрессии «${prog.exercise_name}» сильно отличается от плана (план ${plannedW} кг, введено ${weight} кг). Всё равно засчитать в прогрессию?`))continue;
+      }
+      try{
+        await api.logProgressionSession(prog.id, prog.next_session.id, {
+          actual_weight: weight, actual_reps: reps, actual_sets: used.length, workout_id: workoutId,
+        });
+        touched = true;
+      }catch(e){ /* тихо игнорируем — сохранение тренировки не должно от этого зависеть */ }
+    }
+    if(touched && onProgressionsChange){
+      try{ const fresh = await api.getProgressions(); onProgressionsChange(fresh); }catch(e){}
+    }
+  };
+
   const handleCreate=async(w)=>{
     const res=await api.saveWorkout(w);
     const saved={...w,id:res.id};
@@ -503,6 +616,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
     setShowNew(false);
     setRestoredDraft(null);
     toast("Тренировка сохранена ✓");
+    autoLogProgress(res.id, saved.exercises);
   };
   const handleUpdate=async(w)=>{
     await api.saveWorkout(w);
@@ -610,7 +724,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
         ))}
       <hr className="divider"/>
       <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить тренировку</button>
-      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize} progressions={progressions}/>}
     </div>
   );
 
@@ -640,8 +754,8 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
             </div>
           </div>
         ))}
-      {showNew&&<WorkoutSheet workouts={workouts} initial={null} draft={draft} onSave={handleCreate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
-      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+      {showNew&&<WorkoutSheet workouts={workouts} initial={null} draft={draft} onSave={handleCreate} onClose={handleSheetClose} onMinimize={handleMinimize} progressions={progressions}/>}
+      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize} progressions={progressions}/>}
     </div>
   );
 }
@@ -778,6 +892,510 @@ function ExercisesTab({workouts, setWorkouts, toast}) {
             );
           })}
         </>}
+    </div>
+  );
+}
+
+// ── Прогрессия: общие мелкие компоненты ──────────────────────────────────
+function ChoiceGrid({ options, value, onChange }) {
+  return (
+    <div className="choice-grid">
+      {options.map(o => (
+        <button key={o.value} className={`choice-btn${value===o.value?" active":""}`} onClick={()=>onChange(o.value)}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function ProgWeightGraph({ sessions }) {
+  const pts = sessions
+    .filter(s=>s.status==="done"||s.status==="pending")
+    .map(s=>({ x:s.session_index, y:s.status==="done"?s.actual_weight:s.planned_weight, done:s.status==="done" }));
+  if (pts.length < 2) return null;
+  const w=280, h=84, pad=10;
+  const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+  const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+  const sx = x => maxX===minX ? w/2 : pad+(x-minX)/(maxX-minX)*(w-2*pad);
+  const sy = y => maxY===minY ? h/2 : h-pad-(y-minY)/(maxY-minY)*(h-2*pad);
+  const path = pts.map((p,i)=>`${i===0?"M":"L"}${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join(" ");
+  return (
+    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} style={{display:"block",margin:"4px 0 18px"}}>
+      <path d={path} fill="none" stroke="#FFF" strokeWidth="1.5"/>
+      {pts.map((p,i)=><circle key={i} cx={sx(p.x)} cy={sy(p.y)} r="2.5" fill={p.done?"#4CAF50":"#3A3A3A"}/>)}
+    </svg>
+  );
+}
+
+// ── ProgressionChoiceSheet: выбор произвольная/расчётная ──────────────────
+function ProgressionChoiceSheet({ onPick, onClose }) {
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="sheet">
+        <div className="handle"/>
+        <div className="sheet-top-actions"><button className="sheet-icon-btn" onClick={onClose}><IconClose/></button></div>
+        <div className="sheet-title-row"><span style={{fontSize:18,fontWeight:700}}>Новая прогрессия</span></div>
+        <button className="choice-big-btn" onClick={()=>onPick("calculated")}>
+          <div className="card-title">Расчётная</div>
+          <div className="card-sub">Мастер из нескольких шагов — приложение сама посчитает цели по неделям и подстроится под факт</div>
+        </button>
+        <button className="choice-big-btn" onClick={()=>onPick("manual")}>
+          <div className="card-title">Произвольная</div>
+          <div className="card-sub">Сам вводишь план по тренировкам — без каких-либо расчётов</div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── ManualProgressionSheet ──────────────────────────────────────────────
+function ManualProgressionSheet({ workouts, onSaved, onClose }) {
+  const [name,setName]=useState("");
+  const [rows,setRows]=useState([{weight:"",reps:"",sets:"3"}]);
+  const [saving,setSaving]=useState(false);
+  const allExNames=[...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))];
+
+  const addRow=()=>setRows(p=>[...p,{weight:"",reps:"",sets:"3"}]);
+  const upRow=(i,f,v)=>setRows(p=>p.map((r,ix)=>ix===i?{...r,[f]:v}:r));
+  const remRow=(i)=>setRows(p=>p.filter((_,ix)=>ix!==i));
+  const canSave = name.trim() && rows.every(r=>r.weight!==""&&r.reps!==""&&r.sets!=="");
+
+  const save=async()=>{
+    setSaving(true);
+    try{
+      await api.createProgression({
+        exercise_name: name.trim(), mode: "manual",
+        manual_sessions: rows.map(r=>({ weight:Number(r.weight), reps:Number(r.reps), sets:Number(r.sets) })),
+      });
+      onSaved();
+    }catch(e){ window.alert("Не удалось создать прогрессию: "+(e.message||"")); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="sheet">
+        <div className="handle"/>
+        <div className="sheet-top-actions"><button className="sheet-icon-btn" onClick={onClose}><IconClose/></button></div>
+        <div className="sheet-title-row"><span style={{fontSize:18,fontWeight:700}}>Произвольная прогрессия</span></div>
+        <div className="field">
+          <div className="lbl">Упражнение</div>
+          <div className="inp" style={{padding:0}}><ExNameInput value={name} onChange={setName} allExNames={allExNames}/></div>
+        </div>
+        <div className="sec-lbl">План по тренировкам</div>
+        {rows.map((r,i)=>(
+          <div key={i} className="ex-block" style={{padding:"12px 14px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <span className="card-sub" style={{margin:0}}>Тренировка {i+1}</span>
+              {rows.length>1&&<button className="del-btn" onClick={()=>remRow(i)}><IconTrash/></button>}
+            </div>
+            <div className="set-row">
+              <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={r.weight} onChange={e=>upRow(i,"weight",e.target.value)}/>
+              <span className="set-sep">×</span>
+              <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={r.reps} onChange={e=>upRow(i,"reps",e.target.value)}/>
+              <span className="set-sep">×</span>
+              <input className="set-inp" type="number" inputMode="numeric" placeholder="подх" value={r.sets} onChange={e=>upRow(i,"sets",e.target.value)}/>
+            </div>
+          </div>
+        ))}
+        <button className="add-ex" onClick={addRow}><IconPlus/>Добавить тренировку</button>
+        <button className="btn" disabled={!canSave||saving} onClick={save}>{saving?"Сохранение...":"Создать прогрессию"}</button>
+        <button className="btn ghost" onClick={onClose}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+// ── CalculatedProgressionWizard: мастер из 8 шагов + обзор ────────────────
+function CalculatedProgressionWizard({ workouts, onSaved, onClose }) {
+  const [step,setStep]=useState(1);
+  const [name,setName]=useState("");
+  const [exType,setExType]=useState(null);
+  const [goal,setGoal]=useState(null);
+  const [repLow,setRepLow]=useState("");
+  const [repHigh,setRepHigh]=useState("");
+  const [frequency,setFrequency]=useState(null);
+  const [setsCount,setSetsCount]=useState("3");
+  const [startWeight,setStartWeight]=useState("");
+  const [startReps,setStartReps]=useState("");
+  const [startRir,setStartRir]=useState("");
+  const [increment,setIncrement]=useState("2.5");
+  const [weeks,setWeeks]=useState("8");
+  const [saving,setSaving]=useState(false);
+
+  const allExNames=[...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))];
+  const isVarying = VARYING_EX_TYPES.includes(exType);
+  const isSeconds = exType==="isometric";
+
+  const pickGoal=(g)=>{
+    setGoal(g);
+    const def = REP_RANGE_DEFAULTS[exType]?.[g];
+    if(def){ setRepLow(String(def[0])); setRepHigh(String(def[1])); }
+  };
+
+  const STEP_COUNT = 8;
+  const canNext = {
+    1: name.trim()!=="",
+    2: exType!=null,
+    3: goal!=null && repLow!=="" && repHigh!=="" && Number(repHigh)>Number(repLow),
+    4: frequency!=null,
+    5: setsCount!==""&&Number(setsCount)>=1,
+    6: startWeight!==""&&startReps!=="",
+    7: increment!==""&&Number(increment)>0,
+    8: weeks!==""&&Number(weeks)>=1,
+  }[step];
+
+  const submit=async()=>{
+    setSaving(true);
+    try{
+      await api.createProgression({
+        exercise_name: name.trim(), mode: "calculated",
+        exercise_type: exType, goal, rep_unit: isSeconds?"seconds":"reps",
+        rep_range_low: Number(repLow), rep_range_high: Number(repHigh),
+        frequency, sets_count: Number(setsCount), increment: Number(increment),
+        start_weight: Number(startWeight), start_reps: Number(startReps),
+        start_rir: startRir!==""?Number(startRir):null,
+        weeks: Number(weeks),
+      });
+      onSaved();
+    }catch(e){ window.alert("Не удалось создать прогрессию: "+(e.message||"")); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="sheet">
+        <div className="handle"/>
+        <div className="sheet-top-actions"><button className="sheet-icon-btn" onClick={onClose}><IconClose/></button></div>
+        <div className="sheet-title-row"><span style={{fontSize:18,fontWeight:700}}>Расчётная прогрессия</span></div>
+        {step<=STEP_COUNT && (
+          <div className="wizard-dots">
+            {Array.from({length:STEP_COUNT}).map((_,i)=>(
+              <span key={i} className={`wizard-dot${i+1===step?" active":i+1<step?" done":""}`}/>
+            ))}
+          </div>
+        )}
+
+        {step===1 && (
+          <div className="field">
+            <div className="lbl">Упражнение</div>
+            <div className="inp" style={{padding:0}}><ExNameInput value={name} onChange={setName} allExNames={allExNames}/></div>
+          </div>
+        )}
+
+        {step===2 && (
+          <div className="field">
+            <div className="lbl">Тип упражнения</div>
+            <ChoiceGrid value={exType} onChange={setExType} options={[
+              {value:"main_compound",label:"Основное базовое"},
+              {value:"accessory_compound",label:"Вспомогательное многосуставное"},
+              {value:"isolation",label:"Изоляция"},
+              {value:"isometric",label:"Изометрическое"},
+              {value:"custom",label:"Произвольное"},
+            ]}/>
+            <div className="card-sub" style={{margin:0}}>
+              {isVarying
+                ? "У этого типа при частоте больше 1 раза в неделю тренировки будут разной тяжести (тяжёлая/лёгкая/средняя)."
+                : "Каждая тренировка будет одинаковой по смыслу и прогрессирует независимо от дня."}
+            </div>
+          </div>
+        )}
+
+        {step===3 && (
+          <>
+            <div className="field">
+              <div className="lbl">Цель</div>
+              <ChoiceGrid value={goal} onChange={pickGoal} options={[
+                {value:"strength",label:"Сила"},
+                {value:"hypertrophy",label:"Гипертрофия"},
+                {value:"strength_hypertrophy",label:"Сила + гипертрофия"},
+              ]}/>
+            </div>
+            <div className="m-grid field">
+              <div>
+                <div className="lbl">{isSeconds?"Секунд от":"Повторов от"}</div>
+                <input className="inp" type="number" inputMode="numeric" value={repLow} onChange={e=>setRepLow(e.target.value)}/>
+              </div>
+              <div>
+                <div className="lbl">{isSeconds?"Секунд до":"Повторов до"}</div>
+                <input className="inp" type="number" inputMode="numeric" value={repHigh} onChange={e=>setRepHigh(e.target.value)}/>
+              </div>
+            </div>
+            <div className="card-sub" style={{margin:"0 0 14px"}}>Диапазон подставлен по умолчанию — можно поправить.</div>
+          </>
+        )}
+
+        {step===4 && (
+          <div className="field">
+            <div className="lbl">Частота в неделю</div>
+            <ChoiceGrid value={frequency} onChange={setFrequency} options={[1,2,3,4].map(n=>({value:n,label:`${n} раз${n===1?"":"а"}`}))}/>
+            {isVarying && frequency>1 && (
+              <div className="card-sub" style={{margin:0}}>
+                Схема: {(({1:["heavy"],2:["heavy","light"],3:["heavy","light","medium"],4:["heavy","medium","light","volume"]})[frequency]).map(r=>ROLE_LABELS[r]).join(" → ")}
+              </div>
+            )}
+          </div>
+        )}
+
+        {step===5 && (
+          <div className="field">
+            <div className="lbl">Рабочих подходов</div>
+            <input className="inp" type="number" inputMode="numeric" value={setsCount} onChange={e=>setSetsCount(e.target.value)}/>
+          </div>
+        )}
+
+        {step===6 && (
+          <div className="m-grid field">
+            <div>
+              <div className="lbl">Рабочий вес, кг</div>
+              <input className="inp" type="number" inputMode="decimal" value={startWeight} onChange={e=>setStartWeight(e.target.value)}/>
+            </div>
+            <div>
+              <div className="lbl">{isSeconds?"Секунды":"Повторы"}</div>
+              <input className="inp" type="number" inputMode="numeric" value={startReps} onChange={e=>setStartReps(e.target.value)}/>
+            </div>
+            <div style={{gridColumn:"1 / -1"}}>
+              <div className="lbl">RIR (необязательно)</div>
+              <input className="inp" type="number" inputMode="decimal" value={startRir} onChange={e=>setStartRir(e.target.value)}/>
+            </div>
+          </div>
+        )}
+
+        {step===7 && (
+          <div className="field">
+            <div className="lbl">Шаг прибавки веса, кг</div>
+            <ChoiceGrid value={Number(increment)} onChange={v=>setIncrement(String(v))} options={INCREMENT_PRESETS.map(v=>({value:v,label:String(v)}))}/>
+            <input className="inp" type="number" inputMode="decimal" placeholder="или своё значение" value={increment} onChange={e=>setIncrement(e.target.value)}/>
+          </div>
+        )}
+
+        {step===8 && (
+          <div className="field">
+            <div className="lbl">Длительность цикла, недель</div>
+            <ChoiceGrid value={Number(weeks)} onChange={v=>setWeeks(String(v))} options={WEEKS_PRESETS.map(v=>({value:v,label:String(v)}))}/>
+            <input className="inp" type="number" inputMode="numeric" placeholder="или своё значение" value={weeks} onChange={e=>setWeeks(e.target.value)}/>
+          </div>
+        )}
+
+        {step===9 && (
+          <div className="field">
+            <div className="sec-lbl" style={{marginTop:0}}>Проверь перед созданием</div>
+            <div className="ex-block" style={{padding:"14px 16px"}}>
+              <div className="card-title" style={{marginBottom:8}}>{name}</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>{EXERCISE_TYPE_LABELS[exType]} · {GOAL_LABELS[goal]}</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>Диапазон: {repLow}–{repHigh}{isSeconds?" сек":" повт"} · {frequency} раз/нед · {setsCount} подх.</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>Старт: {startWeight} кг × {startReps}{isSeconds?" сек":""}{startRir?` @RIR${startRir}`:""}</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>Шаг {increment} кг · цикл {weeks} нед.</div>
+            </div>
+          </div>
+        )}
+
+        <div style={{display:"flex",gap:8,marginTop:20}}>
+          {step>1 && <button className="btn ghost" style={{marginBottom:0}} onClick={()=>setStep(s=>s-1)}>Назад</button>}
+          {step<9
+            ? <button className="btn" style={{marginBottom:0}} disabled={!canNext} onClick={()=>setStep(s=>s+1)}>Далее</button>
+            : <button className="btn" style={{marginBottom:0}} disabled={saving} onClick={submit}>{saving?"Создание...":"Создать прогрессию"}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── ProgressionDetail ──────────────────────────────────────────────────
+function ProgressionDetail({ id, onBack, onChanged, toast }) {
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [logging,setLogging]=useState(null);
+  const [logForm,setLogForm]=useState({weight:"",reps:"",sets:"",rir:""});
+  const [busy,setBusy]=useState(false);
+
+  const load=()=>{
+    setLoading(true);
+    api.getProgression(id).then(d=>{setData(d);setLoading(false);}).catch(()=>setLoading(false));
+  };
+  useEffect(load,[id]);
+
+  if(loading) return <div className="loading"><div className="spinner"/><div>Загрузка...</div></div>;
+  if(!data) return (
+    <div>
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button></div>
+      <div className="empty"><div className="empty-icon">⚠️</div>Не удалось загрузить прогрессию</div>
+    </div>
+  );
+
+  const nextPending = data.sessions.find(s=>s.status==="pending");
+  const anyDone = data.sessions.some(s=>s.status==="done");
+  const repUnit = data.rep_unit==="seconds"?" сек":"";
+
+  const startLog=(s)=>{
+    setLogging(s.id);
+    setLogForm({weight:String(s.planned_weight), reps:String(s.planned_reps), sets:String(s.planned_sets), rir:""});
+  };
+  const submitLog=async()=>{
+    setBusy(true);
+    try{
+      await api.logProgressionSession(data.id, logging, {
+        actual_weight:Number(logForm.weight), actual_reps:Number(logForm.reps),
+        actual_sets:Number(logForm.sets), actual_rir: logForm.rir!==""?Number(logForm.rir):null,
+      });
+      setLogging(null);
+      load(); onChanged();
+      toast("Записано ✓");
+    }catch(e){ window.alert("Не удалось сохранить: "+(e.message||"")); }
+    setBusy(false);
+  };
+  const doSkip=async(s)=>{
+    if(!window.confirm("Пропустить эту сессию без пересчёта весов?"))return;
+    await api.skipProgressionSession(data.id, s.id);
+    load(); onChanged();
+  };
+  const doUndo=async()=>{
+    if(!window.confirm("Отменить последнюю запись и пересчитать план?"))return;
+    setBusy(true);
+    try{ await api.undoLastProgressionLog(data.id); load(); onChanged(); toast("Отменено ✓"); }
+    catch(e){ window.alert("Не удалось отменить: "+(e.message||"")); }
+    setBusy(false);
+  };
+  const doArchive=async()=>{
+    if(!window.confirm("Архивировать прогрессию? Она пропадёт из списка активных."))return;
+    await api.archiveProgression(data.id);
+    onChanged(); onBack();
+  };
+  const doNewCycle=async()=>{
+    if(!window.confirm(`Начать новый цикл с текущей точки — ${data.current_weight} кг × ${data.current_reps}${repUnit}?`))return;
+    setBusy(true);
+    try{ await api.startNewProgressionCycle(data.id, {}); onChanged(); load(); toast("Новый цикл начат ✓"); }
+    catch(e){ window.alert("Не удалось начать новый цикл: "+(e.message||"")); }
+    setBusy(false);
+  };
+
+  return (
+    <div>
+      <div className="det-hd">
+        <button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button>
+        <span className="det-title">{data.exercise_name}</span>
+      </div>
+
+      <div className="card-sub" style={{marginBottom:4}}>
+        {data.mode==="manual" ? "Произвольная прогрессия" : (
+          <>{EXERCISE_TYPE_LABELS[data.exercise_type]} · {GOAL_LABELS[data.goal]} · диапазон {data.rep_range_low}–{data.rep_range_high}{repUnit} · шаг {data.increment} кг</>
+        )}
+      </div>
+      <div className="card-sub" style={{marginBottom:14}}>
+        Статус: {data.status==="active"?"активна":data.status==="completed"?"завершена":"в архиве"}
+        {" · "}{data.sessions.filter(s=>s.status==="done").length}/{data.sessions.length} тренировок
+      </div>
+
+      <ProgWeightGraph sessions={data.sessions}/>
+
+      <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
+        {anyDone && <button className="mini-btn ghost" disabled={busy} onClick={doUndo}>Отменить последний лог</button>}
+        {data.status==="completed" && data.mode==="calculated" && <button className="mini-btn" disabled={busy} onClick={doNewCycle}>Начать новый цикл</button>}
+        {data.status!=="archived" && <button className="mini-btn ghost" onClick={doArchive}>Архивировать</button>}
+      </div>
+
+      <div className="sec-lbl" style={{marginTop:0}}>План по сессиям</div>
+      {data.sessions.map(s=>(
+        <div key={s.id}>
+          <div className={`sess-row ${s.status}`}>
+            <span className="sess-idx">{s.session_index}</span>
+            <div className="sess-body">
+              {s.role && <span className={`role-tag role-${s.role}`} style={{marginBottom:5,display:"inline-block"}}>{ROLE_LABELS[s.role]}</span>}
+              <div className="sess-plan">План: {s.planned_weight} кг × {s.planned_reps}{repUnit} × {s.planned_sets} подх.</div>
+              {s.status==="done" && <div className="sess-fact">Факт: {s.actual_weight} кг × {s.actual_reps}{repUnit} × {s.actual_sets} подх.</div>}
+              {s.status==="skipped" && <div className="sess-fact" style={{color:"#888"}}>Пропущена</div>}
+            </div>
+            {s.status==="pending" && s.id===nextPending?.id && (
+              <div className="sess-actions">
+                <button className="mini-btn" onClick={()=>startLog(s)}>Записать</button>
+                <button className="mini-btn ghost" onClick={()=>doSkip(s)}>Пропустить</button>
+              </div>
+            )}
+          </div>
+          {logging===s.id && (
+            <div className="log-form">
+              <div className="m-grid">
+                <div className="field">
+                  <div className="lbl">Вес, кг</div>
+                  <input className="inp" type="number" inputMode="decimal" value={logForm.weight} onChange={e=>setLogForm(f=>({...f,weight:e.target.value}))}/>
+                </div>
+                <div className="field">
+                  <div className="lbl">{data.rep_unit==="seconds"?"Секунды":"Повторы"}</div>
+                  <input className="inp" type="number" inputMode="numeric" value={logForm.reps} onChange={e=>setLogForm(f=>({...f,reps:e.target.value}))}/>
+                </div>
+                <div className="field">
+                  <div className="lbl">Подходы</div>
+                  <input className="inp" type="number" inputMode="numeric" value={logForm.sets} onChange={e=>setLogForm(f=>({...f,sets:e.target.value}))}/>
+                </div>
+                <div className="field">
+                  <div className="lbl">RIR (необязательно)</div>
+                  <input className="inp" type="number" inputMode="decimal" value={logForm.rir} onChange={e=>setLogForm(f=>({...f,rir:e.target.value}))}/>
+                </div>
+              </div>
+              <button className="btn" disabled={busy} onClick={submitLog}>{busy?"Сохранение...":"Сохранить"}</button>
+              <button className="btn ghost" onClick={()=>setLogging(null)}>Отмена</button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── ProgressionTab ──────────────────────────────────────────────────────
+function ProgressionTab({ isPremium, premiumChecked, progressions, reloadProgressions, workouts, toast }) {
+  const [detailId,setDetailId]=useState(null);
+  const [showChoice,setShowChoice]=useState(false);
+  const [addMode,setAddMode]=useState(null);
+
+  if(!premiumChecked) return (
+    <div className="page"><div className="loading"><div className="spinner"/><div>Загрузка...</div></div></div>
+  );
+
+  if(!isPremium) return (
+    <div className="page">
+      <div className="empty" style={{paddingTop:56}}>
+        <div className="empty-icon">🔒</div>
+        Раздел «Прогрессия» доступен премиум-пользователям по подписке.
+        <div className="prog-lock-detail">
+          Здесь можно вести автоматическую прогрессию весов и повторов по упражнениям —
+          с расчётом целей на каждую тренировку и подсказками прямо в дневнике.
+        </div>
+      </div>
+    </div>
+  );
+
+  const onSaved=()=>{ setShowChoice(false); setAddMode(null); reloadProgressions(); };
+
+  return (
+    <div className="page">
+      {detailId!=null ? (
+        <ProgressionDetail id={detailId} onBack={()=>setDetailId(null)} onChanged={reloadProgressions} toast={toast}/>
+      ) : (
+        <>
+          <button className="btn" onClick={()=>setShowChoice(true)}><IconPlus/>Добавить прогрессию</button>
+          {progressions.length===0
+            ? <div className="empty"><div className="empty-icon">📈</div>Прогрессий пока нет.<br/>Добавь первую!</div>
+            : progressions.map(p=>(
+              <div key={p.id} className="card" onClick={()=>setDetailId(p.id)}>
+                <div style={{minWidth:0}}>
+                  <div className="card-title">{p.exercise_name}</div>
+                  <div className="card-sub">
+                    {p.mode==="manual"?"Произвольная":(EXERCISE_TYPE_LABELS[p.exercise_type]||"Расчётная")}
+                    {" · "}{p.sessions_done}/{p.sessions_total}
+                    {p.status==="completed"?" · завершена":""}
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+                  {p.next_session && <span className="tag">{p.next_session.planned_weight}×{p.next_session.planned_reps}</span>}
+                  <IconChevron/>
+                </div>
+              </div>
+            ))}
+        </>
+      )}
+      {showChoice && <ProgressionChoiceSheet onPick={(m)=>{setShowChoice(false);setAddMode(m);}} onClose={()=>setShowChoice(false)}/>}
+      {addMode==="manual" && <ManualProgressionSheet workouts={workouts} onSaved={onSaved} onClose={()=>setAddMode(null)}/>}
+      {addMode==="calculated" && <CalculatedProgressionWizard workouts={workouts} onSaved={onSaved} onClose={()=>setAddMode(null)}/>}
     </div>
   );
 }
@@ -1550,6 +2168,9 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
 // ── Root App ──────────────────────────────────────────────────────────────
 export default function App() {
   const [tab,setTab]=useState(0);
+  const [isPremium,setIsPremium]=useState(false);
+  const [premiumChecked,setPremiumChecked]=useState(false);
+  const [progressions,setProgressions]=useState([]);
   const [workouts,setWorkouts]=useState([]);
   const [measurements,setMeasurements]=useState([]);
   const [profiles,setProfiles]=useState([]);
@@ -1658,6 +2279,25 @@ export default function App() {
 
   useEffect(()=>{ initialLoad(); },[]);
 
+  const reloadProgressions=()=>{
+    api.getProgressions().then(setProgressions).catch(()=>{});
+  };
+
+  // Отдельный, ни на что не блокирующий эффект: у большинства пользователей
+  // премиума нет, это ожидаемый штатный ответ, а не ошибка — поэтому он не
+  // должен ни задерживать основную загрузку (workouts/measurements/profiles/
+  // friends), ни ронять её при сбое. Тренировки/Упражнения/Замеры/Профиль
+  // работают ровно как раньше независимо от результата этого запроса.
+  useEffect(()=>{
+    api.getMyPremium()
+      .then(r=>{
+        setIsPremium(!!r.is_premium);
+        if(r.is_premium) reloadProgressions();
+      })
+      .catch(()=>{})
+      .finally(()=>setPremiumChecked(true));
+  },[]);
+
   // После переключения/удаления активного профиля дневник меняется — оба
   // черновика относятся к старому профилю и больше не актуальны, сбрасываем их.
   const handleProfileSwitch=()=>{
@@ -1692,7 +2332,7 @@ export default function App() {
   // вкладке Тренировки (там он уже виден прямо в списке на своём месте).
   const showWorkoutBar = workoutDraft && !workoutDraft.restoring && tab!==0;
   // Аналогично для замера — прячем на вкладке Замеры.
-  const showMeasurementBar = measurementDraft && !measurementDraft.restoring && tab!==2;
+  const showMeasurementBar = measurementDraft && !measurementDraft.restoring && tab!==3;
   // Сколько плашек-черновиков сейчас реально показано внизу экрана — их высота
   // (позиционированы position:fixed) резервируется отступом снизу в контенте
   // вкладок (.page), чтобы плашки не перекрывали последние элементы списков.
@@ -1710,14 +2350,15 @@ export default function App() {
       <style>{css}</style>
       <div className="app-frame" style={draftBarsCount?{"--draft-bars-h":`${draftBarsCount*80}px`}:undefined}>
         <div className="tab-bar">
-          {["Тренировки","Упражнения","Замеры","Профиль"].map((t,i)=>(
+          {["Тренировки","Упражнения","Прогрессия","Замеры","Профиль"].map((t,i)=>(
             <button key={i} className={`tab${tab===i?" active":""}`} onClick={()=>setTab(i)}>{t}</button>
           ))}
         </div>
-        {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft}/>}
+        {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft} progressions={progressions} onProgressionsChange={setProgressions}/>}
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
-        {tab===2&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
-        {tab===3&&<ProfileTab profiles={profiles} setProfiles={setProfiles} friends={friends} setFriends={setFriends} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
+        {tab===2&&<ProgressionTab isPremium={isPremium} premiumChecked={premiumChecked} progressions={progressions} reloadProgressions={reloadProgressions} workouts={workouts} toast={showToast}/>}
+        {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
+        {tab===4&&<ProfileTab profiles={profiles} setProfiles={setProfiles} friends={friends} setFriends={setFriends} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
         {(showWorkoutBar||showMeasurementBar)&&(
           <div className="draft-bars-wrap">
             {showWorkoutBar&&(
@@ -1736,7 +2377,7 @@ export default function App() {
             {showMeasurementBar&&(
               <div className="draft-bar" onClick={()=>{
                 setMeasurementDraft(p=>({...p,restoring:true}));
-                setTab(2);
+                setTab(3);
               }}>
                 <span className="draft-bar-dot"/>
                 <div className="draft-bar-text">

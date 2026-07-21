@@ -106,4 +106,19 @@ export const api = {
   addFriendByCode:    (code)     => request("POST",   "/friends/add-by-code", { code }),
   removeFriend:       (id)       => request("DELETE", `/friends/${id}`),
   getFriendProfile:   (id)       => request("GET",    `/friends/${id}/profile`),
+
+  // ── Прогрессия (премиум) ───────────────────────────────────────────────────
+  getMyPremium:        ()             => request("GET",    "/me/premium"),
+  getProgressions:     ()             => request("GET",    "/progressions"),
+  createProgression:   (p)            => request("POST",   "/progressions", p),
+  getProgression:      (id)           => request("GET",    `/progressions/${id}`),
+  editProgression:     (id, patch)    => request("PUT",    `/progressions/${id}`, patch),
+  archiveProgression:  (id)           => request("POST",   `/progressions/${id}/archive`),
+  logProgressionSession: (progId, sessionId, actual) =>
+    request("POST", `/progressions/${progId}/sessions/${sessionId}/log`, actual),
+  skipProgressionSession: (progId, sessionId) =>
+    request("POST", `/progressions/${progId}/sessions/${sessionId}/skip`),
+  undoLastProgressionLog: (progId)    => request("POST",   `/progressions/${progId}/undo-last`),
+  startNewProgressionCycle: (progId, overrides = {}) =>
+    request("POST", `/progressions/${progId}/new-cycle`, overrides),
 };
