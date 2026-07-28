@@ -38,6 +38,7 @@ const IconBilateral = () => <svg width="13" height="13" viewBox="0 0 13 13" fill
 const IconClose = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
 const IconMinimize = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 8.5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>;
 const IconLink = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M6 8l2-2M5 9.5L3.5 11A2 2 0 111 8.5L2.5 7M9 5l1.5-1.5A2 2 0 1113 6L11.5 7.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IconChevronDown = () => <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M3 5.5l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 
 // ── Прогрессия: справочники (дублируют main.py по необходимости — как и
 // MEASUREMENT_FIELDS, это чисто визуальные подписи/дефолты, при правке
@@ -68,7 +69,7 @@ body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,
 .tab-bar{display:flex;border-bottom:1px solid #3A3A3A;background:#0A0A0A;position:sticky;top:0;z-index:10}
 .tab{flex:1 1 0;min-width:0;padding:12px 0;text-align:center;font-size:8.5px;font-weight:500;letter-spacing:-0.02em;text-transform:uppercase;color:#666;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;background:none;border-left:none;border-right:none;border-top:none;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tab.active{color:#FFF;border-bottom-color:#FFF}
-.page{flex:1;overflow-y:auto;padding:13px;padding-bottom:calc(32px + var(--draft-bars-h, 0px))}
+.page{flex:1;padding:13px;padding-bottom:calc(32px + var(--draft-bars-h, 0px))}
 .card{border:1px solid #3A3A3A;padding:14px 16px;margin-bottom:10px;cursor:pointer;background:#111;display:flex;align-items:center;justify-content:space-between;gap:12px;transition:border-color .15s}
 .card:active{border-color:#666}
 .card-title{font-weight:600;font-size:15px}
@@ -143,7 +144,7 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .add-set:active{border-color:#777;color:#AAA}
 .add-ex{background:none;border:1px dashed #444;color:#6E6E6E;width:100%;padding:12px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;margin-bottom:16px}
 .add-ex:active{border-color:#888;color:#CCC}
-.det-hd{display:flex;align-items:center;gap:10px;padding:16px 0;border-bottom:1px solid #282828;margin-bottom:16px}
+.det-hd{display:flex;align-items:center;gap:10px;padding:16px 0;border-bottom:1px solid #282828;margin-bottom:16px;position:sticky;top:37px;z-index:5;background:#0A0A0A}
 .back-btn{background:none;border:1px solid #3A3A3A;color:#FFF;padding:6px 10px;cursor:pointer;display:flex;align-items:center;gap:4px;font-size:13px;font-family:inherit}
 .back-btn:active{border-color:#FFF}
 .det-title{font-size:17px;font-weight:700;letter-spacing:-.02em;flex:1;min-width:0}
@@ -180,6 +181,8 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .spinner{width:24px;height:24px;border:2px solid #3A3A3A;border-top-color:#FFF;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 12px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;border:1px solid #444;color:#CCC;font-size:13px;padding:10px 18px;z-index:200;white-space:nowrap;animation:fadeIn .2s ease}
+.kbd-dismiss-btn{position:fixed;right:13px;z-index:60;background:#1A1A1A;border:1px solid #3A3A3A;color:#DDD;font-size:12px;font-weight:600;padding:9px 13px;font-family:inherit;cursor:pointer;display:flex;align-items:center;gap:6px;box-shadow:0 2px 10px rgba(0,0,0,.5)}
+.kbd-dismiss-btn:active{border-color:#FFF;color:#FFF}
 @keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 .draft-bars-wrap{position:fixed;bottom:0;left:0;right:0;max-width:390px;margin:0 auto;z-index:45;display:flex;flex-direction:column}
 .draft-bar{background:#1A1608;border-top:2px solid #E0A030;display:flex;align-items:center;gap:12px;padding:16px;cursor:pointer;animation:up .2s ease;box-shadow:0 -4px 20px rgba(0,0,0,.4)}
@@ -310,6 +313,67 @@ function useLockBodyScroll() {
 // ── Toast ──────────────────────────────────────────────────────────────────
 function Toast({ msg }) {
   return msg ? <div className="toast">{msg}</div> : null;
+}
+
+// ── Кнопка "Скрыть клавиатуру" ───────────────────────────────────────────
+// Не связана с useKeyboardScroll/dvh-логикой выше и не трогает её — отдельная,
+// полностью независимая фича. Идея: многие клавиатуры (особенно цифровые на
+// Android) не имеют своей кнопки закрытия, тапать в пустую область не всегда
+// удобно/очевидно. Отслеживаем фокус на любом текстовом/числовом поле через
+// document.addEventListener("focusin"/"focusout") — работает глобально, во
+// всех шторках и на всех вкладках без отдельного подключения к каждой форме.
+// Позиция кнопки считается через window.visualViewport (тот же приём, что и
+// в useKeyboardScroll), чтобы она всегда была видна над клавиатурой, а не
+// перекрывалась ею.
+const KBD_SKIP_TYPES = ["button","submit","checkbox","radio","range","color","file","image","reset"];
+function isTextField(el) {
+  if (!el) return false;
+  if (el.tagName === "TEXTAREA") return true;
+  if (el.tagName === "INPUT") return !KBD_SKIP_TYPES.includes((el.type||"text").toLowerCase());
+  return false;
+}
+function KeyboardDismissButton() {
+  const [visible, setVisible] = useState(false);
+  const [top, setTop] = useState(null);
+  const hideTimer = useRef(null);
+  const fieldRef = useRef(null);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const updatePos = () => { if (vv) setTop(vv.offsetTop + vv.height - 52); };
+    const onFocusIn = (e) => {
+      if (!isTextField(e.target)) return;
+      fieldRef.current = e.target;
+      if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
+      updatePos();
+      setVisible(true);
+    };
+    const onFocusOut = () => {
+      hideTimer.current = setTimeout(() => {
+        if (!isTextField(document.activeElement)) setVisible(false);
+      }, 80);
+    };
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+    if (vv) vv.addEventListener("resize", updatePos);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+      if (vv) vv.removeEventListener("resize", updatePos);
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, []);
+
+  if (!visible) return null;
+  const handleDismiss = () => {
+    fieldRef.current?.blur();
+    setVisible(false);
+  };
+  return (
+    <button className="kbd-dismiss-btn" style={top!=null?{top}:{bottom:16}} onClick={handleDismiss}>
+      <IconChevronDown/>Скрыть
+    </button>
+  );
 }
 
 // ── Autocomplete input ────────────────────────────────────────────────────
@@ -1777,6 +1841,14 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
             </div>
           ))}
         </div>
+        <div className="sec-lbl" style={{marginTop:16}}>Комментарий</div>
+        <textarea
+          className="ex-note-inp"
+          style={{marginTop:8,marginBottom:0,minHeight:64}}
+          placeholder="Самочувствие, обстоятельства замера и т.п...."
+          value={vals.comment||""}
+          onChange={e=>set("comment",e.target.value)}
+        />
         <div style={{height:20}}/>
         <button className="btn" onClick={handleSave} disabled={saving}>{saving?"Сохранение...":(isEdit?"Сохранить изменения":"Сохранить замер")}</button>
         <button className="btn ghost" onClick={handleCloseClick}>Отмена</button>
@@ -1936,6 +2008,12 @@ function MeasurementsTab({measurements,setMeasurements,toast,measurementDraft,se
               </div>
             );
           })}
+        {detail.comment&&(
+          <>
+            <div className="sec-lbl" style={{marginTop:16}}>Комментарий</div>
+            <p style={{color:"#AAA",fontSize:13,lineHeight:1.5,whiteSpace:"pre-wrap"}}>{detail.comment}</p>
+          </>
+        )}
         <hr className="divider"/>
         <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить замер</button>
         {editTarget&&<MeasurementSheet measurements={measurements} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
@@ -2169,7 +2247,7 @@ function FriendProfileView({friendId, onBack, onRemove}) {
                       <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between"}}>
                         <span>{m.name}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(m.date)}</span>
                       </div>
-                      {filled.length===0
+                      {filled.length===0&&!m.comment
                         ?<p style={{color:"#555",fontSize:12,marginTop:8}}>Ничего не заполнено</p>
                         :filled.map(f=>(
                           <div key={f.key} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"1px solid #1A1A1A"}}>
@@ -2177,6 +2255,7 @@ function FriendProfileView({friendId, onBack, onRemove}) {
                             <span style={{fontSize:13,fontWeight:600}}>{m[f.key]} <span style={{color:"#555",fontWeight:400,fontSize:11}}>{f.key==="weight"?"кг":"см"}</span></span>
                           </div>
                         ))}
+                      {m.comment&&<div className="ex-hist-comment">{m.comment}</div>}
                     </div>
                   );
                 })
@@ -2675,6 +2754,7 @@ export default function App() {
           </div>
         )}
         <Toast msg={toastMsg}/>
+        <KeyboardDismissButton/>
       </div>
     </>
   );
