@@ -6,9 +6,14 @@ const formatDate = (iso) => { try { const [y,m,d]=iso.split("-"); return `${d}.$
 
 // Есть ли в черновике тренировки/замера реально внесённые данные (не просто
 // пустая заготовка) — используется при предупреждении о переключении профиля.
-const workoutDraftHasData = (exercises=[]) => {
+// Учитываем не только внесённые подходы, но и вручную изменённое имя (сверяем
+// с defaultName — исходным сгенерированным именем на момент открытия шторки),
+// а также названия упражнений без подходов (например, сразу после применения
+// шаблона — подходы ещё не вписаны, но структура уже введена).
+const workoutDraftHasData = (exercises=[], name="", defaultName="") => {
   const hasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
-  return exercises.some(e=>e.sets?.some(hasData));
+  if((name||"").trim() && (name||"").trim()!==(defaultName||"").trim()) return true;
+  return exercises.some(e=>e.name?.trim()||e.sets?.some(hasData));
 };
 const measurementDraftHasData = (vals={}) => Object.values(vals).some(v=>v!==""&&v!=null);
 // Черновик создания прогрессии — и произвольной, и расчётной, единая проверка:
@@ -431,7 +436,12 @@ function ExNameInput({ value, onChange, allExNames }) {
 // ── WorkoutSheet ──────────────────────────────────────────────────────────
 function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, progressions = [], templates = [] }) {
   const isEdit = !!initial;
-  const defName = draft?.name ?? (isEdit ? initial.name : `Тренировка ${workouts.length + 1}`);
+  // trueDefaultName — исходное сгенерированное имя ("Тренировка N" / имя при
+  // редактировании), не зависящее от черновика. Используется только для проверки
+  // "имя было изменено вручную" — отдельно от defName (которым инициализируется
+  // сам инпут и который при восстановлении черновика равен уже введённому имени).
+  const trueDefaultName = isEdit ? initial.name : `Тренировка ${workouts.length + 1}`;
+  const defName = draft?.name ?? trueDefaultName;
   const [name, setName] = useState(defName);
   const [date, setDate] = useState(draft?.date ?? (isEdit ? initial.date : today()));
   const [exercises, setExercises] = useState(() => {
@@ -484,11 +494,13 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   const remSet=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.filter((_,i)=>i!==si)}:e));
   const toggleBilateral=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,bilateral:!s.bilateral}:s)}:e));
 
-  // Есть ли реально внесённые данные (используется только для решения — нужно
-  // ли спрашивать подтверждение при явном закрытии крестиком, не для сворачивания).
-  const hasRealData = () => exercises.some(e=>e.sets.some(setHasData));
+  // Есть ли реально внесённые данные — не только подходы с весом/повторами, но и
+  // вручную изменённое имя тренировки, и названия упражнений без подходов (так
+  // бывает сразу после применения шаблона — подходы ещё не вписаны, но структура
+  // уже введена пользователем и её жалко потерять по случайному крестику).
+  const hasRealData = () => name.trim()!==trueDefaultName.trim() || exercises.some(e=>e.name.trim()||e.sets.some(setHasData));
 
-  const buildDraft = () => ({ name, date, exercises, appliedTemplateName });
+  const buildDraft = () => ({ name, date, exercises, appliedTemplateName, defaultName: trueDefaultName });
 
   // Аварийное автосохранение: пишем в localStorage с небольшой задержкой после
   // каждого изменения (не на каждую букву). Сохраняем всегда, даже если пока
@@ -496,7 +508,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   // Переживает убийство процесса Telegram в фоне — не только сворачивание внутри приложения.
   useEffect(() => {
     const t = setTimeout(() => {
-      saveDraftToStorage("workout", { editId: isEdit?initial.id:null, name, date, exercises, appliedTemplateName });
+      saveDraftToStorage("workout", { editId: isEdit?initial.id:null, name, date, exercises, appliedTemplateName, defaultName: trueDefaultName });
     }, 600);
     return () => clearTimeout(t);
   }, [name, date, exercises, appliedTemplateName]);
@@ -766,6 +778,14 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
     })));
     setShowWorkoutPicker(false);
   };
+  // Возврат к выбору способа создания (с нуля / из тренировки) — например если
+  // выбрали не ту тренировку или передумали. Спрашиваем подтверждение только
+  // если уже успели что-то назвать вручную (иначе, сразу после выбора — просто откатываем).
+  const goBackToModePick = () => {
+    if (hasRealData() && !window.confirm("Вернуться к выбору? Текущий список упражнений будет очищён.")) return;
+    setExercises([]);
+    setShowWorkoutPicker(false);
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -800,7 +820,10 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
         <div className="sheet-title-row">
           <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName}/>
         </div>
-        <div className="sec-lbl" style={{marginTop:20,marginBottom:12}}>Упражнения</div>
+        <div className="sec-lbl" style={{marginTop:20,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span>Упражнения</span>
+          {exercises.length>0&&<button className="edit-badge" onClick={goBackToModePick}>← Назад к выбору</button>}
+        </div>
         {exercises.length===0 ? (
           <div className="tpl-mode-pick">
             <button className="btn" onClick={startFresh}><IconPlus/>Начать с нуля</button>
@@ -3055,7 +3078,7 @@ export default function App() {
   // Есть ли несохранённые данные в черновиках — если да, при переключении
   // профиля (или удалении активного) предупреждаем, что они будут потеряны.
   const hasUnsavedDrafts =
-    (!!workoutDraft && workoutDraftHasData(workoutDraft.exercises)) ||
+    (!!workoutDraft && workoutDraftHasData(workoutDraft.exercises, workoutDraft.name, workoutDraft.defaultName)) ||
     (!!measurementDraft && measurementDraftHasData(measurementDraft.vals)) ||
     (!!progressionDraft && progressionDraftHasData(progressionDraft)) ||
     (!!templateDraft && templateDraftHasData(templateDraft));
