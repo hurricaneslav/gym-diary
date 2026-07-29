@@ -20,6 +20,13 @@ const progressionDraftHasData = (d) => {
   if(d.mode==="calculated") return !!d.exType || !!d.goal;
   return false;
 };
+// Черновик шаблона тренировки — есть данные, если задано имя или хотя бы
+// у одного упражнения есть название.
+const templateDraftHasData = (d) => {
+  if(!d) return false;
+  if((d.name||"").trim()) return true;
+  return (d.exercises||[]).some(e=>e.name?.trim());
+};
 
 const MEASUREMENT_FIELDS = [
   {key:"weight",label:"Вес тела"},{key:"waist",label:"Талия"},{key:"chest",label:"Грудь"},
@@ -38,7 +45,10 @@ const IconBilateral = () => <svg width="13" height="13" viewBox="0 0 13 13" fill
 const IconClose = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
 const IconMinimize = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 8.5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>;
 const IconLink = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M6 8l2-2M5 9.5L3.5 11A2 2 0 111 8.5L2.5 7M9 5l1.5-1.5A2 2 0 1113 6L11.5 7.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
-const IconChevronDown = () => <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M3 5.5l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IconArrowUp = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 11V3M3.5 6.5L7 3l3.5 3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IconArrowDown = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 3v8M3.5 7.5L7 11l3.5-3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IconTemplate = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1.5" y="1.5" width="11" height="11" rx="1" stroke="currentColor" strokeWidth="1.2"/><path d="M4 5h6M4 7.5h6M4 10h3.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/></svg>;
+const IconKeyboard = () => <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><rect x="1.5" y="4.5" width="17" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M4.5 8h1M8 8h1M11.5 8h1M15 8h1M4.5 11h1M8 11h1M11.5 11h1M15 11h1M6.5 13.5h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>;
 
 // ── Прогрессия: справочники (дублируют main.py по необходимости — как и
 // MEASUREMENT_FIELDS, это чисто визуальные подписи/дефолты, при правке
@@ -115,6 +125,12 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .sug-item:last-child{border-bottom:none}
 .sug-item:active{background:#2A2A2A}
 .sug-match{color:#FFF;font-weight:600}
+.tpl-picker{border:1px solid #3A3A3A;background:#111;margin-top:8px;max-height:200px;overflow-y:auto}
+.tpl-picker-item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 13px;border-bottom:1px solid #242424;cursor:pointer;font-size:13px}
+.tpl-picker-item:last-child{border-bottom:none}
+.tpl-picker-item:active{background:#1A1A1A}
+.tpl-picker-empty{padding:13px;color:#666;font-size:12px;text-align:center}
+.tpl-mode-pick{display:flex;flex-direction:column;gap:10px}
 .prev{margin:0 14px;padding:8px 0 10px;font-size:12px;color:#6E6E6E;border-bottom:1px solid #242424;font-style:italic}
 .sets{padding:10px 14px;overflow:hidden;contain:layout}
 .set-row{display:flex;align-items:center;gap:5px;margin-bottom:8px;width:100%;min-width:0}
@@ -133,6 +149,7 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .btn-bi:active{color:#888}
 .btn-bi.active{color:#5B9CF6}
 .del-btn{background:none;border:none;color:#5C5C5C;cursor:pointer;padding:4px;display:flex;align-items:center;justify-content:center;line-height:1}
+.del-btn:disabled{opacity:.25;cursor:default}
 .del-btn:active{color:#FF4444}
 .ex-comment{padding:0 14px 12px;margin-top:2px}
 .ex-comment-inp{width:100%;background:none;border:none;border-top:1px solid #242424;color:#888;font-size:13px;padding:10px 0 0;outline:none;font-family:inherit;resize:none;line-height:1.5;min-height:36px}
@@ -256,6 +273,7 @@ const DRAFT_STORAGE_KEYS = {
   workout: "gym_diary_draft_workout_v1",
   measurement: "gym_diary_draft_measurement_v1",
   progression: "gym_diary_draft_progression_v1",
+  template: "gym_diary_draft_template_v1",
 };
 
 function saveDraftToStorage(type, draft) {
@@ -371,7 +389,7 @@ function KeyboardDismissButton() {
   };
   return (
     <button className="kbd-dismiss-btn" style={top!=null?{top}:{bottom:16}} onClick={handleDismiss}>
-      <IconChevronDown/>Скрыть
+      <IconKeyboard/>Скрыть
     </button>
   );
 }
@@ -411,7 +429,7 @@ function ExNameInput({ value, onChange, allExNames }) {
 }
 
 // ── WorkoutSheet ──────────────────────────────────────────────────────────
-function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, progressions = [] }) {
+function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, progressions = [], templates = [] }) {
   const isEdit = !!initial;
   const defName = draft?.name ?? (isEdit ? initial.name : `Тренировка ${workouts.length + 1}`);
   const [name, setName] = useState(defName);
@@ -423,6 +441,8 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
     }
     return [newEx()];
   });
+  const [appliedTemplateName, setAppliedTemplateName] = useState(draft?.appliedTemplateName ?? null);
+  const [showTplPicker, setShowTplPicker] = useState(false);
   const [saving, setSaving] = useState(false);
   const sheetRef = useRef(null);
   useKeyboardScroll(sheetRef);
@@ -444,7 +464,22 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
     if(ex && ex.sets.some(setHasData) && !window.confirm("Удалить упражнение? Внесённые подходы будут потеряны."))return;
     setExercises(p=>p.filter(e=>e.id!==id));
   };
-  const addSet=(id)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:[...e.sets,newSet()]}:e));
+  // Перемещение упражнения в списке — на 1 позицию за нажатие (вверх/вниз).
+  const moveEx=(id,dir)=>setExercises(p=>{
+    const i=p.findIndex(e=>e.id===id);
+    const j=i+dir;
+    if(i<0||j<0||j>=p.length)return p;
+    const copy=[...p];
+    [copy[i],copy[j]]=[copy[j],copy[i]];
+    return copy;
+  });
+  const addSet=(id)=>setExercises(p=>p.map(e=>{
+    if(e.id!==id)return e;
+    const last=e.sets[e.sets.length-1];
+    const s=newSet();
+    if(last&&last.bilateral)s.bilateral=true;
+    return {...e,sets:[...e.sets,s]};
+  }));
   const upSet=(id,si,f,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,[f]:v}:s)}:e));
   const remSet=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.filter((_,i)=>i!==si)}:e));
   const toggleBilateral=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,bilateral:!s.bilateral}:s)}:e));
@@ -453,7 +488,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   // ли спрашивать подтверждение при явном закрытии крестиком, не для сворачивания).
   const hasRealData = () => exercises.some(e=>e.sets.some(setHasData));
 
-  const buildDraft = () => ({ name, date, exercises });
+  const buildDraft = () => ({ name, date, exercises, appliedTemplateName });
 
   // Аварийное автосохранение: пишем в localStorage с небольшой задержкой после
   // каждого изменения (не на каждую букву). Сохраняем всегда, даже если пока
@@ -461,10 +496,34 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   // Переживает убийство процесса Telegram в фоне — не только сворачивание внутри приложения.
   useEffect(() => {
     const t = setTimeout(() => {
-      saveDraftToStorage("workout", { editId: isEdit?initial.id:null, name, date, exercises });
+      saveDraftToStorage("workout", { editId: isEdit?initial.id:null, name, date, exercises, appliedTemplateName });
     }, 600);
     return () => clearTimeout(t);
-  }, [name, date, exercises]);
+  }, [name, date, exercises, appliedTemplateName]);
+
+  // Применить шаблон: заменяет список упражнений на структуру из шаблона
+  // (только названия + количество подходов, без веса/повторов — их вписываем
+  // уже по факту). Название тренировки помечается именем шаблона в скобках.
+  // Если уже применяли другой шаблон — его пометка в названии заменяется, а не копится.
+  const applyTemplate = (t) => {
+    if(hasRealData() && !window.confirm(`Заменить упражнения на шаблон «${t.name}»? Внесённые подходы будут потеряны.`)) return;
+    setExercises(t.exercises.map(te=>({
+      id: Date.now()+Math.random(),
+      name: te.name,
+      sets: Array.from({length: Math.max(1, te.sets_count||1)}, ()=>newSet()),
+      comment: "",
+    })));
+    setName(prev=>{
+      let base = prev;
+      if(appliedTemplateName){
+        const suffix = ` (${appliedTemplateName})`;
+        if(base.endsWith(suffix)) base = base.slice(0, -suffix.length);
+      }
+      return `${base} (${t.name})`;
+    });
+    setAppliedTemplateName(t.name);
+    setShowTplPicker(false);
+  };
 
   const getPrev=(exName)=>{
     if(!exName.trim())return null;
@@ -541,6 +600,21 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
           <div className="lbl">Дата</div>
           <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)}/>
         </div>
+        <div style={{marginTop:14}}>
+          <button className="btn ghost" onClick={()=>setShowTplPicker(v=>!v)}><IconTemplate/>Выбрать из шаблона</button>
+          {showTplPicker&&(
+            <div className="tpl-picker">
+              {templates.length===0
+                ? <div className="tpl-picker-empty">Шаблонов пока нет. Создайте их в разделе «Шаблоны тренировок».</div>
+                : templates.map(t=>(
+                  <div key={t.id} className="tpl-picker-item" onClick={()=>applyTemplate(t)}>
+                    <span>{t.name}</span>
+                    <span style={{color:"#666",fontSize:11,flexShrink:0}}>{t.exercises.length} упр.</span>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
         <div className="sec-lbl" style={{marginTop:20,marginBottom:12}}>Упражнения</div>
         {exercises.map((ex,ei)=>{
           const prev=getPrev(ex.name);
@@ -550,6 +624,8 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
               <div className="ex-hd">
                 <span className="ex-num">{ei+1}</span>
                 <ExNameInput value={ex.name} onChange={v=>upEx(ex.id,"name",v)} allExNames={allExNames}/>
+                <button className="del-btn" disabled={ei===0} onClick={()=>moveEx(ex.id,-1)} title="Переместить выше"><IconArrowUp/></button>
+                <button className="del-btn" disabled={ei===exercises.length-1} onClick={()=>moveEx(ex.id,1)} title="Переместить ниже"><IconArrowDown/></button>
                 {exercises.length>1&&<button className="del-btn" onClick={()=>remEx(ex.id)}><IconTrash/></button>}
               </div>
               {prog&&(
@@ -627,14 +703,281 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   );
 }
 
+// ── TemplateSheet ─────────────────────────────────────────────────────────
+// Шаблон хранит только структуру: название упражнения + количество подходов
+// (без веса/повторов — их вписывают уже во время самой тренировки). Можно
+// начать с пустого списка и вбить всё вручную, либо скопировать структуру
+// из уже проведённой тренировки. Черновик/сворачивание — та же система,
+// что и у тренировок и замеров.
+function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, onMinimize }) {
+  const isEdit = !!initial;
+  const defName = draft?.name ?? (isEdit ? initial.name : `Шаблон ${templates.length + 1}`);
+  const [name, setName] = useState(defName);
+  const [exercises, setExercises] = useState(() => {
+    if (draft?.exercises) return draft.exercises;
+    if (isEdit) {
+      return initial.exercises.map(e=>({
+        id: Date.now()+Math.random(),
+        name: e.name,
+        sets: Array.from({length: Math.max(1, e.sets_count||1)}, ()=>({id:Date.now()+Math.random()})),
+      }));
+    }
+    return [];
+  });
+  const [showWorkoutPicker, setShowWorkoutPicker] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const sheetRef = useRef(null);
+  useKeyboardScroll(sheetRef);
+  useLockBodyScroll();
+
+  const allExNames = [...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))];
+
+  function newExRow(){ return { id: Date.now()+Math.random(), name:"", sets:[{id:Date.now()+Math.random()}] }; }
+  const addEx=()=>setExercises(p=>[...p,newExRow()]);
+  const upEx=(id,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,name:v}:e));
+  const remEx=(id)=>setExercises(p=>p.filter(e=>e.id!==id));
+  const moveEx=(id,dir)=>setExercises(p=>{
+    const i=p.findIndex(e=>e.id===id);
+    const j=i+dir;
+    if(i<0||j<0||j>=p.length)return p;
+    const copy=[...p];
+    [copy[i],copy[j]]=[copy[j],copy[i]];
+    return copy;
+  });
+  const addSet=(exId)=>setExercises(p=>p.map(e=>e.id===exId?{...e,sets:[...e.sets,{id:Date.now()+Math.random()}]}:e));
+  const remSet=(exId,setId)=>setExercises(p=>p.map(e=>e.id===exId?{...e,sets:e.sets.filter(s=>s.id!==setId)}:e));
+
+  const hasRealData = () => exercises.some(e=>e.name.trim());
+  const buildDraft = () => ({ name, exercises });
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      saveDraftToStorage("template", { editId: isEdit?initial.id:null, name, exercises });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [name, exercises]);
+
+  const startFresh = () => setExercises([newExRow()]);
+  const applyFromWorkout = (w) => {
+    setExercises(w.exercises.filter(e=>e.name.trim()).map(e=>({
+      id: Date.now()+Math.random(),
+      name: e.name,
+      sets: Array.from({length: Math.max(1, e.sets.length)}, ()=>({id:Date.now()+Math.random()})),
+    })));
+    setShowWorkoutPicker(false);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const filtered = exercises.filter(e=>e.name.trim()).map(e=>({name:e.name.trim(), sets_count:Math.max(1,e.sets.length)}));
+    const payload = { id: isEdit?initial.id:-1, name: name.trim()||defName, exercises: filtered };
+    const res = await onSave(payload);
+    clearDraftFromStorage("template");
+    setSaving(false);
+    return res;
+  };
+
+  const handleMinimize = () => {
+    const d = buildDraft();
+    saveDraftToStorage("template", { editId: isEdit?initial.id:null, ...d });
+    onMinimize(d);
+  };
+
+  const handleCloseClick = () => {
+    if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+    clearDraftFromStorage("template");
+    onClose();
+  };
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&handleMinimize()}>
+      <div className="sheet" ref={sheetRef}>
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-minimize-btn" onClick={handleMinimize} title="Свернуть"><IconMinimize/>Свернуть</button>
+          <button className="sheet-icon-btn" onClick={handleCloseClick} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName}/>
+        </div>
+        <div className="sec-lbl" style={{marginTop:20,marginBottom:12}}>Упражнения</div>
+        {exercises.length===0 ? (
+          <div className="tpl-mode-pick">
+            <button className="btn" onClick={startFresh}><IconPlus/>Начать с нуля</button>
+            <button className="btn ghost" onClick={()=>setShowWorkoutPicker(v=>!v)}><IconTemplate/>Скопировать из тренировки</button>
+            {showWorkoutPicker&&(
+              <div className="tpl-picker">
+                {workouts.length===0
+                  ? <div className="tpl-picker-empty">Тренировок пока нет.</div>
+                  : [...workouts].sort((a,b)=>b.date.localeCompare(a.date)).map(w=>(
+                    <div key={w.id} className="tpl-picker-item" onClick={()=>applyFromWorkout(w)}>
+                      <span>{w.name}</span>
+                      <span style={{color:"#666",fontSize:11,flexShrink:0}}>{formatDate(w.date)}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {exercises.map((ex,ei)=>(
+              <div key={ex.id} className="ex-block">
+                <div className="ex-hd">
+                  <span className="ex-num">{ei+1}</span>
+                  <ExNameInput value={ex.name} onChange={v=>upEx(ex.id,v)} allExNames={allExNames}/>
+                  <button className="del-btn" disabled={ei===0} onClick={()=>moveEx(ex.id,-1)} title="Переместить выше"><IconArrowUp/></button>
+                  <button className="del-btn" disabled={ei===exercises.length-1} onClick={()=>moveEx(ex.id,1)} title="Переместить ниже"><IconArrowDown/></button>
+                  <button className="del-btn" onClick={()=>remEx(ex.id)} title="Удалить"><IconTrash/></button>
+                </div>
+                <div className="sets">
+                  {ex.sets.map((s,si)=>(
+                    <div key={s.id} className="set-row">
+                      <span className="set-n">{si+1}</span>
+                      <span style={{flex:1,color:"#888",fontSize:13}}>Подход {si+1}</span>
+                      {ex.sets.length>1&&<button className="del-btn" onClick={()=>remSet(ex.id,s.id)}><IconTrash/></button>}
+                    </div>
+                  ))}
+                  <button className="add-set" onClick={()=>addSet(ex.id)}><IconPlus/>подход</button>
+                </div>
+              </div>
+            ))}
+            <button className="add-ex" onClick={addEx}><IconPlus/>Добавить упражнение</button>
+          </>
+        )}
+        <button className="btn" style={{marginTop:16}} onClick={handleSave} disabled={saving||exercises.every(e=>!e.name.trim())}>{saving?"Сохранение...":(isEdit?"Сохранить изменения":"Сохранить шаблон")}</button>
+        <button className="btn ghost" onClick={handleCloseClick}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+// ── TemplatesView ─────────────────────────────────────────────────────────
+function TemplatesView({templates, setTemplates, workouts, toast, templateDraft, setTemplateDraft, onBack}) {
+  const [showNew,setShowNew]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [detailId,setDetailId]=useState(null);
+  const [restoredDraft,setRestoredDraft]=useState(null);
+
+  const detail=detailId!=null?templates.find(t=>t.id===detailId):null;
+  const editTarget=editId!=null?templates.find(t=>t.id===editId):null;
+
+  useEffect(()=>{
+    if(templateDraft?.restoring){
+      setRestoredDraft(templateDraft);
+      if(templateDraft.editId!=null){ setEditId(templateDraft.editId); setDetailId(null); }
+      else { setShowNew(true); }
+      setTemplateDraft(null);
+    }
+  },[templateDraft]);
+
+  const draft = restoredDraft;
+
+  const handleCreate=async(t)=>{
+    const res=await api.saveTemplate(t);
+    const saved={...t,id:res.id};
+    setTemplates(p=>[saved,...p]);
+    setShowNew(false);
+    setRestoredDraft(null);
+    toast("Шаблон сохранён ✓");
+  };
+  const handleUpdate=async(t)=>{
+    await api.saveTemplate(t);
+    setTemplates(p=>p.map(x=>x.id===t.id?t:x));
+    setEditId(null); setDetailId(t.id);
+    setRestoredDraft(null);
+    toast("Изменения сохранены ✓");
+  };
+  const handleDelete=async(id)=>{
+    if(!window.confirm("Удалить шаблон?"))return;
+    await api.deleteTemplate(id);
+    setTemplates(p=>p.filter(t=>t.id!==id));
+    setDetailId(null);
+    toast("Удалено");
+  };
+
+  const handleMinimize=(draftData)=>{
+    setShowNew(false);
+    setEditId(null);
+    setRestoredDraft(null);
+    setTemplateDraft({editId: editTarget?.id ?? null, ...draftData});
+  };
+  const handleSheetClose=()=>{
+    setShowNew(false);
+    setEditId(null);
+    setRestoredDraft(null);
+  };
+
+  const guardOpen=(openFn)=>{
+    if(templateDraft && !templateDraft.restoring){
+      window.alert("Сначала заверши текущий шаблон — он ещё не сохранён. Нажми на плашку внизу, чтобы продолжить.");
+      return;
+    }
+    openFn();
+  };
+
+  if(detail) return (
+    <div className="page">
+      <div className="det-hd">
+        <button className="back-btn" onClick={()=>setDetailId(null)}><IconChevron dir="left"/>Назад</button>
+        <span className="det-title">{detail.name}</span>
+      </div>
+      <div className="sec-lbl">Упражнения — {detail.exercises.length}</div>
+      {detail.exercises.length===0
+        ?<div className="empty"><div className="empty-icon">📋</div>Упражнения не заданы</div>
+        :detail.exercises.map((e,i)=>(
+          <div key={i} className="w-ex">
+            <div className="w-ex-name">{e.name}</div>
+            <div style={{color:"#888",fontSize:12}}>{e.sets_count} подход{e.sets_count===1?"":(e.sets_count>=2&&e.sets_count<=4?"а":"ов")}</div>
+          </div>
+        ))}
+      <div style={{marginTop:16}}>
+        <button className="edit-badge" onClick={()=>guardOpen(()=>{setDetailId(null);setEditId(detail.id);})}>✎ Редактировать</button>
+      </div>
+      <hr className="divider"/>
+      <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить шаблон</button>
+      {editTarget&&<TemplateSheet templates={templates} workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+    </div>
+  );
+
+  return (
+    <div className="page">
+      <div className="det-hd">
+        <button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button>
+        <span className="det-title">Шаблоны тренировок</span>
+      </div>
+      <button className="btn" onClick={()=>guardOpen(()=>setShowNew(true))}><IconPlus/>Создать шаблон</button>
+      {templates.length===0
+        ?<div className="empty"><div className="empty-icon">📋</div>Шаблонов пока нет.<br/>Создай первый!</div>
+        :templates.map(t=>(
+          <div key={t.id} className="card" onClick={()=>setDetailId(t.id)}>
+            <div style={{minWidth:0}}>
+              <div className="card-title">{t.name}</div>
+              <div className="card-sub">{t.exercises.length} упр.</div>
+            </div>
+            <IconChevron/>
+          </div>
+        ))}
+      {showNew&&<TemplateSheet templates={templates} workouts={workouts} initial={null} draft={draft} onSave={handleCreate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+      {editTarget&&<TemplateSheet templates={templates} workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+    </div>
+  );
+}
+
 // ── WorkoutsTab ───────────────────────────────────────────────────────────
-function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraft, progressions=[], onProgressionsChange}) {
+function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraft, progressions=[], onProgressionsChange, templates=[], setTemplates, templateDraft, setTemplateDraft}) {
   const [showNew,setShowNew]=useState(false);
   const [editId,setEditId]=useState(null);
   const [detailId,setDetailId]=useState(null);
   const [renamingId,setRenamingId]=useState(null);
   const [renameVal,setRenameVal]=useState("");
   const [restoredDraft,setRestoredDraft]=useState(null); // черновик, восстановленный в текущей открытой шторке
+  const [showTemplates,setShowTemplates]=useState(false);
+
+  // Если плашка-черновик шаблона восстанавливается кликом снаружи (пока мы,
+  // допустим, смотрели список тренировок) — переходим в раздел шаблонов сами.
+  useEffect(()=>{
+    if(templateDraft?.restoring) setShowTemplates(true);
+  },[templateDraft]);
 
   const detail=detailId!=null?workouts.find(w=>w.id===detailId):null;
   const editTarget=editId!=null?workouts.find(w=>w.id===editId):null;
@@ -765,6 +1108,14 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
     }
   }
 
+  if(showTemplates) return (
+    <TemplatesView
+      templates={templates} setTemplates={setTemplates} workouts={workouts} toast={toast}
+      templateDraft={templateDraft} setTemplateDraft={setTemplateDraft}
+      onBack={()=>setShowTemplates(false)}
+    />
+  );
+
   if(detail) return (
     <div className="page">
       <div className="det-hd">
@@ -805,12 +1156,13 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
         ))}
       <hr className="divider"/>
       <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить тренировку</button>
-      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize} progressions={progressions}/>}
+      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize} progressions={progressions} templates={templates}/>}
     </div>
   );
 
   return (
     <div className="page">
+      <button className="btn ghost" style={{marginBottom:10}} onClick={()=>setShowTemplates(true)}><IconTemplate/>Шаблоны тренировок</button>
       <button className="btn" onClick={()=>guardOpen(()=>setShowNew(true))}><IconPlus/>Новая тренировка</button>
       {workouts.length===0 && !listDraft
         ?<div className="empty"><div className="empty-icon">🏋️</div>Тренировок пока нет.<br/>Начни первую!</div>
@@ -835,8 +1187,8 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
             </div>
           </div>
         ))}
-      {showNew&&<WorkoutSheet workouts={workouts} initial={null} draft={draft} onSave={handleCreate} onClose={handleSheetClose} onMinimize={handleMinimize} progressions={progressions}/>}
-      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize} progressions={progressions}/>}
+      {showNew&&<WorkoutSheet workouts={workouts} initial={null} draft={draft} onSave={handleCreate} onClose={handleSheetClose} onMinimize={handleMinimize} progressions={progressions} templates={templates}/>}
+      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize} progressions={progressions} templates={templates}/>}
     </div>
   );
 }
@@ -2517,6 +2869,7 @@ export default function App() {
   const [progressions,setProgressions]=useState([]);
   const [workouts,setWorkouts]=useState([]);
   const [measurements,setMeasurements]=useState([]);
+  const [templates,setTemplates]=useState([]);
   const [profiles,setProfiles]=useState([]);
   const [friends,setFriends]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -2525,6 +2878,7 @@ export default function App() {
   const [workoutDraft,setWorkoutDraft]=useState(null); // {editId, name, date, exercises, restoring}
   const [measurementDraft,setMeasurementDraft]=useState(null); // {editId, name, date, vals, restoring}
   const [progressionDraft,setProgressionDraft]=useState(null); // {mode, ...поля мастера/формы, restoring}
+  const [templateDraft,setTemplateDraft]=useState(null); // {editId, name, exercises, restoring}
 
   const showToast=(msg)=>{
     setToastMsg(msg);
@@ -2549,10 +2903,11 @@ export default function App() {
   // профиля, когда список профилей и друзей не изменился, менять их незачем.
   const reloadDiaryOnly=()=>{
     setLoading(true);
-    Promise.all([api.getWorkouts(), api.getMeasurements()])
-      .then(([w,m])=>{
+    Promise.all([api.getWorkouts(), api.getMeasurements(), api.getTemplates()])
+      .then(([w,m,tpl])=>{
         setWorkouts([...w].reverse());
         setMeasurements([...m].reverse());
+        setTemplates(tpl);
         setLoading(false);
       })
       .catch(()=>{
@@ -2597,9 +2952,10 @@ export default function App() {
     setError(null);
     setLoading(true);
     try{
-      const [w,m,p,f] = await Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends()]);
+      const [w,m,p,f,tpl] = await Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends(), api.getTemplates()]);
       setWorkouts([...w].reverse()); // сервер даёт DESC, нам нужен ASC для логики
       setMeasurements([...m].reverse());
+      setTemplates(tpl); // шаблоны сортировкой по дате не завязаны — оставляем как отдаёт сервер (новые сверху)
       setProfiles(p);
       setFriends(f);
       setLoading(false);
@@ -2616,6 +2972,8 @@ export default function App() {
       if(storedMeasurement) setMeasurementDraft({...storedMeasurement, restoring:false});
       const storedProgression = loadDraftFromStorage("progression");
       if(storedProgression) setProgressionDraft({...storedProgression, restoring:false});
+      const storedTemplate = loadDraftFromStorage("template");
+      if(storedTemplate) setTemplateDraft({...storedTemplate, restoring:false});
     }catch(e){
       // Бэкенд на Railway может "просыпаться" несколько секунд после простоя —
       // api.js уже делает несколько попыток сам, это резервный случай на будущее.
@@ -2650,6 +3008,7 @@ export default function App() {
   const handleProfileSwitch=()=>{
     setWorkoutDraft(null);
     setMeasurementDraft(null);
+    setTemplateDraft(null);
     reloadDiaryOnly();
   };
 
@@ -2683,18 +3042,23 @@ export default function App() {
   // Аналогично для прогрессии — прячем на вкладке Прогрессия, и только для
   // премиум-пользователей (если премиум отключили, старый черновик не всплывает).
   const showProgressionBar = isPremium && progressionDraft && !progressionDraft.restoring && tab!==2;
+  // У шаблонов нет отдельной верхнеуровневой вкладки (раздел вложен внутрь
+  // "Тренировки"), поэтому в отличие от остальных плашка не прячется по вкладке —
+  // это единственный способ вернуться к незавершённому шаблону откуда угодно.
+  const showTemplateBar = templateDraft && !templateDraft.restoring;
   // Сколько плашек-черновиков сейчас реально показано внизу экрана — их высота
   // (позиционированы position:fixed) резервируется отступом снизу в контенте
   // вкладок (.page), чтобы плашки не перекрывали последние элементы списков.
   // 80px — высота одной плашки с запасом (padding+контент+бордер, см. .draft-bar).
-  const draftBarsCount = (showWorkoutBar?1:0) + (showMeasurementBar?1:0) + (showProgressionBar?1:0);
+  const draftBarsCount = (showWorkoutBar?1:0) + (showMeasurementBar?1:0) + (showProgressionBar?1:0) + (showTemplateBar?1:0);
 
   // Есть ли несохранённые данные в черновиках — если да, при переключении
   // профиля (или удалении активного) предупреждаем, что они будут потеряны.
   const hasUnsavedDrafts =
     (!!workoutDraft && workoutDraftHasData(workoutDraft.exercises)) ||
     (!!measurementDraft && measurementDraftHasData(measurementDraft.vals)) ||
-    (!!progressionDraft && progressionDraftHasData(progressionDraft));
+    (!!progressionDraft && progressionDraftHasData(progressionDraft)) ||
+    (!!templateDraft && templateDraftHasData(templateDraft));
 
   return(
     <>
@@ -2705,12 +3069,12 @@ export default function App() {
             <button key={i} className={`tab${tab===i?" active":""}`} onClick={()=>setTab(i)}>{t}</button>
           ))}
         </div>
-        {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft} progressions={progressions} onProgressionsChange={setProgressions}/>}
+        {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft} progressions={progressions} onProgressionsChange={setProgressions} templates={templates} setTemplates={setTemplates} templateDraft={templateDraft} setTemplateDraft={setTemplateDraft}/>}
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
         {tab===2&&<ProgressionTab isPremium={isPremium} premiumChecked={premiumChecked} progressions={progressions} reloadProgressions={reloadProgressions} workouts={workouts} toast={showToast} progressionDraft={progressionDraft} setProgressionDraft={setProgressionDraft}/>}
         {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
         {tab===4&&<ProfileTab profiles={profiles} setProfiles={setProfiles} friends={friends} setFriends={setFriends} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
-        {(showWorkoutBar||showMeasurementBar||showProgressionBar)&&(
+        {(showWorkoutBar||showMeasurementBar||showProgressionBar||showTemplateBar)&&(
           <div className="draft-bars-wrap">
             {showWorkoutBar&&(
               <div className="draft-bar" onClick={()=>{
@@ -2749,6 +3113,19 @@ export default function App() {
                   <div className="draft-bar-sub">Не сохранена · нажми чтобы продолжить</div>
                 </div>
                 <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage("progression");setProgressionDraft(null);}}}><IconClose/></button>
+              </div>
+            )}
+            {showTemplateBar&&(
+              <div className="draft-bar" onClick={()=>{
+                setTemplateDraft(p=>({...p,restoring:true}));
+                setTab(0);
+              }}>
+                <span className="draft-bar-dot"/>
+                <div className="draft-bar-text">
+                  <div className="draft-bar-title">{templateDraft.name || "Шаблон"}</div>
+                  <div className="draft-bar-sub">Шаблон не сохранён · нажми чтобы продолжить</div>
+                </div>
+                <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage("template");setTemplateDraft(null);}}}><IconClose/></button>
               </div>
             )}
           </div>

@@ -64,6 +64,11 @@ export const api = {
   saveWorkout:      (w)     => request("POST",   "/workouts", w),
   deleteWorkout:    (id)    => request("DELETE", `/workouts/${id}`),
 
+  // ── Шаблоны тренировок ──────────────────────────────────────────────────
+  getTemplates:     ()      => request("GET",    "/templates"),
+  saveTemplate:     (t)     => request("POST",   "/templates", t),
+  deleteTemplate:   (id)    => request("DELETE", `/templates/${id}`),
+
   // ── Замеры ──────────────────────────────────────────────────────────────
   getMeasurements:  ()      => request("GET",    "/measurements"),
   saveMeasurement:  (m)     => request("POST",   "/measurements", {
