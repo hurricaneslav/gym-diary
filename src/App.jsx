@@ -58,24 +58,55 @@ const IconKeyboard = () => <svg width="16" height="16" viewBox="0 0 20 20" fill=
 // ── Прогрессия: справочники (дублируют main.py по необходимости — как и
 // MEASUREMENT_FIELDS, это чисто визуальные подписи/дефолты, при правке
 // логики на бэкенде сюда лезть не нужно, они не участвуют в расчёте) ──────
-const ROLE_LABELS = { heavy: "Тяжёлая", light: "Лёгкая", medium: "Средняя", volume: "Объёмная" };
+const ROLE_LABELS = { heavy: "Тяжёлая", light: "Лёгкая" };
 const EXERCISE_TYPE_LABELS = {
   main_compound: "Основное базовое",
   accessory_compound: "Вспомогательное многосуставное",
   isolation: "Изоляция",
-  isometric: "Изометрическое",
   custom: "Произвольное",
 };
 const GOAL_LABELS = { strength: "Сила", hypertrophy: "Гипертрофия", strength_hypertrophy: "Сила + гипертрофия" };
 const VARYING_EX_TYPES = ["main_compound", "accessory_compound"];
+// Общие диапазоны повторов для основных и вспомогательных многосуставных упражнений.
+const COMPOUND_REP_RANGE_DEFAULTS = { strength: [1,5], hypertrophy: [6,10], strength_hypertrophy: [5,8] };
+// У изоляции диапазон фиксированный и не зависит от выбранной цели.
+const ISOLATION_REP_RANGE_DEFAULT = [10,15];
 const REP_RANGE_DEFAULTS = {
-  main_compound:      { strength: [3,5],  hypertrophy: [6,10], strength_hypertrophy: [5,8]  },
-  accessory_compound: { strength: [5,8],  hypertrophy: [8,12], strength_hypertrophy: [6,10] },
-  isolation:          { strength: [8,12], hypertrophy: [10,15], strength_hypertrophy: [10,15] },
-  isometric:          { strength: [15,30],hypertrophy: [20,45], strength_hypertrophy: [20,45] },
+  main_compound:      COMPOUND_REP_RANGE_DEFAULTS,
+  accessory_compound: COMPOUND_REP_RANGE_DEFAULTS,
 };
 const INCREMENT_PRESETS = [1, 2, 2.5, 5];
 const WEEKS_PRESETS = [4, 6, 8, 10, 12];
+
+// Оценка 1ПМ по формуле Эпли и обратный расчёт веса под целевое число повторов.
+// Это прикидка, а не точный максимум — насчитанное значение всегда можно
+// поправить руками на шаге ввода стартовой точки.
+const epley1RM = (weight, reps) => weight * (1 + reps / 30);
+const weightForTargetReps = (oneRM, targetReps, increment) => {
+  const raw = oneRM / (1 + targetReps / 30);
+  const step = increment || 2.5;
+  return Math.round(raw / step) * step;
+};
+// Лучший (по оценке 1ПМ) рабочий подход в самой свежей тренировке с этим упражнением.
+const findLastBestSet = (workouts, name) => {
+  const lc = name.trim().toLowerCase();
+  if (!lc) return null;
+  const entries = workouts
+    .filter(w => w.exercises.some(e => e.name.trim().toLowerCase() === lc))
+    .sort((a, b) => b.date.localeCompare(a.date));
+  if (!entries.length) return null;
+  const workout = entries[0];
+  const exercise = workout.exercises.find(e => e.name.trim().toLowerCase() === lc);
+  let best = null;
+  for (const s of exercise.sets) {
+    const w = s.bilateral ? Math.min(Number(s.weightL) || 0, Number(s.weightR) || 0) : Number(s.weight) || 0;
+    const r = s.bilateral ? Math.min(Number(s.repsL) || 0, Number(s.repsR) || 0) : Number(s.reps) || 0;
+    if (!w || !r) continue;
+    const oneRM = epley1RM(w, r);
+    if (!best || oneRM > best.oneRM) best = { weight: w, reps: r, oneRM, date: workout.date };
+  }
+  return best;
+};
 
 const css = `
 *{box-sizing:border-box;margin:0;padding:0}
@@ -249,8 +280,6 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .role-tag{font-size:9px;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;flex-shrink:0;border:1px solid;white-space:nowrap}
 .role-heavy{color:#FF8A5B;border-color:#4A2E1E}
 .role-light{color:#5B9CF6;border-color:#2A3A4A}
-.role-medium{color:#E0C030;border-color:#4A4020}
-.role-volume{color:#B47CE0;border-color:#3A2A4A}
 .sess-row{display:flex;align-items:flex-start;gap:10px;border:1px solid #282828;background:#111;padding:10px 12px;margin-bottom:8px}
 .sess-row.done{border-color:#2E4A2E}
 .sess-row.skipped{opacity:.5}
@@ -522,7 +551,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
     setExercises(t.exercises.map(te=>({
       id: Date.now()+Math.random(),
       name: te.name,
-      sets: Array.from({length: Math.max(1, te.sets_count||1)}, ()=>newSet()),
+      sets: Array.from({length: Math.max(1, te.sets_count||1)}, ()=>te.bilateral?{...newSet(),bilateral:true}:newSet()),
       comment: "",
     })));
     setName(prev=>{
@@ -561,12 +590,11 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   };
   const fillFromProgression=(exId, session)=>{
     const setsSrc = session.planned_detail
-      ? session.planned_detail.map(d=>({weight:String(d.weight),reps:String(d.reps)}))
-      : Array.from({length:session.planned_sets},()=>({weight:String(session.planned_weight),reps:String(session.planned_reps)}));
-    setExercises(p=>p.map(e=>e.id===exId?{
-      ...e,
-      sets: setsSrc.map(s=>({...s, bilateral:false, weightL:"", repsL:"", weightR:"", repsR:""})),
-    }:e));
+      ? session.planned_detail.map(d=>d.bilateral
+          ? ({bilateral:true, weightL:String(d.weightL), repsL:String(d.repsL), weightR:String(d.weightR), repsR:String(d.repsR), weight:"", reps:""})
+          : ({bilateral:false, weight:String(d.weight), reps:String(d.reps), weightL:"", repsL:"", weightR:"", repsR:""}))
+      : Array.from({length:session.planned_sets},()=>({bilateral:false, weight:String(session.planned_weight),reps:String(session.planned_reps), weightL:"", repsL:"", weightR:"", repsR:""}));
+    setExercises(p=>p.map(e=>e.id===exId?{ ...e, sets: setsSrc }:e));
   };
 
   const handleSave=async()=>{
@@ -645,8 +673,8 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
                   {prog.next_session.role&&<span className={`role-tag role-${prog.next_session.role}`} style={{marginRight:6}}>{ROLE_LABELS[prog.next_session.role]}</span>}
                   Цель прогрессии: <b>
                     {prog.next_session.planned_detail
-                      ? prog.next_session.planned_detail.map(d=>`${d.weight} кг × ${d.reps}${prog.rep_unit==="seconds"?" сек":""}`).join("; ")
-                      : `${prog.next_session.planned_weight} кг × ${prog.next_session.planned_reps}${prog.rep_unit==="seconds"?" сек":""} × ${prog.next_session.planned_sets} подх.`}
+                      ? prog.next_session.planned_detail.map(d=>d.bilateral?`Л ${d.weightL}×${d.repsL} · П ${d.weightR}×${d.repsR}`:`${d.weight} кг × ${d.reps}`).join("; ")
+                      : `${prog.next_session.planned_weight} кг × ${prog.next_session.planned_reps} × ${prog.next_session.planned_sets} подх.`}
                   </b> — нажми, чтобы заполнить
                 </div>
               )}
@@ -731,6 +759,7 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
       return initial.exercises.map(e=>({
         id: Date.now()+Math.random(),
         name: e.name,
+        bilateral: !!e.bilateral,
         sets: Array.from({length: Math.max(1, e.sets_count||1)}, ()=>({id:Date.now()+Math.random()})),
       }));
     }
@@ -744,7 +773,7 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
 
   const allExNames = [...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))];
 
-  function newExRow(){ return { id: Date.now()+Math.random(), name:"", sets:[{id:Date.now()+Math.random()}] }; }
+  function newExRow(){ return { id: Date.now()+Math.random(), name:"", bilateral:false, sets:[{id:Date.now()+Math.random()}] }; }
   const addEx=()=>setExercises(p=>[...p,newExRow()]);
   const upEx=(id,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,name:v}:e));
   const remEx=(id)=>setExercises(p=>p.filter(e=>e.id!==id));
@@ -758,6 +787,7 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
   });
   const addSet=(exId)=>setExercises(p=>p.map(e=>e.id===exId?{...e,sets:[...e.sets,{id:Date.now()+Math.random()}]}:e));
   const remSet=(exId,setId)=>setExercises(p=>p.map(e=>e.id===exId?{...e,sets:e.sets.filter(s=>s.id!==setId)}:e));
+  const toggleExBilateral=(exId)=>setExercises(p=>p.map(e=>e.id===exId?{...e,bilateral:!e.bilateral}:e));
 
   const hasRealData = () => exercises.some(e=>e.name.trim());
   const buildDraft = () => ({ name, exercises });
@@ -774,6 +804,7 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
     setExercises(w.exercises.filter(e=>e.name.trim()).map(e=>({
       id: Date.now()+Math.random(),
       name: e.name,
+      bilateral: e.sets.length>0 && !!e.sets[e.sets.length-1].bilateral,
       sets: Array.from({length: Math.max(1, e.sets.length)}, ()=>({id:Date.now()+Math.random()})),
     })));
     setShowWorkoutPicker(false);
@@ -789,7 +820,7 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
 
   const handleSave = async () => {
     setSaving(true);
-    const filtered = exercises.filter(e=>e.name.trim()).map(e=>({name:e.name.trim(), sets_count:Math.max(1,e.sets.length)}));
+    const filtered = exercises.filter(e=>e.name.trim()).map(e=>({name:e.name.trim(), sets_count:Math.max(1,e.sets.length), bilateral:!!e.bilateral}));
     const payload = { id: isEdit?initial.id:-1, name: name.trim()||defName, exercises: filtered };
     const res = await onSave(payload);
     clearDraftFromStorage("template");
@@ -848,6 +879,7 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
                 <div className="ex-hd">
                   <span className="ex-num">{ei+1}</span>
                   <ExNameInput value={ex.name} onChange={v=>upEx(ex.id,v)} allExNames={allExNames}/>
+                  <button className={`btn-bi${ex.bilateral?" active":""}`} onClick={()=>toggleExBilateral(ex.id)} title="Унилатеральное упражнение по умолчанию"><IconBilateral/></button>
                   <button className="del-btn" disabled={ei===0} onClick={()=>moveEx(ex.id,-1)} title="Переместить выше"><IconArrowUp/></button>
                   <button className="del-btn" disabled={ei===exercises.length-1} onClick={()=>moveEx(ex.id,1)} title="Переместить ниже"><IconArrowDown/></button>
                   <button className="del-btn" onClick={()=>remEx(ex.id)} title="Удалить"><IconTrash/></button>
@@ -950,7 +982,7 @@ function TemplatesView({templates, setTemplates, workouts, toast, templateDraft,
         :detail.exercises.map((e,i)=>(
           <div key={i} className="w-ex">
             <div className="w-ex-name">{e.name}</div>
-            <div style={{color:"#888",fontSize:12}}>{e.sets_count} подход{e.sets_count===1?"":(e.sets_count>=2&&e.sets_count<=4?"а":"ов")}</div>
+            <div style={{color:"#888",fontSize:12}}>{e.sets_count} подход{e.sets_count===1?"":(e.sets_count>=2&&e.sets_count<=4?"а":"ов")}{e.bilateral?" · унилатерально":""}</div>
           </div>
         ))}
       <div style={{marginTop:16}}>
@@ -1030,13 +1062,17 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
       const lc = ex.name.trim().toLowerCase();
       const prog = progressions.find(p=>p.exercise_name_lc===lc && p.status==="active" && p.next_session);
       if(!prog) continue;
-      // билатеральные (Л/П) подходы прогрессией не учитываются — см. дизайн-документ
-      const workingSets = ex.sets.filter(s=>!s.bilateral && s.weight!=="" && s.reps!=="");
+      // унилатеральные прогрессии считаются по Л/П сетам, обычные — по билатеральным
+      const workingSets = prog.unilateral
+        ? ex.sets.filter(s=>s.bilateral ? (s.weightL!=="" && s.repsL!=="" && s.weightR!=="" && s.repsR!=="") : (s.weight!=="" && s.reps!==""))
+        : ex.sets.filter(s=>!s.bilateral && s.weight!=="" && s.reps!=="");
       if(!workingSets.length) continue;
       const plannedSets = prog.next_session.planned_detail ? prog.next_session.planned_detail.length : prog.next_session.planned_sets;
       const used = workingSets.slice(0, plannedSets);
-      const weight = Number(used[0].weight);
-      const reps = Math.min(...used.map(s=>Number(s.reps)));
+      const weight = Number(prog.unilateral ? (used[0].bilateral?used[0].weightL:used[0].weight) : used[0].weight);
+      const reps = Math.min(...used.map(s=>prog.unilateral
+        ? (s.bilateral?Math.min(Number(s.repsL),Number(s.repsR)):Number(s.reps))
+        : Number(s.reps)));
       const plannedW = prog.next_session.planned_weight;
       if(plannedW && Math.abs(weight-plannedW)/plannedW > 0.2){
         if(!window.confirm(`Вес по прогрессии «${prog.exercise_name}» сильно отличается от плана (план ${plannedW} кг, введено ${weight} кг). Всё равно засчитать в прогрессию?`))continue;
@@ -1044,7 +1080,9 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
       const payload = { actual_weight: weight, actual_reps: reps, actual_sets: used.length, workout_id: workoutId };
       // план детализирован по каждому подходу — пишем и факт по каждому подходу, а не только сводку
       if(prog.next_session.planned_detail){
-        payload.actual_detail = used.map(s=>({ weight:Number(s.weight), reps:Number(s.reps) }));
+        payload.actual_detail = used.map(s=>s.bilateral
+          ? { weightL:Number(s.weightL), repsL:Number(s.repsL), weightR:Number(s.weightR), repsR:Number(s.repsR) }
+          : { weight:Number(s.weight), reps:Number(s.reps) });
       }
       try{
         await api.logProgressionSession(prog.id, prog.next_session.id, payload);
@@ -1504,18 +1542,38 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
   const [repHigh,setRepHigh]=useState(draft?.repHigh ?? "");
   const [frequency,setFrequency]=useState(draft?.frequency ?? null);
   const [setsCount,setSetsCount]=useState(draft?.setsCount ?? "3");
+  const [unilateral,setUnilateral]=useState(draft?.unilateral ?? false);
   const [startWeight,setStartWeight]=useState(draft?.startWeight ?? "");
   const [startReps,setStartReps]=useState(draft?.startReps ?? "");
   const [startRir,setStartRir]=useState(draft?.startRir ?? "");
   const [increment,setIncrement]=useState(draft?.increment ?? "2.5");
   const [weeks,setWeeks]=useState(draft?.weeks ?? "8");
   const [saving,setSaving]=useState(false);
+  const [showTest,setShowTest]=useState(false);
+  const [testWeight,setTestWeight]=useState("");
+  const [testReps,setTestReps]=useState("");
+  const [testRir,setTestRir]=useState("");
 
   const allExNames=[...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))];
   const isVarying = VARYING_EX_TYPES.includes(exType);
-  const isSeconds = exType==="isometric";
+  const lastBestSet = findLastBestSet(workouts, name);
+  const suggestedFromHistory = lastBestSet && repLow!==""
+    ? weightForTargetReps(lastBestSet.oneRM, Number(repLow), Number(increment))
+    : null;
 
-  const buildDraft=()=>({ mode:"calculated", step, name, exType, goal, repLow, repHigh, frequency, setsCount, startWeight, startReps, startRir, increment, weeks });
+  const applyHistorySuggestion=()=>{
+    setStartWeight(String(suggestedFromHistory));
+    setStartReps(repLow);
+  };
+  const applyTestSuggestion=()=>{
+    const w = Number(testWeight), r = Number(testReps), rir = Number(testRir)||0;
+    if(!w || !r) return;
+    const oneRM = epley1RM(w, r + rir); // повторы "в отказ" ≈ выполненные + RIR
+    setStartWeight(String(weightForTargetReps(oneRM, Number(repLow)||r, Number(increment))));
+    setStartReps(repLow || String(r));
+  };
+
+  const buildDraft=()=>({ mode:"calculated", step, name, exType, goal, repLow, repHigh, frequency, setsCount, unilateral, startWeight, startReps, startRir, increment, weeks });
 
   // Автосохранение — как у тренировки/замера: чтобы прогресс по мастеру не
   // терялся, даже если процесс Telegram убьют в фоне на любом из 8 шагов.
@@ -1526,7 +1584,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
 
   const pickGoal=(g)=>{
     setGoal(g);
-    const def = REP_RANGE_DEFAULTS[exType]?.[g];
+    const def = exType==="isolation" ? ISOLATION_REP_RANGE_DEFAULT : REP_RANGE_DEFAULTS[exType]?.[g];
     if(def){ setRepLow(String(def[0])); setRepHigh(String(def[1])); }
   };
 
@@ -1558,12 +1616,12 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
     try{
       await api.createProgression({
         exercise_name: name.trim(), mode: "calculated",
-        exercise_type: exType, goal, rep_unit: isSeconds?"seconds":"reps",
+        exercise_type: exType, goal, rep_unit: "reps",
         rep_range_low: Number(repLow), rep_range_high: Number(repHigh),
         frequency, sets_count: Number(setsCount), increment: Number(increment),
         start_weight: Number(startWeight), start_reps: Number(startReps),
         start_rir: startRir!==""?Number(startRir):null,
-        weeks: Number(weeks),
+        weeks: Number(weeks), unilateral,
       });
       clearDraftFromStorage("progression");
       onSaved();
@@ -1602,12 +1660,11 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
               {value:"main_compound",label:"Основное базовое"},
               {value:"accessory_compound",label:"Вспомогательное многосуставное"},
               {value:"isolation",label:"Изоляция"},
-              {value:"isometric",label:"Изометрическое"},
               {value:"custom",label:"Произвольное"},
             ]}/>
             <div className="card-sub" style={{margin:0}}>
               {isVarying
-                ? "У этого типа при частоте больше 1 раза в неделю тренировки будут разной тяжести (тяжёлая/лёгкая/средняя)."
+                ? "У этого типа при частоте больше 1 раза в неделю тренировки будут разной тяжести (тяжёлая/лёгкая)."
                 : "Каждая тренировка будет одинаковой по смыслу и прогрессирует независимо от дня."}
             </div>
           </div>
@@ -1625,11 +1682,11 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
             </div>
             <div className="m-grid field">
               <div>
-                <div className="lbl">{isSeconds?"Секунд от":"Повторов от"}</div>
+                <div className="lbl">Повторов от</div>
                 <input className="inp" type="number" inputMode="numeric" value={repLow} onChange={e=>setRepLow(e.target.value)}/>
               </div>
               <div>
-                <div className="lbl">{isSeconds?"Секунд до":"Повторов до"}</div>
+                <div className="lbl">Повторов до</div>
                 <input className="inp" type="number" inputMode="numeric" value={repHigh} onChange={e=>setRepHigh(e.target.value)}/>
               </div>
             </div>
@@ -1643,7 +1700,8 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
             <ChoiceGrid value={frequency} onChange={setFrequency} options={[1,2,3,4].map(n=>({value:n,label:`${n} раз${n===1?"":"а"}`}))}/>
             {isVarying && frequency>1 && (
               <div className="card-sub" style={{margin:0}}>
-                Схема: {(({1:["heavy"],2:["heavy","light"],3:["heavy","light","medium"],4:["heavy","medium","light","volume"]})[frequency]).map(r=>ROLE_LABELS[r]).join(" → ")}
+                Схема: {(({1:["heavy"],2:["heavy","light"],3:["heavy","light","heavy"],4:["heavy","light","heavy","light"]})[frequency]).map(r=>ROLE_LABELS[r]).join(" → ")}
+                {" "}· Лёгкий день — тот же вес, но меньше повторов (не влияет на прогресс)
               </div>
             )}
           </div>
@@ -1653,22 +1711,63 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
           <div className="field">
             <div className="lbl">Рабочих подходов</div>
             <input className="inp" type="number" inputMode="numeric" value={setsCount} onChange={e=>setSetsCount(e.target.value)}/>
+            <div style={{marginTop:14}}>
+              <button className={`mini-btn${unilateral?"":" ghost"}`} onClick={()=>setUnilateral(v=>!v)}>
+                {unilateral?"✓ ":""}Унилатеральное упражнение (раздельно по сторонам)
+              </button>
+              <div className="card-sub" style={{margin:"8px 0 0"}}>
+                Каждая сторона прогрессирует независимо — вес общий, но количество повторов
+                считается отдельно для каждой стороны. Начинать обе стороны будете с одной точки,
+                дальше расхождение появится само по факту тренировок.
+              </div>
+            </div>
           </div>
         )}
 
         {step===6 && (
-          <div className="m-grid field">
-            <div>
-              <div className="lbl">Рабочий вес, кг</div>
-              <input className="inp" type="number" inputMode="decimal" value={startWeight} onChange={e=>setStartWeight(e.target.value)}/>
-            </div>
-            <div>
-              <div className="lbl">{isSeconds?"Секунды":"Повторы"}</div>
-              <input className="inp" type="number" inputMode="numeric" value={startReps} onChange={e=>setStartReps(e.target.value)}/>
-            </div>
-            <div style={{gridColumn:"1 / -1"}}>
-              <div className="lbl">RIR (необязательно)</div>
-              <input className="inp" type="number" inputMode="decimal" value={startRir} onChange={e=>setStartRir(e.target.value)}/>
+          <div className="field">
+            {suggestedFromHistory!=null && (
+              <div className="card-sub" style={{background:"#16241A",border:"1px solid #2A4A32",borderRadius:10,padding:10,marginBottom:10}}>
+                В истории есть {lastBestSet.weight} кг × {lastBestSet.reps} ({formatDate(lastBestSet.date)}).
+                {" "}По формуле Эпли (оценка, не точный максимум) — старт с <b>{suggestedFromHistory} кг × {repLow}</b>.
+                <div><button className="mini-btn" style={{marginTop:8}} onClick={applyHistorySuggestion}>Применить</button></div>
+              </div>
+            )}
+            <button className="mini-btn ghost" style={{marginBottom:10}} onClick={()=>setShowTest(v=>!v)}>
+              {showTest ? "Скрыть тестовый подход" : "Не знаю, с чего начать → тестовый подход"}
+            </button>
+            {showTest && (
+              <div className="m-grid" style={{marginBottom:14}}>
+                <div>
+                  <div className="lbl">Вес теста, кг</div>
+                  <input className="inp" type="number" inputMode="decimal" value={testWeight} onChange={e=>setTestWeight(e.target.value)}/>
+                </div>
+                <div>
+                  <div className="lbl">Повторы (почти до отказа)</div>
+                  <input className="inp" type="number" inputMode="numeric" value={testReps} onChange={e=>setTestReps(e.target.value)}/>
+                </div>
+                <div style={{gridColumn:"1 / -1"}}>
+                  <div className="lbl">RIR — сколько ещё оставалось в запасе</div>
+                  <input className="inp" type="number" inputMode="numeric" value={testRir} onChange={e=>setTestRir(e.target.value)}/>
+                </div>
+                <div style={{gridColumn:"1 / -1"}}>
+                  <button className="mini-btn" onClick={applyTestSuggestion}>Рассчитать стартовый вес</button>
+                </div>
+              </div>
+            )}
+            <div className="m-grid">
+              <div>
+                <div className="lbl">Рабочий вес, кг</div>
+                <input className="inp" type="number" inputMode="decimal" value={startWeight} onChange={e=>setStartWeight(e.target.value)}/>
+              </div>
+              <div>
+                <div className="lbl">Повторы</div>
+                <input className="inp" type="number" inputMode="numeric" value={startReps} onChange={e=>setStartReps(e.target.value)}/>
+              </div>
+              <div style={{gridColumn:"1 / -1"}}>
+                <div className="lbl">RIR (необязательно)</div>
+                <input className="inp" type="number" inputMode="decimal" value={startRir} onChange={e=>setStartRir(e.target.value)}/>
+              </div>
             </div>
           </div>
         )}
@@ -1695,8 +1794,8 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
             <div className="ex-block" style={{padding:"14px 16px"}}>
               <div className="card-title" style={{marginBottom:8}}>{name}</div>
               <div className="card-sub" style={{margin:"2px 0"}}>{EXERCISE_TYPE_LABELS[exType]} · {GOAL_LABELS[goal]}</div>
-              <div className="card-sub" style={{margin:"2px 0"}}>Диапазон: {repLow}–{repHigh}{isSeconds?" сек":" повт"} · {frequency} раз/нед · {setsCount} подх.</div>
-              <div className="card-sub" style={{margin:"2px 0"}}>Старт: {startWeight} кг × {startReps}{isSeconds?" сек":""}{startRir?` @RIR${startRir}`:""}</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>Диапазон: {repLow}–{repHigh} повт · {frequency} раз/нед · {setsCount} подх.{unilateral?" · унилатерально":""}</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>Старт: {startWeight} кг × {startReps}{startRir?` @RIR${startRir}`:""}</div>
               <div className="card-sub" style={{margin:"2px 0"}}>Шаг {increment} кг · цикл {weeks} нед.</div>
             </div>
           </div>
@@ -1739,19 +1838,21 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
 
   const nextPending = data.sessions.find(s=>s.status==="pending");
   const anyDone = data.sessions.some(s=>s.status==="done");
-  const repUnit = data.rep_unit==="seconds"?" сек":"";
+  const repUnit = "";
 
   const startLog=(s)=>{
     setLogging(s.id);
     if(s.planned_detail){
-      setLogDetail(s.planned_detail.map(d=>({weight:String(d.weight),reps:String(d.reps)})));
+      setLogDetail(s.planned_detail.map(d=>d.bilateral
+        ? {bilateral:true, weightL:String(d.weightL), repsL:String(d.repsL), weightR:String(d.weightR), repsR:String(d.repsR)}
+        : {bilateral:false, weight:String(d.weight), reps:String(d.reps)}));
     }else{
       setLogDetail(null);
       setLogForm({weight:String(s.planned_weight), reps:String(s.planned_reps), sets:String(s.planned_sets), rir:""});
     }
   };
   const upLogDetail=(i,field,val)=>setLogDetail(p=>p.map((d,ix)=>ix===i?{...d,[field]:val}:d));
-  const addLogDetailRow=()=>setLogDetail(p=>[...p,{weight:"",reps:""}]);
+  const addLogDetailRow=()=>setLogDetail(p=>[...p, p.length&&p[0].bilateral?{bilateral:true,weightL:"",repsL:"",weightR:"",repsR:""}:{bilateral:false,weight:"",reps:""}]);
   const remLogDetailRow=(i)=>setLogDetail(p=>p.filter((_,ix)=>ix!==i));
 
   const submitLog=async()=>{
@@ -1759,13 +1860,23 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
     try{
       let payload;
       if(logDetail){
-        const detail=logDetail.map(d=>({weight:Number(d.weight),reps:Number(d.reps)}));
-        payload={
-          actual_weight: detail[0].weight,
-          actual_reps: Math.min(...detail.map(d=>d.reps)),
-          actual_sets: detail.length,
-          actual_detail: detail,
-        };
+        if(logDetail[0].bilateral){
+          const detail=logDetail.map(d=>({weightL:Number(d.weightL),repsL:Number(d.repsL),weightR:Number(d.weightR),repsR:Number(d.repsR)}));
+          payload={
+            actual_weight: detail[0].weightL,
+            actual_reps: Math.min(...detail.flatMap(d=>[d.repsL,d.repsR])),
+            actual_sets: detail.length,
+            actual_detail: detail,
+          };
+        }else{
+          const detail=logDetail.map(d=>({weight:Number(d.weight),reps:Number(d.reps)}));
+          payload={
+            actual_weight: detail[0].weight,
+            actual_reps: Math.min(...detail.map(d=>d.reps)),
+            actual_sets: detail.length,
+            actual_detail: detail,
+          };
+        }
       }else{
         payload={
           actual_weight:Number(logForm.weight), actual_reps:Number(logForm.reps),
@@ -1791,10 +1902,11 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
     catch(e){ window.alert("Не удалось отменить: "+(e.message||"")); }
     setBusy(false);
   };
-  const doArchive=async()=>{
-    if(!window.confirm("Архивировать прогрессию? Она пропадёт из списка активных."))return;
-    await api.archiveProgression(data.id);
-    onChanged(); onBack();
+  const doDelete=async()=>{
+    if(!window.confirm("Удалить прогрессию из базы? Вся история планирования этого цикла будет безвозвратно удалена. (Данные о фактически выполненных тренировках сохранятся в дневнике)."))return;
+    setBusy(true);
+    try{ await api.deleteProgression(data.id); onChanged(); onBack(); }
+    catch(e){ window.alert("Не удалось удалить: "+(e.message||"")); setBusy(false); }
   };
   const doNewCycle=async()=>{
     if(!window.confirm(`Начать новый цикл с текущей точки — ${data.current_weight} кг × ${data.current_reps}${repUnit}?`))return;
@@ -1813,11 +1925,11 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
 
       <div className="card-sub" style={{marginBottom:4}}>
         {data.mode==="manual" ? "Произвольная прогрессия" : (
-          <>{EXERCISE_TYPE_LABELS[data.exercise_type]} · {GOAL_LABELS[data.goal]} · диапазон {data.rep_range_low}–{data.rep_range_high}{repUnit} · шаг {data.increment} кг</>
+          <>{EXERCISE_TYPE_LABELS[data.exercise_type]} · {GOAL_LABELS[data.goal]} · диапазон {data.rep_range_low}–{data.rep_range_high}{repUnit} · шаг {data.increment} кг{data.unilateral?" · унилатерально":""}</>
         )}
       </div>
       <div className="card-sub" style={{marginBottom:14}}>
-        Статус: {data.status==="active"?"активна":data.status==="completed"?"завершена":"в архиве"}
+        Статус: {data.status==="active"?"активна":"завершена"}
         {" · "}{data.sessions.filter(s=>s.status==="done").length}/{data.sessions.length} тренировок
       </div>
 
@@ -1827,7 +1939,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
         {data.mode==="calculated" && data.status==="active" && <button className="mini-btn" onClick={()=>setShowEdit(true)}>Редактировать</button>}
         {anyDone && <button className="mini-btn ghost" disabled={busy} onClick={doUndo}>Отменить последний лог</button>}
         {data.status==="completed" && data.mode==="calculated" && <button className="mini-btn" disabled={busy} onClick={doNewCycle}>Начать новый цикл</button>}
-        {data.status!=="archived" && <button className="mini-btn ghost" onClick={doArchive}>Архивировать</button>}
+        <button className="mini-btn ghost" disabled={busy} onClick={doDelete}>Удалить</button>
       </div>
 
       <div className="sec-lbl" style={{marginTop:0}}>План по сессиям</div>
@@ -1838,13 +1950,13 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
             <div className="sess-body">
               {s.role && <span className={`role-tag role-${s.role}`} style={{marginBottom:5,display:"inline-block"}}>{ROLE_LABELS[s.role]}</span>}
               {s.planned_detail ? (
-                <div className="sess-plan">План: {s.planned_detail.map((d,di)=>`${d.weight} кг × ${d.reps}${repUnit}`).join("; ")}</div>
+                <div className="sess-plan">План: {s.planned_detail.map(d=>d.bilateral?`Л ${d.weightL}×${d.repsL} · П ${d.weightR}×${d.repsR}`:`${d.weight} кг × ${d.reps}${repUnit}`).join("; ")}</div>
               ) : (
                 <div className="sess-plan">План: {s.planned_weight} кг × {s.planned_reps}{repUnit} × {s.planned_sets} подх.</div>
               )}
               {s.status==="done" && (
                 s.actual_detail ? (
-                  <div className="sess-fact">Факт: {s.actual_detail.map(d=>`${d.weight} кг × ${d.reps}${repUnit}`).join("; ")}</div>
+                  <div className="sess-fact">Факт: {s.actual_detail.map(d=>d.bilateral?`Л ${d.weightL}×${d.repsL} · П ${d.weightR}×${d.repsR}`:`${d.weight} кг × ${d.reps}${repUnit}`).join("; ")}</div>
                 ) : (
                   <div className="sess-fact">Факт: {s.actual_weight} кг × {s.actual_reps}{repUnit} × {s.actual_sets} подх.</div>
                 )
@@ -1865,9 +1977,24 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
                   {logDetail.map((d,di)=>(
                     <div key={di} className="set-row">
                       <span className="sess-idx" style={{paddingTop:8}}>{di+1}</span>
-                      <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={d.weight} onChange={e=>upLogDetail(di,"weight",e.target.value)}/>
-                      <span className="set-sep">×</span>
-                      <input className="set-inp" type="number" inputMode="numeric" placeholder={data.rep_unit==="seconds"?"сек":"повт"} value={d.reps} onChange={e=>upLogDetail(di,"reps",e.target.value)}/>
+                      {d.bilateral ? (
+                        <>
+                          <span style={{fontSize:11,color:"#888",width:14}}>Л</span>
+                          <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={d.weightL} onChange={e=>upLogDetail(di,"weightL",e.target.value)}/>
+                          <span className="set-sep">×</span>
+                          <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={d.repsL} onChange={e=>upLogDetail(di,"repsL",e.target.value)}/>
+                          <span style={{fontSize:11,color:"#888",width:14,marginLeft:6}}>П</span>
+                          <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={d.weightR} onChange={e=>upLogDetail(di,"weightR",e.target.value)}/>
+                          <span className="set-sep">×</span>
+                          <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={d.repsR} onChange={e=>upLogDetail(di,"repsR",e.target.value)}/>
+                        </>
+                      ) : (
+                        <>
+                          <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={d.weight} onChange={e=>upLogDetail(di,"weight",e.target.value)}/>
+                          <span className="set-sep">×</span>
+                          <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={d.reps} onChange={e=>upLogDetail(di,"reps",e.target.value)}/>
+                        </>
+                      )}
                       {logDetail.length>1&&<button className="del-btn" onClick={()=>remLogDetailRow(di)}><IconTrash/></button>}
                     </div>
                   ))}
@@ -1880,7 +2007,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
                     <input className="inp" type="number" inputMode="decimal" value={logForm.weight} onChange={e=>setLogForm(f=>({...f,weight:e.target.value}))}/>
                   </div>
                   <div className="field">
-                    <div className="lbl">{data.rep_unit==="seconds"?"Секунды":"Повторы"}</div>
+                    <div className="lbl">Повторы</div>
                     <input className="inp" type="number" inputMode="numeric" value={logForm.reps} onChange={e=>setLogForm(f=>({...f,reps:e.target.value}))}/>
                   </div>
                   <div className="field">
@@ -2031,7 +2158,6 @@ function EditProgressionSheet({ data, onSaved, onClose }) {
   const [deload,setDeload]=useState(!!data.deload_enabled);
   const [saving,setSaving]=useState(false);
   const isVarying = VARYING_EX_TYPES.includes(data.exercise_type);
-  const isSeconds = data.rep_unit==="seconds";
 
   const canSave = repLow!==""&&repHigh!==""&&Number(repHigh)>Number(repLow)
     && setsCount!==""&&Number(setsCount)>=1 && increment!==""&&Number(increment)>0;
@@ -2066,11 +2192,11 @@ function EditProgressionSheet({ data, onSaved, onClose }) {
         </div>
         <div className="m-grid field">
           <div>
-            <div className="lbl">{isSeconds?"Секунд от":"Повторов от"}</div>
+            <div className="lbl">Повторов от</div>
             <input className="inp" type="number" inputMode="numeric" value={repLow} onChange={e=>setRepLow(e.target.value)}/>
           </div>
           <div>
-            <div className="lbl">{isSeconds?"Секунд до":"Повторов до"}</div>
+            <div className="lbl">Повторов до</div>
             <input className="inp" type="number" inputMode="numeric" value={repHigh} onChange={e=>setRepHigh(e.target.value)}/>
           </div>
         </div>

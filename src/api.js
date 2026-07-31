@@ -118,7 +118,7 @@ export const api = {
   createProgression:   (p)            => request("POST",   "/progressions", p),
   getProgression:      (id)           => request("GET",    `/progressions/${id}`),
   editProgression:     (id, patch)    => request("PUT",    `/progressions/${id}`, patch),
-  archiveProgression:  (id)           => request("POST",   `/progressions/${id}/archive`),
+  deleteProgression:   (id)           => request("DELETE", `/progressions/${id}`),
   logProgressionSession: (progId, sessionId, actual) =>
     request("POST", `/progressions/${progId}/sessions/${sessionId}/log`, actual),
   skipProgressionSession: (progId, sessionId) =>
