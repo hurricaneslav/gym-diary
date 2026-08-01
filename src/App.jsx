@@ -1850,6 +1850,10 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
   const [logDetailRir,setLogDetailRir]=useState("");
   const [busy,setBusy]=useState(false);
   const [showEdit,setShowEdit]=useState(false);
+  const [showReset,setShowReset]=useState(false);
+  const [resetWeight,setResetWeight]=useState("");
+  const [resetReps,setResetReps]=useState("");
+  const [resetBeginner,setResetBeginner]=useState(true);
 
   const load=()=>{
     setLoading(true);
@@ -1962,10 +1966,6 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
     catch(e){ window.alert("Не удалось: "+(e.message||"")); }
     setBusy(false);
   };
-  const [showReset,setShowReset]=useState(false);
-  const [resetWeight,setResetWeight]=useState("");
-  const [resetReps,setResetReps]=useState("");
-  const [resetBeginner,setResetBeginner]=useState(true);
   const doResetStart=async()=>{
     if(!resetWeight || !resetReps) return;
     setBusy(true);
