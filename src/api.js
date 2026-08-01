@@ -126,4 +126,7 @@ export const api = {
   undoLastProgressionLog: (progId)    => request("POST",   `/progressions/${progId}/undo-last`),
   startNewProgressionCycle: (progId, overrides = {}) =>
     request("POST", `/progressions/${progId}/new-cycle`, overrides),
+  resetProgressionStart: (progId, body) => request("POST", `/progressions/${progId}/reset-start`, body),
+  completeProgression:   (progId)       => request("POST", `/progressions/${progId}/complete`),
+  flagAmrapSession:      (progId)       => request("POST", `/progressions/${progId}/flag-amrap`),
 };

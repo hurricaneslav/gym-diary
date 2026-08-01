@@ -671,11 +671,13 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
               {prog&&(
                 <div className="prog-hint" onClick={()=>fillFromProgression(ex.id,prog.next_session)}>
                   {prog.next_session.role&&<span className={`role-tag role-${prog.next_session.role}`} style={{marginRight:6}}>{ROLE_LABELS[prog.next_session.role]}</span>}
+                  {prog.next_session.is_amrap&&<span className="role-tag" style={{marginRight:6,color:"#FF9800",borderColor:"#5A4020"}}>AMRAP</span>}
                   Цель прогрессии: <b>
                     {prog.next_session.planned_detail
                       ? prog.next_session.planned_detail.map(d=>d.bilateral?`Л ${d.weightL}×${d.repsL} · П ${d.weightR}×${d.repsR}`:`${d.weight} кг × ${d.reps}`).join("; ")
                       : `${prog.next_session.planned_weight} кг × ${prog.next_session.planned_reps} × ${prog.next_session.planned_sets} подх.`}
                   </b> — нажми, чтобы заполнить
+                  {prog.next_session.is_amrap&&<div style={{marginTop:4,color:"#FF9800",fontSize:12}}>Последний подход — в отказ, а не по плану</div>}
                 </div>
               )}
               {prev&&(
@@ -1543,6 +1545,8 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
   const [frequency,setFrequency]=useState(draft?.frequency ?? null);
   const [setsCount,setSetsCount]=useState(draft?.setsCount ?? "3");
   const [unilateral,setUnilateral]=useState(draft?.unilateral ?? false);
+  const [beginnerMode,setBeginnerMode]=useState(draft?.beginnerMode ?? false);
+  const [amrapEveryWeeks,setAmrapEveryWeeks]=useState(draft?.amrapEveryWeeks ?? null);
   const [startWeight,setStartWeight]=useState(draft?.startWeight ?? "");
   const [startReps,setStartReps]=useState(draft?.startReps ?? "");
   const [startRir,setStartRir]=useState(draft?.startRir ?? "");
@@ -1573,7 +1577,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
     setStartReps(repLow || String(r));
   };
 
-  const buildDraft=()=>({ mode:"calculated", step, name, exType, goal, repLow, repHigh, frequency, setsCount, unilateral, startWeight, startReps, startRir, increment, weeks });
+  const buildDraft=()=>({ mode:"calculated", step, name, exType, goal, repLow, repHigh, frequency, setsCount, unilateral, beginnerMode, amrapEveryWeeks, startWeight, startReps, startRir, increment, weeks });
 
   // Автосохранение — как у тренировки/замера: чтобы прогресс по мастеру не
   // терялся, даже если процесс Telegram убьют в фоне на любом из 8 шагов.
@@ -1621,7 +1625,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
         frequency, sets_count: Number(setsCount), increment: Number(increment),
         start_weight: Number(startWeight), start_reps: Number(startReps),
         start_rir: startRir!==""?Number(startRir):null,
-        weeks: Number(weeks), unilateral,
+        weeks: Number(weeks), unilateral, beginner_mode: beginnerMode, amrap_every_weeks: amrapEveryWeeks,
       });
       clearDraftFromStorage("progression");
       onSaved();
@@ -1712,7 +1716,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
             <div className="lbl">Рабочих подходов</div>
             <input className="inp" type="number" inputMode="numeric" value={setsCount} onChange={e=>setSetsCount(e.target.value)}/>
             <div style={{marginTop:14}}>
-              <button className={`mini-btn${unilateral?"":" ghost"}`} onClick={()=>setUnilateral(v=>!v)}>
+              <button className={`mini-btn${unilateral?"":" ghost"}`} onClick={()=>{setUnilateral(v=>!v); setAmrapEveryWeeks(null);}}>
                 {unilateral?"✓ ":""}Унилатеральное упражнение (раздельно по сторонам)
               </button>
               <div className="card-sub" style={{margin:"8px 0 0"}}>
@@ -1721,6 +1725,30 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
                 дальше расхождение появится само по факту тренировок.
               </div>
             </div>
+            <div style={{marginTop:14}}>
+              <button className={`mini-btn${beginnerMode?"":" ghost"}`} onClick={()=>setBeginnerMode(v=>!v)}>
+                {beginnerMode?"✓ ":""}Режим новичка / возврат после перерыва
+              </button>
+              <div className="card-sub" style={{margin:"8px 0 0"}}>
+                Пока включён — шаг прибавки веса удвоенный, чтобы быстрее пройти лёгкие веса.
+                Выключается сам после первой тренировки, где вес не вырос.
+              </div>
+            </div>
+            {!unilateral && (
+              <div style={{marginTop:14}}>
+                <div className="lbl">AMRAP-тест (проверка "в отказ")</div>
+                <ChoiceGrid value={amrapEveryWeeks} onChange={setAmrapEveryWeeks} options={[
+                  {value:null,label:"Выкл."},
+                  {value:2,label:"Каждые 2 нед."},
+                  {value:4,label:"Каждые 4 нед."},
+                ]}/>
+                <div className="card-sub" style={{margin:"8px 0 0"}}>
+                  Раз в N недель последний подход тяжёлой тренировки — в отказ, а не по плану.
+                  По факту пересчитываем рабочий вес от реального максимума, а не по одному шагу —
+                  быстрее ловим и резкий прогресс, и застой.
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1794,7 +1822,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
             <div className="ex-block" style={{padding:"14px 16px"}}>
               <div className="card-title" style={{marginBottom:8}}>{name}</div>
               <div className="card-sub" style={{margin:"2px 0"}}>{EXERCISE_TYPE_LABELS[exType]} · {GOAL_LABELS[goal]}</div>
-              <div className="card-sub" style={{margin:"2px 0"}}>Диапазон: {repLow}–{repHigh} повт · {frequency} раз/нед · {setsCount} подх.{unilateral?" · унилатерально":""}</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>Диапазон: {repLow}–{repHigh} повт · {frequency} раз/нед · {setsCount} подх.{unilateral?" · унилатерально":""}{beginnerMode?" · режим новичка":""}{amrapEveryWeeks?` · AMRAP каждые ${amrapEveryWeeks} нед.`:""}</div>
               <div className="card-sub" style={{margin:"2px 0"}}>Старт: {startWeight} кг × {startReps}{startRir?` @RIR${startRir}`:""}</div>
               <div className="card-sub" style={{margin:"2px 0"}}>Шаг {increment} кг · цикл {weeks} нед.</div>
             </div>
@@ -1819,6 +1847,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
   const [logging,setLogging]=useState(null);
   const [logForm,setLogForm]=useState({weight:"",reps:"",sets:"",rir:""});
   const [logDetail,setLogDetail]=useState(null); // массив {weight,reps} — только для сессий с planned_detail
+  const [logDetailRir,setLogDetailRir]=useState("");
   const [busy,setBusy]=useState(false);
   const [showEdit,setShowEdit]=useState(false);
 
@@ -1842,6 +1871,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
 
   const startLog=(s)=>{
     setLogging(s.id);
+    setLogDetailRir("");
     if(s.planned_detail){
       setLogDetail(s.planned_detail.map(d=>d.bilateral
         ? {bilateral:true, weightL:String(d.weightL), repsL:String(d.repsL), weightR:String(d.weightR), repsR:String(d.repsR)}
@@ -1859,6 +1889,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
     setBusy(true);
     try{
       let payload;
+      const rir = logDetailRir!==""?Number(logDetailRir):null;
       if(logDetail){
         if(logDetail[0].bilateral){
           const detail=logDetail.map(d=>({weightL:Number(d.weightL),repsL:Number(d.repsL),weightR:Number(d.weightR),repsR:Number(d.repsR)}));
@@ -1867,6 +1898,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
             actual_reps: Math.min(...detail.flatMap(d=>[d.repsL,d.repsR])),
             actual_sets: detail.length,
             actual_detail: detail,
+            actual_rir: rir,
           };
         }else{
           const detail=logDetail.map(d=>({weight:Number(d.weight),reps:Number(d.reps)}));
@@ -1875,6 +1907,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
             actual_reps: Math.min(...detail.map(d=>d.reps)),
             actual_sets: detail.length,
             actual_detail: detail,
+            actual_rir: rir,
           };
         }
       }else{
@@ -1915,6 +1948,34 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
     catch(e){ window.alert("Не удалось начать новый цикл: "+(e.message||"")); }
     setBusy(false);
   };
+  const doComplete=async()=>{
+    if(!window.confirm("Завершить прогрессию? Дальше можно начать новый цикл с изменёнными параметрами."))return;
+    setBusy(true);
+    try{ await api.completeProgression(data.id); onChanged(); load(); toast("Прогрессия завершена ✓"); }
+    catch(e){ window.alert("Не удалось завершить: "+(e.message||"")); }
+    setBusy(false);
+  };
+  const doFlagAmrap=async()=>{
+    if(!window.confirm("Пометить ближайшую тренировку как AMRAP-тест (последний подход — в отказ)?"))return;
+    setBusy(true);
+    try{ await api.flagAmrapSession(data.id); load(); toast("Следующая тренировка — AMRAP ✓"); }
+    catch(e){ window.alert("Не удалось: "+(e.message||"")); }
+    setBusy(false);
+  };
+  const [showReset,setShowReset]=useState(false);
+  const [resetWeight,setResetWeight]=useState("");
+  const [resetReps,setResetReps]=useState("");
+  const [resetBeginner,setResetBeginner]=useState(true);
+  const doResetStart=async()=>{
+    if(!resetWeight || !resetReps) return;
+    setBusy(true);
+    try{
+      await api.resetProgressionStart(data.id, {start_weight:Number(resetWeight), start_reps:Number(resetReps), beginner_mode:resetBeginner});
+      setShowReset(false); setResetWeight(""); setResetReps("");
+      onChanged(); load(); toast("Стартовая точка сброшена ✓");
+    }catch(e){ window.alert("Не удалось сбросить старт: "+(e.message||"")); }
+    setBusy(false);
+  };
 
   return (
     <div>
@@ -1925,7 +1986,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
 
       <div className="card-sub" style={{marginBottom:4}}>
         {data.mode==="manual" ? "Произвольная прогрессия" : (
-          <>{EXERCISE_TYPE_LABELS[data.exercise_type]} · {GOAL_LABELS[data.goal]} · диапазон {data.rep_range_low}–{data.rep_range_high}{repUnit} · шаг {data.increment} кг{data.unilateral?" · унилатерально":""}</>
+          <>{EXERCISE_TYPE_LABELS[data.exercise_type]} · {GOAL_LABELS[data.goal]} · диапазон {data.rep_range_low}–{data.rep_range_high}{repUnit} · шаг {data.increment} кг{data.unilateral?" · унилатерально":""}{data.beginner_mode?" · режим новичка":""}</>
         )}
       </div>
       <div className="card-sub" style={{marginBottom:14}}>
@@ -1935,12 +1996,31 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
 
       <ProgWeightGraph sessions={data.sessions}/>
 
-      <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
+      <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
         {data.mode==="calculated" && data.status==="active" && <button className="mini-btn" onClick={()=>setShowEdit(true)}>Редактировать</button>}
         {anyDone && <button className="mini-btn ghost" disabled={busy} onClick={doUndo}>Отменить последний лог</button>}
         {data.status==="completed" && data.mode==="calculated" && <button className="mini-btn" disabled={busy} onClick={doNewCycle}>Начать новый цикл</button>}
+        {data.mode==="calculated" && data.status==="active" && <button className="mini-btn ghost" disabled={busy} onClick={()=>setShowReset(v=>!v)}>Сбросить старт</button>}
+        {data.mode==="calculated" && data.status==="active" && !data.unilateral && <button className="mini-btn ghost" disabled={busy} onClick={doFlagAmrap}>Запросить AMRAP</button>}
+        {data.mode==="calculated" && data.status==="active" && <button className="mini-btn ghost" disabled={busy} onClick={doComplete}>Завершить</button>}
         <button className="mini-btn ghost" disabled={busy} onClick={doDelete}>Удалить</button>
       </div>
+
+      {showReset && (
+        <div className="card-sub" style={{background:"#241A16",border:"1px solid #4A322A",borderRadius:10,padding:10,marginBottom:18}}>
+          <div style={{marginBottom:8}}>Новая стартовая точка — если переоценили силы или возвращаетесь после перерыва.</div>
+          <div className="m-grid">
+            <div><div className="lbl">Вес, кг</div><input className="inp" type="number" inputMode="decimal" value={resetWeight} onChange={e=>setResetWeight(e.target.value)}/></div>
+            <div><div className="lbl">Повторы</div><input className="inp" type="number" inputMode="numeric" value={resetReps} onChange={e=>setResetReps(e.target.value)}/></div>
+          </div>
+          <button className={`mini-btn${resetBeginner?"":" ghost"}`} style={{marginTop:8}} onClick={()=>setResetBeginner(v=>!v)}>
+            {resetBeginner?"✓ ":""}Включить режим новичка (удвоенный шаг до первой неудачи)
+          </button>
+          <div style={{marginTop:10}}>
+            <button className="mini-btn" disabled={busy} onClick={doResetStart}>Сбросить</button>
+          </div>
+        </div>
+      )}
 
       <div className="sec-lbl" style={{marginTop:0}}>План по сессиям</div>
       {data.sessions.map(s=>(
@@ -1949,6 +2029,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
             <span className="sess-idx">{s.session_index}</span>
             <div className="sess-body">
               {s.role && <span className={`role-tag role-${s.role}`} style={{marginBottom:5,display:"inline-block"}}>{ROLE_LABELS[s.role]}</span>}
+              {s.is_amrap && <span className="role-tag" style={{marginBottom:5,marginLeft:6,display:"inline-block",color:"#FF9800",borderColor:"#5A4020"}}>AMRAP</span>}
               {s.planned_detail ? (
                 <div className="sess-plan">План: {s.planned_detail.map(d=>d.bilateral?`Л ${d.weightL}×${d.repsL} · П ${d.weightR}×${d.repsR}`:`${d.weight} кг × ${d.reps}${repUnit}`).join("; ")}</div>
               ) : (
@@ -1972,6 +2053,12 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
           </div>
           {logging===s.id && (
             <div className="log-form">
+              {s.is_amrap && (
+                <div className="card-sub" style={{color:"#FF9800",marginBottom:10}}>
+                  Это AMRAP-тест — последний подход выполните в отказ и впишите реальное число повторов,
+                  а не плановое. По нему пересчитается рабочий вес.
+                </div>
+              )}
               {logDetail ? (
                 <>
                   {logDetail.map((d,di)=>(
@@ -1999,6 +2086,10 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
                     </div>
                   ))}
                   <button className="add-set" onClick={addLogDetailRow}><IconPlus/>Подход</button>
+                  <div className="field" style={{marginTop:10}}>
+                    <div className="lbl">RIR первого подхода (необязательно)</div>
+                    <input className="inp" type="number" inputMode="decimal" placeholder="сколько повторов оставалось в запасе" value={logDetailRir} onChange={e=>setLogDetailRir(e.target.value)}/>
+                  </div>
                 </>
               ) : (
                 <div className="m-grid">
