@@ -4,6 +4,22 @@ import { api, BOT_USERNAME } from "./api.js";
 const today = () => new Date().toISOString().slice(0, 10);
 const formatDate = (iso) => { try { const [y,m,d]=iso.split("-"); return `${d}.${m}.${y}`; } catch { return iso; } };
 
+// Нормализация ввода веса/дробных чисел: на некоторых телефонах (особенно
+// iPhone с системной локалью, где принят десятичный разделитель "запятая")
+// экранная клавиатура для чисел выдаёт "," вместо "." — а после потери
+// соединения/восстановления из фона это иногда проскакивало в сохранённые
+// данные необработанным. Принудительно приводим к точке и отбрасываем всё,
+// что не цифра и не точка (и схлопываем повторные точки в одну) — прямо
+// при вводе, а не только при сохранении, чтобы запятая никогда не долетала
+// до состояния приложения.
+const normalizeDecimal = (raw) => {
+  if (raw == null) return raw;
+  let v = String(raw).replace(/,/g, ".").replace(/[^0-9.]/g, "");
+  const dot = v.indexOf(".");
+  if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, "");
+  return v;
+};
+
 // Есть ли в черновике тренировки/замера реально внесённые данные (не просто
 // пустая заготовка) — используется при предупреждении о переключении профиля.
 // Учитываем не только внесённые подходы, но и вручную изменённое имя (сверяем
@@ -168,6 +184,8 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .tpl-picker-empty{padding:13px;color:#666;font-size:12px;text-align:center}
 .tpl-mode-pick{display:flex;flex-direction:column;gap:10px}
 .prev{margin:0 14px;padding:8px 0 10px;font-size:12px;color:#6E6E6E;border-bottom:1px solid #242424;font-style:italic}
+.ex-note-hint{margin:0 14px 10px;padding:6px 0 6px 10px;font-size:12px;color:#8A8A8A;border-left:2px solid #333;line-height:1.5;font-style:italic;cursor:pointer;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ex-note-hint.expanded{-webkit-line-clamp:unset;display:block}
 .sets{padding:10px 14px;overflow:hidden;contain:layout}
 .set-row{display:flex;align-items:center;gap:5px;margin-bottom:8px;width:100%;min-width:0}
 .set-n{font-size:11px;color:#5C5C5C;font-weight:600;text-align:center;flex-shrink:0;width:18px}
@@ -487,6 +505,16 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   useKeyboardScroll(sheetRef);
   useLockBodyScroll();
 
+  // Заметки к упражнениям (техника/сетап), заданные во вкладке "Упражнения" —
+  // показываем их прямо во время тренировки, чтобы не приходилось выходить
+  // из тренировки и искать упражнение отдельно. По умолчанию свёрнуты в 2
+  // строки (минимально), разворачиваются по тапу, если текст длиннее.
+  const [exNotes, setExNotes] = useState({});
+  useEffect(() => { api.getExerciseNotes().then(d=>setExNotes(d||{})).catch(()=>{}); }, []);
+  const [expandedNotes, setExpandedNotes] = useState({});
+  const getExNote = (name) => { const k=(name||"").trim().toLowerCase(); return k ? (exNotes[k] || "") : ""; };
+  const toggleNoteExpand = (id) => setExpandedNotes(p=>({...p,[id]:!p[id]}));
+
   const allExNames = [...new Set(
     workouts.filter(w=>!isEdit||w.id!==initial?.id).flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean))
   )];
@@ -659,6 +687,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
         {exercises.map((ex,ei)=>{
           const prev=getPrev(ex.name);
           const prog=getProg(ex.name);
+          const exNote=getExNote(ex.name);
           return(
             <div key={ex.id} className="ex-block">
               <div className="ex-hd">
@@ -668,6 +697,11 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
                 <button className="del-btn" disabled={ei===exercises.length-1} onClick={()=>moveEx(ex.id,1)} title="Переместить ниже"><IconArrowDown/></button>
                 {exercises.length>1&&<button className="del-btn" onClick={()=>remEx(ex.id)}><IconTrash/></button>}
               </div>
+              {exNote&&(
+                <div className={`ex-note-hint${expandedNotes[ex.id]?" expanded":""}`} onClick={()=>toggleNoteExpand(ex.id)}>
+                  {exNote}
+                </div>
+              )}
               {prog&&(
                 <div className="prog-hint" onClick={()=>fillFromProgression(ex.id,prog.next_session)}>
                   {prog.next_session.role&&<span className={`role-tag role-${prog.next_session.role}`} style={{marginRight:6}}>{ROLE_LABELS[prog.next_session.role]}</span>}
@@ -700,20 +734,20 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
                       <div className="set-bi-wrap">
                         <div className="set-bi-row">
                           <span className="set-side L">Л</span>
-                          <input className="set-inp sm" type="number" inputMode="decimal" placeholder="кг" value={s.weightL} onChange={e=>upSet(ex.id,si,"weightL",e.target.value)}/>
+                          <input className="set-inp sm" type="text" inputMode="decimal" placeholder="кг" value={s.weightL} onChange={e=>upSet(ex.id,si,"weightL",normalizeDecimal(e.target.value))}/>
                           <span className="set-sep">×</span>
                           <input className="set-inp sm" type="number" inputMode="numeric" placeholder="повт" value={s.repsL} onChange={e=>upSet(ex.id,si,"repsL",e.target.value)}/>
                         </div>
                         <div className="set-bi-row">
                           <span className="set-side R">П</span>
-                          <input className="set-inp sm" type="number" inputMode="decimal" placeholder="кг" value={s.weightR} onChange={e=>upSet(ex.id,si,"weightR",e.target.value)}/>
+                          <input className="set-inp sm" type="text" inputMode="decimal" placeholder="кг" value={s.weightR} onChange={e=>upSet(ex.id,si,"weightR",normalizeDecimal(e.target.value))}/>
                           <span className="set-sep">×</span>
                           <input className="set-inp sm" type="number" inputMode="numeric" placeholder="повт" value={s.repsR} onChange={e=>upSet(ex.id,si,"repsR",e.target.value)}/>
                         </div>
                       </div>
                     ):(
                       <>
-                        <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",e.target.value)}/>
+                        <input className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",normalizeDecimal(e.target.value))}/>
                         <span className="set-sep">×</span>
                         <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)}/>
                       </>
@@ -1517,7 +1551,7 @@ function ManualProgressionSheet({ workouts, draft, onSaved, onClose, onMinimize 
             {sess.map((s,seti)=>(
               <div key={seti} className="set-row">
                 <span className="sess-idx" style={{paddingTop:8}}>{seti+1}</span>
-                <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(si,seti,"weight",e.target.value)}/>
+                <input className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(si,seti,"weight",normalizeDecimal(e.target.value))}/>
                 <span className="set-sep">×</span>
                 <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(si,seti,"reps",e.target.value)}/>
                 {sess.length>1&&<button className="del-btn" onClick={()=>remSet(si,seti)}><IconTrash/></button>}
@@ -1768,7 +1802,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
               <div className="m-grid" style={{marginBottom:14}}>
                 <div>
                   <div className="lbl">Вес теста, кг</div>
-                  <input className="inp" type="number" inputMode="decimal" value={testWeight} onChange={e=>setTestWeight(e.target.value)}/>
+                  <input className="inp" type="text" inputMode="decimal" value={testWeight} onChange={e=>setTestWeight(normalizeDecimal(e.target.value))}/>
                 </div>
                 <div>
                   <div className="lbl">Повторы (почти до отказа)</div>
@@ -1786,7 +1820,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
             <div className="m-grid">
               <div>
                 <div className="lbl">Рабочий вес, кг</div>
-                <input className="inp" type="number" inputMode="decimal" value={startWeight} onChange={e=>setStartWeight(e.target.value)}/>
+                <input className="inp" type="text" inputMode="decimal" value={startWeight} onChange={e=>setStartWeight(normalizeDecimal(e.target.value))}/>
               </div>
               <div>
                 <div className="lbl">Повторы</div>
@@ -1794,7 +1828,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
               </div>
               <div style={{gridColumn:"1 / -1"}}>
                 <div className="lbl">RIR (необязательно)</div>
-                <input className="inp" type="number" inputMode="decimal" value={startRir} onChange={e=>setStartRir(e.target.value)}/>
+                <input className="inp" type="text" inputMode="decimal" value={startRir} onChange={e=>setStartRir(normalizeDecimal(e.target.value))}/>
               </div>
             </div>
           </div>
@@ -1804,7 +1838,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
           <div className="field">
             <div className="lbl">Шаг прибавки веса, кг</div>
             <ChoiceGrid value={Number(increment)} onChange={v=>setIncrement(String(v))} options={INCREMENT_PRESETS.map(v=>({value:v,label:String(v)}))}/>
-            <input className="inp" type="number" inputMode="decimal" placeholder="или своё значение" value={increment} onChange={e=>setIncrement(e.target.value)}/>
+            <input className="inp" type="text" inputMode="decimal" placeholder="или своё значение" value={increment} onChange={e=>setIncrement(normalizeDecimal(e.target.value))}/>
           </div>
         )}
 
@@ -2010,7 +2044,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
         <div className="card-sub" style={{background:"#241A16",border:"1px solid #4A322A",borderRadius:10,padding:10,marginBottom:18}}>
           <div style={{marginBottom:8}}>Новая стартовая точка — если переоценили силы или возвращаетесь после перерыва.</div>
           <div className="m-grid">
-            <div><div className="lbl">Вес, кг</div><input className="inp" type="number" inputMode="decimal" value={resetWeight} onChange={e=>setResetWeight(e.target.value)}/></div>
+            <div><div className="lbl">Вес, кг</div><input className="inp" type="text" inputMode="decimal" value={resetWeight} onChange={e=>setResetWeight(normalizeDecimal(e.target.value))}/></div>
             <div><div className="lbl">Повторы</div><input className="inp" type="number" inputMode="numeric" value={resetReps} onChange={e=>setResetReps(e.target.value)}/></div>
           </div>
           <button className={`mini-btn${resetBeginner?"":" ghost"}`} style={{marginTop:8}} onClick={()=>setResetBeginner(v=>!v)}>
@@ -2067,17 +2101,17 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
                       {d.bilateral ? (
                         <>
                           <span style={{fontSize:11,color:"#888",width:14}}>Л</span>
-                          <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={d.weightL} onChange={e=>upLogDetail(di,"weightL",e.target.value)}/>
+                          <input className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={d.weightL} onChange={e=>upLogDetail(di,"weightL",normalizeDecimal(e.target.value))}/>
                           <span className="set-sep">×</span>
                           <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={d.repsL} onChange={e=>upLogDetail(di,"repsL",e.target.value)}/>
                           <span style={{fontSize:11,color:"#888",width:14,marginLeft:6}}>П</span>
-                          <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={d.weightR} onChange={e=>upLogDetail(di,"weightR",e.target.value)}/>
+                          <input className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={d.weightR} onChange={e=>upLogDetail(di,"weightR",normalizeDecimal(e.target.value))}/>
                           <span className="set-sep">×</span>
                           <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={d.repsR} onChange={e=>upLogDetail(di,"repsR",e.target.value)}/>
                         </>
                       ) : (
                         <>
-                          <input className="set-inp" type="number" inputMode="decimal" placeholder="кг" value={d.weight} onChange={e=>upLogDetail(di,"weight",e.target.value)}/>
+                          <input className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={d.weight} onChange={e=>upLogDetail(di,"weight",normalizeDecimal(e.target.value))}/>
                           <span className="set-sep">×</span>
                           <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={d.reps} onChange={e=>upLogDetail(di,"reps",e.target.value)}/>
                         </>
@@ -2088,14 +2122,14 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
                   <button className="add-set" onClick={addLogDetailRow}><IconPlus/>Подход</button>
                   <div className="field" style={{marginTop:10}}>
                     <div className="lbl">RIR первого подхода (необязательно)</div>
-                    <input className="inp" type="number" inputMode="decimal" placeholder="сколько повторов оставалось в запасе" value={logDetailRir} onChange={e=>setLogDetailRir(e.target.value)}/>
+                    <input className="inp" type="text" inputMode="decimal" placeholder="сколько повторов оставалось в запасе" value={logDetailRir} onChange={e=>setLogDetailRir(normalizeDecimal(e.target.value))}/>
                   </div>
                 </>
               ) : (
                 <div className="m-grid">
                   <div className="field">
                     <div className="lbl">Вес, кг</div>
-                    <input className="inp" type="number" inputMode="decimal" value={logForm.weight} onChange={e=>setLogForm(f=>({...f,weight:e.target.value}))}/>
+                    <input className="inp" type="text" inputMode="decimal" value={logForm.weight} onChange={e=>setLogForm(f=>({...f,weight:normalizeDecimal(e.target.value)}))}/>
                   </div>
                   <div className="field">
                     <div className="lbl">Повторы</div>
@@ -2107,7 +2141,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
                   </div>
                   <div className="field">
                     <div className="lbl">RIR (необязательно)</div>
-                    <input className="inp" type="number" inputMode="decimal" value={logForm.rir} onChange={e=>setLogForm(f=>({...f,rir:e.target.value}))}/>
+                    <input className="inp" type="text" inputMode="decimal" value={logForm.rir} onChange={e=>setLogForm(f=>({...f,rir:normalizeDecimal(e.target.value)}))}/>
                   </div>
                 </div>
               )}
@@ -2304,7 +2338,7 @@ function EditProgressionSheet({ data, onSaved, onClose }) {
         <div className="field">
           <div className="lbl">Шаг прибавки веса, кг</div>
           <ChoiceGrid value={Number(increment)} onChange={v=>setIncrement(String(v))} options={INCREMENT_PRESETS.map(v=>({value:v,label:String(v)}))}/>
-          <input className="inp" type="number" inputMode="decimal" placeholder="или своё значение" value={increment} onChange={e=>setIncrement(e.target.value)}/>
+          <input className="inp" type="text" inputMode="decimal" placeholder="или своё значение" value={increment} onChange={e=>setIncrement(normalizeDecimal(e.target.value))}/>
         </div>
         <div className="toggle-row">
           <div>
@@ -2409,7 +2443,7 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
         <div className="sec-lbl" style={{marginTop:16}}>Вес тела</div>
         <div className="field" style={{marginTop:8}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <input className="inp" style={{flex:1}} type="number" inputMode="decimal" placeholder="кг, например 82.5" value={vals["weight"]||""} onChange={e=>set("weight",e.target.value)}/>
+            <input className="inp" style={{flex:1}} type="text" inputMode="decimal" placeholder="кг, например 82.5" value={vals["weight"]||""} onChange={e=>set("weight",normalizeDecimal(e.target.value))}/>
             {prevMeasurement&&prevMeasurement["weight"]&&(
               <div className="m-prev-hint">
                 <span className="m-prev-val">{prevMeasurement["weight"]} кг</span>
@@ -2423,7 +2457,7 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
           {MEASUREMENT_FIELDS.slice(1).map(f=>(
             <div key={f.key} className="field">
               <div className="lbl">{f.label}</div>
-              <input className="inp" type="number" inputMode="decimal" placeholder="см" value={vals[f.key]||""} onChange={e=>set(f.key,e.target.value)}/>
+              <input className="inp" type="text" inputMode="decimal" placeholder="см" value={vals[f.key]||""} onChange={e=>set(f.key,normalizeDecimal(e.target.value))}/>
               {prevMeasurement&&prevMeasurement[f.key]&&(
                 <div className="m-prev-hint" style={{marginTop:4}}>
                   <span className="m-prev-val">{prevMeasurement[f.key]} см</span>
@@ -3133,6 +3167,15 @@ export default function App() {
     if(!tg) return;
     tg.ready?.();
     tg.expand?.();
+    // Плашка с названием мини-приложения ("Дневник тренировок") по умолчанию
+    // подстраивается под тему самого Telegram — в светлой теме получается
+    // светлой, что не сочетается с тёмным дизайном приложения. Делаем её
+    // перманентно тёмной, под фон приложения, независимо от темы пользователя.
+    // Поддерживается не во всех клиентах Telegram — оборачиваем в try/catch,
+    // чтобы отсутствие метода в старой версии клиента не ломало запуск.
+    try{ tg.setHeaderColor?.("#0A0A0A"); }catch{}
+    try{ tg.setBackgroundColor?.("#0A0A0A"); }catch{}
+    try{ tg.setBottomBarColor?.("#0A0A0A"); }catch{}
   },[]);
 
   // Загружаем вообще всё один раз при старте: тренировки, замеры, профили, друзей.
