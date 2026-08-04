@@ -1755,8 +1755,10 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
               </button>
               <div className="card-sub" style={{margin:"8px 0 0"}}>
                 Каждая сторона прогрессирует независимо — вес общий, но количество повторов
-                считается отдельно для каждой стороны. Начинать обе стороны будете с одной точки,
-                дальше расхождение появится само по факту тренировок.
+                считается отдельно для каждой стороны. Обе стороны начинают с одной точки; если
+                одна сторона слабее, её цель по повторам будет подстраиваться отдельно, пока
+                стороны не сравняются — расхождение не цель, а временное явление, которое
+                сглаживается по ходу тренировок.
               </div>
             </div>
             <div style={{marginTop:14}}>
@@ -2366,6 +2368,11 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
     if(!isEdit)return{};
     const v={};
     MEASUREMENT_FIELDS.forEach(f=>{if(initial[f.key]!=null&&initial[f.key]!=="")v[f.key]=initial[f.key];});
+    // Комментарий не входит в MEASUREMENT_FIELDS (это отдельное текстовое поле),
+    // поэтому его нужно перенести из initial явно — иначе при редактировании
+    // существующего замера он всегда стартует пустым и стирается при сохранении,
+    // даже если пользователь его не трогал.
+    if(initial.comment!=null&&initial.comment!=="")v.comment=initial.comment;
     return v;
   });
   const [saving,setSaving]=useState(false);
