@@ -1579,6 +1579,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
   const [frequency,setFrequency]=useState(draft?.frequency ?? null);
   const [setsCount,setSetsCount]=useState(draft?.setsCount ?? "3");
   const [unilateral,setUnilateral]=useState(draft?.unilateral ?? false);
+  const [unilateralMode,setUnilateralMode]=useState(draft?.unilateralMode ?? "equalize");
   const [beginnerMode,setBeginnerMode]=useState(draft?.beginnerMode ?? false);
   const [amrapEveryWeeks,setAmrapEveryWeeks]=useState(draft?.amrapEveryWeeks ?? null);
   const [startWeight,setStartWeight]=useState(draft?.startWeight ?? "");
@@ -1611,7 +1612,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
     setStartReps(repLow || String(r));
   };
 
-  const buildDraft=()=>({ mode:"calculated", step, name, exType, goal, repLow, repHigh, frequency, setsCount, unilateral, beginnerMode, amrapEveryWeeks, startWeight, startReps, startRir, increment, weeks });
+  const buildDraft=()=>({ mode:"calculated", step, name, exType, goal, repLow, repHigh, frequency, setsCount, unilateral, unilateralMode, beginnerMode, amrapEveryWeeks, startWeight, startReps, startRir, increment, weeks });
 
   // Автосохранение — как у тренировки/замера: чтобы прогресс по мастеру не
   // терялся, даже если процесс Telegram убьют в фоне на любом из 8 шагов.
@@ -1659,7 +1660,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
         frequency, sets_count: Number(setsCount), increment: Number(increment),
         start_weight: Number(startWeight), start_reps: Number(startReps),
         start_rir: startRir!==""?Number(startRir):null,
-        weeks: Number(weeks), unilateral, beginner_mode: beginnerMode, amrap_every_weeks: amrapEveryWeeks,
+        weeks: Number(weeks), unilateral, unilateral_mode: unilateralMode, beginner_mode: beginnerMode, amrap_every_weeks: amrapEveryWeeks,
       });
       clearDraftFromStorage("progression");
       onSaved();
@@ -1753,13 +1754,21 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
               <button className={`mini-btn${unilateral?"":" ghost"}`} onClick={()=>{setUnilateral(v=>!v); setAmrapEveryWeeks(null);}}>
                 {unilateral?"✓ ":""}Унилатеральное упражнение (раздельно по сторонам)
               </button>
-              <div className="card-sub" style={{margin:"8px 0 0"}}>
-                Каждая сторона прогрессирует независимо — вес общий, но количество повторов
-                считается отдельно для каждой стороны. Обе стороны начинают с одной точки; если
-                одна сторона слабее, её цель по повторам будет подстраиваться отдельно, пока
-                стороны не сравняются — расхождение не цель, а временное явление, которое
-                сглаживается по ходу тренировок.
-              </div>
+              {unilateral && (
+                <div style={{marginTop:10}}>
+                  <button className={`mini-btn${unilateralMode==="equalize"?"":" ghost"}`} onClick={()=>setUnilateralMode("equalize")} style={{marginRight:8}}>
+                    {unilateralMode==="equalize"?"✓ ":""}Выравнивание
+                  </button>
+                  <button className={`mini-btn${unilateralMode==="independent"?"":" ghost"}`} onClick={()=>setUnilateralMode("independent")}>
+                    {unilateralMode==="independent"?"✓ ":""}Независимо
+                  </button>
+                  <div className="card-sub" style={{margin:"8px 0 0"}}>
+                    {unilateralMode==="equalize"
+                      ? "Вес общий на обе стороны, повторы считаются отдельно. Слабая сторона подтягивается к сильной — вес не поднимется, пока обе стороны не доберутся до верха диапазона. Подходит, когда важна симметрия (например, в бодибилдинге)."
+                      : "У каждой стороны полностью свой вес и свои повторы — стороны могут разойтись и не сравняться. Подходит, когда одна сторона объективно сильнее и это нормально (например, в силовых видах)."}
+                  </div>
+                </div>
+              )}
             </div>
             <div style={{marginTop:14}}>
               <button className={`mini-btn${beginnerMode?"":" ghost"}`} onClick={()=>setBeginnerMode(v=>!v)}>
@@ -1858,7 +1867,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
             <div className="ex-block" style={{padding:"14px 16px"}}>
               <div className="card-title" style={{marginBottom:8}}>{name}</div>
               <div className="card-sub" style={{margin:"2px 0"}}>{EXERCISE_TYPE_LABELS[exType]} · {GOAL_LABELS[goal]}</div>
-              <div className="card-sub" style={{margin:"2px 0"}}>Диапазон: {repLow}–{repHigh} повт · {frequency} раз/нед · {setsCount} подх.{unilateral?" · унилатерально":""}{beginnerMode?" · режим новичка":""}{amrapEveryWeeks?` · AMRAP каждые ${amrapEveryWeeks} нед.`:""}</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>Диапазон: {repLow}–{repHigh} повт · {frequency} раз/нед · {setsCount} подх.{unilateral?` · унилатерально (${unilateralMode==="equalize"?"выравнивание":"независимо"})`:""}{beginnerMode?" · режим новичка":""}{amrapEveryWeeks?` · AMRAP каждые ${amrapEveryWeeks} нед.`:""}</div>
               <div className="card-sub" style={{margin:"2px 0"}}>Старт: {startWeight} кг × {startReps}{startRir?` @RIR${startRir}`:""}</div>
               <div className="card-sub" style={{margin:"2px 0"}}>Шаг {increment} кг · цикл {weeks} нед.</div>
             </div>
@@ -2022,7 +2031,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
 
       <div className="card-sub" style={{marginBottom:4}}>
         {data.mode==="manual" ? "Произвольная прогрессия" : (
-          <>{EXERCISE_TYPE_LABELS[data.exercise_type]} · {GOAL_LABELS[data.goal]} · диапазон {data.rep_range_low}–{data.rep_range_high}{repUnit} · шаг {data.increment} кг{data.unilateral?" · унилатерально":""}{data.beginner_mode?" · режим новичка":""}</>
+          <>{EXERCISE_TYPE_LABELS[data.exercise_type]} · {GOAL_LABELS[data.goal]} · диапазон {data.rep_range_low}–{data.rep_range_high}{repUnit} · шаг {data.increment} кг{data.unilateral?` · унилатерально (${data.unilateral_mode==="equalize"?"выравнивание":"независимо"})`:""}{data.beginner_mode?" · режим новичка":""}</>
         )}
       </div>
       <div className="card-sub" style={{marginBottom:14}}>
