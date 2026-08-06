@@ -329,7 +329,8 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .prog-lock-detail{font-size:13px;color:#6E6E6E;margin-top:14px;line-height:1.6;text-align:center}
 .prog-lock-dot{margin-left:6px;font-size:11px;opacity:.7}
 .tab{position:relative}
-.tab-badge-dot{position:absolute;top:8px;right:calc(50% - 22px);width:7px;height:7px;border-radius:50%;background:#F6485B;border:1px solid #0A0A0A}
+.tab-label{position:relative;display:inline-block}
+.tab-badge-dot{position:absolute;top:-2px;right:-9px;width:6px;height:6px;border-radius:50%;background:#F6485B}
 .comm-block{border:1px solid #3A3A3A;padding:14px 16px;margin-bottom:10px;cursor:pointer;background:#111;display:flex;align-items:center;gap:12px;transition:border-color .15s}
 .comm-block:hover{border-color:#555}
 .comm-block-icon{width:36px;height:36px;background:#1A1A1A;border:1px solid #3A3A3A;display:flex;align-items:center;justify-content:center;color:#CCC;flex-shrink:0}
@@ -348,6 +349,7 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .feed-comment-text{color:#AAA;word-break:break-word}
 .feed-comment-del{background:none;border:none;color:#555;cursor:pointer;margin-left:auto;padding:2px}
 .feed-comment-input-row{display:flex;gap:8px;margin-top:8px}
+.news-body{font-size:14px;color:#CCC;line-height:1.6;padding:12px 14px}
 `;
 
 // ── Аварийное сохранение черновика в localStorage ────────────────────────
@@ -2983,13 +2985,13 @@ function html_escape(s){
   return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
-function NewsSection({onOpen}) {
+function NewsSection({onOpen, unread}) {
   return (
     <div className="comm-block" onClick={onOpen}>
-      <div className="comm-block-icon"><IconBell/></div>
+      <div className="comm-block-icon"><IconBell dot={unread}/></div>
       <div className="comm-block-text">
         <div className="comm-block-title">Новости и обновления</div>
-        <div className="comm-block-sub">Что изменилось в приложении</div>
+        <div className="comm-block-sub">{unread?"Есть новые посты":"Что изменилось в приложении"}</div>
       </div>
       <IconChevron/>
     </div>
@@ -3015,7 +3017,7 @@ function NewsView({onBack}) {
               <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between"}}>
                 <span>{p.title}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(p.created_at.slice(0,10))}</span>
               </div>
-              <div style={{fontSize:14,color:"#CCC",lineHeight:1.5,marginTop:6}} dangerouslySetInnerHTML={{__html:markdownLite(p.body)}}/>
+              <div className="news-body" dangerouslySetInnerHTML={{__html:markdownLite(p.body)}}/>
             </div>
           ))}
     </div>
@@ -3386,7 +3388,7 @@ function CommunityTab({friends, setFriends, toast, badge, onBadgeChange, reloadB
 
   return (
     <div className="page">
-      <NewsSection onOpen={()=>setView("news")}/>
+      <NewsSection onOpen={()=>setView("news")} unread={badge.unread_news}/>
       <FriendsSection onOpen={()=>setView("friends")} pendingCount={badge.pending_requests}/>
       <FeedSection/>
     </div>
@@ -3769,8 +3771,10 @@ export default function App() {
         <div className="tab-bar">
           {["Тренировки","Упражнения","Сообщество","Замеры","Профиль"].map((t,i)=>(
             <button key={i} className={`tab${tab===i?" active":""}`} onClick={()=>setTab(i)}>
-              {t}
-              {i===2&&(communityBadge.unread_news||communityBadge.pending_requests>0)&&<span className="tab-badge-dot"/>}
+              <span className="tab-label">
+                {t}
+                {i===2&&(communityBadge.unread_news||communityBadge.pending_requests>0)&&<span className="tab-badge-dot"/>}
+              </span>
             </button>
           ))}
         </div>
