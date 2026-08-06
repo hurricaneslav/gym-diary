@@ -1,6 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api, BOT_USERNAME } from "./api.js";
 
+/** Мой собственный Telegram user_id (строкой — как id приходят из API) —
+ * нужен на фронте только для одной вещи: показать кнопку удаления у своих
+ * же комментариев в ленте сообщества. Источник тот же, что использует
+ * getInitData() в api.js, только распарсенный, а не как строка. */
+function getMyUserId(){
+  const id = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+  return id!=null ? String(id) : "12345"; // тот же dev-фолбэк, что и в api.js
+}
+
 const today = () => new Date().toISOString().slice(0, 10);
 const formatDate = (iso) => { try { const [y,m,d]=iso.split("-"); return `${d}.${m}.${y}`; } catch { return iso; } };
 
@@ -70,6 +79,11 @@ const IconArrowUp = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="
 const IconArrowDown = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 3v8M3.5 7.5L7 11l3.5-3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 const IconTemplate = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1.5" y="1.5" width="11" height="11" rx="1" stroke="currentColor" strokeWidth="1.2"/><path d="M4 5h6M4 7.5h6M4 10h3.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/></svg>;
 const IconKeyboard = () => <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><rect x="1.5" y="4.5" width="17" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M4.5 8h1M8 8h1M11.5 8h1M15 8h1M4.5 11h1M8 11h1M11.5 11h1M15 11h1M6.5 13.5h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>;
+const IconProgression = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 10.5l3-3.5 2.5 2L11.5 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><path d="M8.5 3H11.5V6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IconBell = ({dot=false}) => <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M5 7.5a4 4 0 018 0v3l1 1.5H4l1-1.5v-3z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><path d="M7.3 13.5a1.7 1.7 0 003.4 0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>{dot&&<circle cx="13.5" cy="4" r="2.5" fill="#FF4444" stroke="#0A0A0A" strokeWidth="1"/>}</svg>;
+const IconPeople = ({dot=false}) => <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="6.5" cy="6" r="2.3" stroke="currentColor" strokeWidth="1.3"/><circle cx="12.5" cy="7" r="1.9" stroke="currentColor" strokeWidth="1.3"/><path d="M2 15c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><path d="M11.5 11.3c1.8.2 3 1.4 3 3.7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>{dot&&<circle cx="15" cy="3.5" r="2.5" fill="#FF4444" stroke="#0A0A0A" strokeWidth="1"/>}</svg>;
+const IconHeart = ({filled=false}) => <svg width="15" height="15" viewBox="0 0 15 15" fill={filled?"#F6485B":"none"}><path d="M7.5 12.8s-5.2-3.3-5.2-6.9a2.9 2.9 0 015.2-1.8 2.9 2.9 0 015.2 1.8c0 3.6-5.2 6.9-5.2 6.9z" stroke={filled?"#F6485B":"currentColor"} strokeWidth="1.2" strokeLinejoin="round"/></svg>;
+const IconComment = () => <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M2 3h11v7H6l-2.5 2.5V10H2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>;
 
 // ── Прогрессия: справочники (дублируют main.py по необходимости — как и
 // MEASUREMENT_FIELDS, это чисто визуальные подписи/дефолты, при правке
@@ -313,6 +327,27 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .prog-hint{margin:0 14px 10px;padding:10px 12px;font-size:12px;color:#CCC;border:1px solid #333;background:#141414;cursor:pointer;line-height:1.5}
 .prog-hint b{color:#FFF}
 .prog-lock-detail{font-size:13px;color:#6E6E6E;margin-top:14px;line-height:1.6;text-align:center}
+.prog-lock-dot{margin-left:6px;font-size:11px;opacity:.7}
+.tab{position:relative}
+.tab-badge-dot{position:absolute;top:8px;right:calc(50% - 22px);width:7px;height:7px;border-radius:50%;background:#F6485B;border:1px solid #0A0A0A}
+.comm-block{border:1px solid #3A3A3A;padding:14px 16px;margin-bottom:10px;cursor:pointer;background:#111;display:flex;align-items:center;gap:12px;transition:border-color .15s}
+.comm-block:hover{border-color:#555}
+.comm-block-icon{width:36px;height:36px;background:#1A1A1A;border:1px solid #3A3A3A;display:flex;align-items:center;justify-content:center;color:#CCC;flex-shrink:0}
+.comm-block-text{flex:1;min-width:0}
+.comm-block-title{font-size:14px;font-weight:600;color:#FFF}
+.comm-block-sub{font-size:12px;color:#777;margin-top:2px}
+.comm-badge-num{background:#F6485B;color:#FFF;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 5px;flex-shrink:0}
+.feed-post{border:1px solid #3A3A3A;background:#111;padding:14px 16px;margin-bottom:12px}
+.feed-post-hd{display:flex;align-items:center;gap:12px}
+.feed-post-actions{display:flex;gap:16px;margin-top:12px;padding-top:10px;border-top:1px solid #242424}
+.feed-action{display:flex;align-items:center;gap:5px;background:none;border:none;color:#888;font-size:12px;cursor:pointer;padding:4px 0}
+.feed-action.active{color:#F6485B}
+.feed-comments{margin-top:10px;padding-top:10px;border-top:1px solid #242424}
+.feed-comment{display:flex;align-items:baseline;gap:6px;font-size:13px;margin-bottom:6px;flex-wrap:wrap}
+.feed-comment-author{font-weight:600;color:#CCC;flex-shrink:0}
+.feed-comment-text{color:#AAA;word-break:break-word}
+.feed-comment-del{background:none;border:none;color:#555;cursor:pointer;margin-left:auto;padding:2px}
+.feed-comment-input-row{display:flex;gap:8px;margin-top:8px}
 `;
 
 // ── Аварийное сохранение черновика в localStorage ────────────────────────
@@ -1055,7 +1090,7 @@ function TemplatesView({templates, setTemplates, workouts, toast, templateDraft,
 }
 
 // ── WorkoutsTab ───────────────────────────────────────────────────────────
-function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraft, progressions=[], onProgressionsChange, templates=[], setTemplates, templateDraft, setTemplateDraft}) {
+function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraft, progressions=[], onProgressionsChange, templates=[], setTemplates, templateDraft, setTemplateDraft, isPremium, premiumChecked, reloadProgressions, progressionDraft, setProgressionDraft}) {
   const [showNew,setShowNew]=useState(false);
   const [editId,setEditId]=useState(null);
   const [detailId,setDetailId]=useState(null);
@@ -1063,12 +1098,21 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
   const [renameVal,setRenameVal]=useState("");
   const [restoredDraft,setRestoredDraft]=useState(null); // черновик, восстановленный в текущей открытой шторке
   const [showTemplates,setShowTemplates]=useState(false);
+  // Раздел «Прогрессия» переехал сюда же (над шаблонами) — своя под-страница,
+  // тот же паттерн, что и showTemplates.
+  const [showProgression,setShowProgression]=useState(false);
 
   // Если плашка-черновик шаблона восстанавливается кликом снаружи (пока мы,
   // допустим, смотрели список тренировок) — переходим в раздел шаблонов сами.
   useEffect(()=>{
     if(templateDraft?.restoring) setShowTemplates(true);
   },[templateDraft]);
+
+  // Аналогично для черновика прогрессии — если он восстанавливается кликом
+  // по плавающей плашке снаружи (мы на списке тренировок), открываем раздел.
+  useEffect(()=>{
+    if(progressionDraft?.restoring) setShowProgression(true);
+  },[progressionDraft]);
 
   const detail=detailId!=null?workouts.find(w=>w.id===detailId):null;
   const editTarget=editId!=null?workouts.find(w=>w.id===editId):null;
@@ -1213,6 +1257,15 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
     />
   );
 
+  if(showProgression) return (
+    <ProgressionTab
+      isPremium={isPremium} premiumChecked={premiumChecked} progressions={progressions}
+      reloadProgressions={reloadProgressions} workouts={workouts} toast={toast}
+      progressionDraft={progressionDraft} setProgressionDraft={setProgressionDraft}
+      onBack={()=>setShowProgression(false)}
+    />
+  );
+
   if(detail) return (
     <div className="page">
       <div className="det-hd">
@@ -1259,6 +1312,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
 
   return (
     <div className="page">
+      <button className="btn ghost" style={{marginBottom:10}} onClick={()=>setShowProgression(true)}><IconProgression/>Прогрессия{!isPremium&&premiumChecked&&<span className="prog-lock-dot">🔒</span>}</button>
       <button className="btn ghost" style={{marginBottom:10}} onClick={()=>setShowTemplates(true)}><IconTemplate/>Шаблоны тренировок</button>
       <button className="btn" onClick={()=>guardOpen(()=>setShowNew(true))}><IconPlus/>Новая тренировка</button>
       {workouts.length===0 && !listDraft
@@ -2174,7 +2228,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
 }
 
 // ── ProgressionTab ──────────────────────────────────────────────────────
-function ProgressionTab({ isPremium, premiumChecked, progressions, reloadProgressions, workouts, toast, progressionDraft, setProgressionDraft }) {
+function ProgressionTab({ isPremium, premiumChecked, progressions, reloadProgressions, workouts, toast, progressionDraft, setProgressionDraft, onBack }) {
   const [detailId,setDetailId]=useState(null);
   const [showChoice,setShowChoice]=useState(false);
   const [addMode,setAddMode]=useState(null);
@@ -2195,12 +2249,16 @@ function ProgressionTab({ isPremium, premiumChecked, progressions, reloadProgres
   },[progressionDraft]);
 
   if(!premiumChecked) return (
-    <div className="page"><div className="loading"><div className="spinner"/><div>Загрузка...</div></div></div>
+    <div className="page">
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button><span className="det-title">Прогрессия</span></div>
+      <div className="loading"><div className="spinner"/><div>Загрузка...</div></div>
+    </div>
   );
 
   if(!isPremium) return (
     <div className="page">
-      <div className="empty" style={{paddingTop:56}}>
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button><span className="det-title">Прогрессия</span></div>
+      <div className="empty" style={{paddingTop:36}}>
         <div className="empty-icon">🔒</div>
         Раздел «Прогрессия» доступен премиум-пользователям по подписке.
         <div className="prog-lock-detail">
@@ -2240,6 +2298,7 @@ function ProgressionTab({ isPremium, premiumChecked, progressions, reloadProgres
         <ProgressionDetail id={detailId} onBack={()=>setDetailId(null)} onChanged={reloadProgressions} toast={toast}/>
       ) : (
         <>
+          <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button><span className="det-title">Прогрессия</span></div>
           <button className="btn" onClick={()=>guardOpen(()=>setShowChoice(true))}><IconPlus/>Добавить прогрессию</button>
           {listDraft && (
             <div className="card draft-card" onClick={()=>setProgressionDraft(p=>({...p,restoring:true}))}>
@@ -2910,18 +2969,436 @@ function FriendProfileView({friendId, onBack, onRemove}) {
   );
 }
 
-// ── ProfileTab ────────────────────────────────────────────────────────────
-function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch, toast, hasUnsavedDrafts}) {
-  const [detailId,setDetailId]=useState(null);
-  const [renamingId,setRenamingId]=useState(null);
-  const [renameVal,setRenameVal]=useState("");
-  const [showCreate,setShowCreate]=useState(false);
+// ── CommunityTab: Новости и обновления + Друзья + лента ─────────────────────
 
+function markdownLite(text){
+  // Простейший markdown: **жирный**, *курсив*, переносы строк — без внешних
+  // библиотек, ровно то, что поддерживает textarea в админке новостей.
+  const esc = html_escape(text);
+  const bold = esc.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  const italic = bold.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  return italic.replace(/\n/g, "<br/>");
+}
+function html_escape(s){
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function NewsSection({onOpen}) {
+  return (
+    <div className="comm-block" onClick={onOpen}>
+      <div className="comm-block-icon"><IconBell/></div>
+      <div className="comm-block-text">
+        <div className="comm-block-title">Новости и обновления</div>
+        <div className="comm-block-sub">Что изменилось в приложении</div>
+      </div>
+      <IconChevron/>
+    </div>
+  );
+}
+
+function NewsView({onBack}) {
+  const [posts,setPosts]=useState(null);
+
+  useEffect(()=>{
+    api.getNews().then(setPosts).catch(()=>setPosts([]));
+  },[]);
+
+  return (
+    <div className="page">
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button><span className="det-title">Новости и обновления</span></div>
+      {posts===null
+        ? <div className="loading"><div className="spinner"/><div>Загрузка...</div></div>
+        : posts.length===0
+          ? <div className="empty"><div className="empty-icon">📰</div>Пока нет новостей</div>
+          : posts.map(p=>(
+            <div key={p.id} className="w-ex" style={{marginBottom:10}}>
+              <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between"}}>
+                <span>{p.title}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(p.created_at.slice(0,10))}</span>
+              </div>
+              <div style={{fontSize:14,color:"#CCC",lineHeight:1.5,marginTop:6}} dangerouslySetInnerHTML={{__html:markdownLite(p.body)}}/>
+            </div>
+          ))}
+    </div>
+  );
+}
+
+function FriendsSection({onOpen, pendingCount}) {
+  return (
+    <div className="comm-block" onClick={onOpen}>
+      <div className="comm-block-icon"><IconPeople/></div>
+      <div className="comm-block-text">
+        <div className="comm-block-title">Друзья</div>
+        <div className="comm-block-sub">{pendingCount>0?`${pendingCount} новых заявок`:"Список, приглашения, заявки"}</div>
+      </div>
+      {pendingCount>0&&<span className="comm-badge-num">{pendingCount}</span>}
+      <IconChevron/>
+    </div>
+  );
+}
+
+function FriendsView({friends, setFriends, onBack, toast, onRequestsChanged}) {
   const [friendQuery,setFriendQuery]=useState("");
   const [friendResults,setFriendResults]=useState(null);
   const [searching,setSearching]=useState(false);
   const [openFriendId,setOpenFriendId]=useState(null);
   const [inviteBusy,setInviteBusy]=useState(false);
+  const [requests,setRequests]=useState(null);
+  const [busyReqId,setBusyReqId]=useState(null);
+
+  const loadRequests=()=>{ api.getFriendRequests().then(setRequests).catch(()=>setRequests([])); };
+  useEffect(()=>{ loadRequests(); },[]);
+
+  const handleInvite=async()=>{
+    if(!BOT_USERNAME){
+      window.alert("Юзернейм бота не настроен. Добавь VITE_BOT_USERNAME в переменные окружения фронтенда.");
+      return;
+    }
+    setInviteBusy(true);
+    try{
+      const {code}=await api.getInviteCode();
+      const link=`https://t.me/${BOT_USERNAME}?start=add_${code}`;
+      const shareUrl=`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Присоединяйся к моему дневнику тренировок 💪")}`;
+      if(window.Telegram?.WebApp?.openTelegramLink){
+        window.Telegram.WebApp.openTelegramLink(shareUrl);
+      }else{
+        window.open(shareUrl,"_blank");
+      }
+    }catch(e){
+      toast("Не удалось создать ссылку");
+    }
+    setInviteBusy(false);
+  };
+
+  const handleSearch=async()=>{
+    if(!friendQuery.trim())return;
+    setSearching(true);
+    try{
+      const res=await api.searchFriend(friendQuery.trim());
+      setFriendResults(res);
+    }catch(e){
+      setFriendResults([]);
+    }
+    setSearching(false);
+  };
+
+  const handleAddByUsername=async(result)=>{
+    try{
+      const res=await api.addFriendByUsername(result.username);
+      setFriendResults(null);
+      setFriendQuery("");
+      if(res.status==="accepted"){
+        // Он уже успел отправить нам заявку раньше — теперь мы сразу друзья.
+        setFriends(prev=>[...prev, {id:result.id, username:result.username, name:result.name}]);
+        toast("Вы теперь друзья ✓");
+      }else if(res.status==="already_friends"){
+        toast("Вы уже друзья");
+      }else if(res.status==="already_pending"){
+        toast("Заявка уже отправлена ранее");
+      }else{
+        toast("Заявка отправлена ✓");
+      }
+    }catch(e){
+      window.alert("Не удалось отправить заявку — возможно пользователь ещё не открывал приложение");
+    }
+  };
+
+  const handleRemoveFriend=async(id)=>{
+    if(!window.confirm("Удалить из друзей?"))return;
+    await api.removeFriend(id);
+    setFriends(prev=>prev.filter(f=>f.id!==id));
+  };
+
+  const handleAccept=async(req)=>{
+    setBusyReqId(req.request_id);
+    try{
+      await api.acceptFriendRequest(req.request_id);
+      setRequests(prev=>prev.filter(r=>r.request_id!==req.request_id));
+      setFriends(prev=>[...prev, {id:req.id, username:req.username, name:req.name}]);
+      toast("Заявка принята ✓");
+      onRequestsChanged?.();
+    }catch(e){
+      window.alert("Не удалось принять заявку");
+    }
+    setBusyReqId(null);
+  };
+
+  const handleDecline=async(req)=>{
+    setBusyReqId(req.request_id);
+    try{
+      await api.declineFriendRequest(req.request_id);
+      setRequests(prev=>prev.filter(r=>r.request_id!==req.request_id));
+      onRequestsChanged?.();
+    }catch(e){
+      window.alert("Не удалось отклонить заявку");
+    }
+    setBusyReqId(null);
+  };
+
+  if(openFriendId) return (
+    <FriendProfileView
+      friendId={openFriendId}
+      onBack={()=>setOpenFriendId(null)}
+      onRemove={async()=>{await handleRemoveFriend(openFriendId);setOpenFriendId(null);}}
+    />
+  );
+
+  return (
+    <div className="page">
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button><span className="det-title">Друзья</span></div>
+
+      <button className="btn ghost" onClick={handleInvite} disabled={inviteBusy}>
+        <IconLink/>{inviteBusy?"Готовим ссылку...":"Пригласить друга"}
+      </button>
+      <div className="search-row">
+        <input className="inp" placeholder="Юзернейм друга" value={friendQuery} onChange={e=>setFriendQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSearch()}/>
+        <button className="search-btn" onClick={handleSearch} disabled={searching}>{searching?"...":"Найти"}</button>
+      </div>
+      {friendResults&&(
+        friendResults.length===0
+          ?<p style={{color:"#555",fontSize:13,marginBottom:14}}>Никого не нашли</p>
+          :friendResults.map(r=>(
+            <div key={r.id} className="search-result">
+              <span>{r.name}{r.username&&<span style={{color:"#555"}}> · @{r.username}</span>}</span>
+              <button className="edit-badge" onClick={()=>handleAddByUsername(r)}>Отправить заявку</button>
+            </div>
+          ))
+      )}
+
+      {requests&&requests.length>0&&(
+        <>
+          <div className="sec-lbl" style={{marginTop:24}}>Заявки в друзья — {requests.length}</div>
+          {requests.map(r=>(
+            <div key={r.request_id} className="card" style={{cursor:"default"}}>
+              <div className="friend-row" style={{minWidth:0}}>
+                <div className="avatar">{(r.name||"?")[0].toUpperCase()}</div>
+                <div style={{minWidth:0}}>
+                  <div className="card-title">{r.name}</div>
+                  {r.username&&<div className="card-sub">@{r.username}</div>}
+                </div>
+              </div>
+              <div style={{display:"flex",gap:6,flexShrink:0}}>
+                <button className="edit-badge" disabled={busyReqId===r.request_id} onClick={()=>handleAccept(r)}>Принять</button>
+                <button className="del-btn" disabled={busyReqId===r.request_id} onClick={()=>handleDecline(r)}><IconClose/></button>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      <div className="sec-lbl" style={{marginTop:24}}>Мои друзья</div>
+      {friends.length===0
+        ?<p style={{color:"#555",fontSize:13,marginTop:4}}>Пока нет друзей — пригласи через ссылку или найди по юзернейму</p>
+        :friends.map(f=>(
+          <div key={f.id} className="card" onClick={()=>setOpenFriendId(f.id)}>
+            <div className="friend-row" style={{minWidth:0}}>
+              <div className="avatar">{(f.name||"?")[0].toUpperCase()}</div>
+              <div style={{minWidth:0}}>
+                <div className="card-title">{f.name}</div>
+                {f.username&&<div className="card-sub">@{f.username}</div>}
+              </div>
+            </div>
+            <IconChevron/>
+          </div>
+        ))}
+    </div>
+  );
+}
+
+function FeedPost({post, onLikeToggle, onCommentAdd, onCommentDelete}) {
+  const [commentText,setCommentText]=useState("");
+  const [showComments,setShowComments]=useState(false);
+  const [busy,setBusy]=useState(false);
+
+  const submitComment=async()=>{
+    const text=commentText.trim();
+    if(!text)return;
+    setBusy(true);
+    try{
+      await onCommentAdd(post, text);
+      setCommentText("");
+    }finally{ setBusy(false); }
+  };
+
+  return (
+    <div className="feed-post">
+      <div className="feed-post-hd">
+        <div className="avatar">{(post.author.name||"?")[0].toUpperCase()}</div>
+        <div style={{minWidth:0,flex:1}}>
+          <div className="card-title">{post.author.name}</div>
+          <div className="card-sub">{formatDate(post.date)} · {post.post_type==="workout"?post.title:`Замер «${post.title}»`}</div>
+        </div>
+      </div>
+
+      {post.post_type==="workout"?(
+        <div className="w-sets" style={{marginTop:10}}>
+          {(post.exercises||[]).map((ex,ei)=>(
+            <div key={ei} style={{marginBottom:12}}>
+              <div style={{fontSize:13,color:"#AAA",marginBottom:4,fontWeight:600}}>{ex.name||`Упражнение ${ei+1}`}</div>
+              {ex.sets.map((s,si)=>(
+                <div key={si} className="w-set-row">
+                  <span className="w-set-n">{si+1}</span>
+                  {s.bilateral?(
+                    <span className="w-set-v w-set-bi">
+                      <span className="w-set-bi-side"><span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}</span>
+                      <span className="w-set-bi-sep">|</span>
+                      <span className="w-set-bi-side"><span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}</span>
+                    </span>
+                  ):(
+                    <span className="w-set-v">{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
+                  )}
+                </div>
+              ))}
+              {ex.comment&&<div className="w-ex-comment" style={{borderTop:"none",paddingLeft:0}}>{ex.comment}</div>}
+            </div>
+          ))}
+        </div>
+      ):(
+        <div style={{marginTop:10}}>
+          {MEASUREMENT_FIELDS.filter(f=>post[f.key]!==""&&post[f.key]!=null).map(f=>(
+            <div key={f.key} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"1px solid #1A1A1A"}}>
+              <span style={{color:"#888",fontSize:12}}>{f.label}</span>
+              <span style={{fontSize:13,fontWeight:600}}>{post[f.key]} <span style={{color:"#555",fontWeight:400,fontSize:11}}>{f.key==="weight"?"кг":"см"}</span></span>
+            </div>
+          ))}
+          {post.comment&&<div className="ex-hist-comment">{post.comment}</div>}
+        </div>
+      )}
+
+      <div className="feed-post-actions">
+        <button className={`feed-action${post.liked_by_me?" active":""}`} onClick={()=>onLikeToggle(post)}>
+          <IconHeart filled={post.liked_by_me}/>{post.like_count>0?post.like_count:""}
+        </button>
+        <button className="feed-action" onClick={()=>setShowComments(v=>!v)}>
+          <IconComment/>{post.comments.length>0?post.comments.length:""}
+        </button>
+      </div>
+
+      {showComments&&(
+        <div className="feed-comments">
+          {post.comments.map(c=>(
+            <div key={c.id} className="feed-comment">
+              <span className="feed-comment-author">{c.author.name}</span>
+              <span className="feed-comment-text">{c.text}</span>
+              {c.author.id===getMyUserId()&&(
+                <button className="feed-comment-del" onClick={()=>onCommentDelete(post, c.id)}><IconClose/></button>
+              )}
+            </div>
+          ))}
+          <div className="feed-comment-input-row">
+            <input className="inp" placeholder="Комментарий..." value={commentText} onChange={e=>setCommentText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submitComment()}/>
+            <button className="search-btn" disabled={busy||!commentText.trim()} onClick={submitComment}>➤</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeedSection() {
+  const [posts,setPosts]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [loadingMore,setLoadingMore]=useState(false);
+  const [nextBefore,setNextBefore]=useState(null);
+  const [error,setError]=useState(false);
+
+  const load=async(before)=>{
+    try{
+      const res=await api.getFeed(before);
+      setPosts(prev=> before ? [...prev, ...res.posts] : res.posts);
+      setNextBefore(res.next_before);
+      setError(false);
+    }catch(e){
+      setError(true);
+    }
+  };
+
+  useEffect(()=>{ load(null).finally(()=>setLoading(false)); },[]);
+
+  const handleLoadMore=async()=>{
+    setLoadingMore(true);
+    await load(nextBefore);
+    setLoadingMore(false);
+  };
+
+  const handleLikeToggle=async(post)=>{
+    // Оптимистичное обновление — лента может быть длинной, ждать ответ сервера
+    // на каждый тап по сердечку будет ощущаться медленно.
+    setPosts(prev=>prev.map(p=>p.post_type===post.post_type&&p.post_id===post.post_id
+      ? {...p, liked_by_me:!p.liked_by_me, like_count:p.like_count+(p.liked_by_me?-1:1)}
+      : p
+    ));
+    try{
+      const res=await api.toggleLike(post.post_type, post.post_id);
+      setPosts(prev=>prev.map(p=>p.post_type===post.post_type&&p.post_id===post.post_id
+        ? {...p, liked_by_me:res.liked_by_me, like_count:res.like_count}
+        : p
+      ));
+    }catch(e){ /* при сбое оставляем оптимистичное значение — не критично */ }
+  };
+
+  const handleCommentAdd=async(post, text)=>{
+    const comment=await api.addComment(post.post_type, post.post_id, text);
+    setPosts(prev=>prev.map(p=>p.post_type===post.post_type&&p.post_id===post.post_id
+      ? {...p, comments:[...p.comments, comment]}
+      : p
+    ));
+  };
+
+  const handleCommentDelete=async(post, commentId)=>{
+    await api.deleteComment(commentId);
+    setPosts(prev=>prev.map(p=>p.post_type===post.post_type&&p.post_id===post.post_id
+      ? {...p, comments:p.comments.filter(c=>c.id!==commentId)}
+      : p
+    ));
+  };
+
+  if(loading) return <div className="loading"><div className="spinner"/><div>Загрузка...</div></div>;
+  if(error) return <div className="empty" style={{paddingTop:24}}><div className="empty-icon">⚠️</div>Не удалось загрузить ленту</div>;
+
+  return (
+    <>
+      <div className="sec-lbl" style={{marginTop:28}}>Лента друзей</div>
+      {posts.length===0
+        ? <div className="empty" style={{paddingTop:12}}><div className="empty-icon">📭</div>Пока пусто.<br/>Как только друзья начнут записывать тренировки и замеры, они появятся здесь.</div>
+        : posts.map(p=>(
+          <FeedPost key={`${p.post_type}-${p.post_id}`} post={p} onLikeToggle={handleLikeToggle} onCommentAdd={handleCommentAdd} onCommentDelete={handleCommentDelete}/>
+        ))}
+      {nextBefore&&(
+        <button className="btn ghost" onClick={handleLoadMore} disabled={loadingMore} style={{marginTop:10}}>
+          {loadingMore?"Загрузка...":"Показать ещё"}
+        </button>
+      )}
+    </>
+  );
+}
+
+function CommunityTab({friends, setFriends, toast, badge, onBadgeChange, reloadBadge}) {
+  const [view,setView]=useState(null); // null | "news" | "friends"
+
+  if(view==="news") return <NewsView onBack={()=>{setView(null);reloadBadge();}}/>;
+  if(view==="friends") return (
+    <FriendsView
+      friends={friends} setFriends={setFriends} toast={toast}
+      onBack={()=>{setView(null);reloadBadge();}}
+      onRequestsChanged={reloadBadge}
+    />
+  );
+
+  return (
+    <div className="page">
+      <NewsSection onOpen={()=>setView("news")}/>
+      <FriendsSection onOpen={()=>setView("friends")} pendingCount={badge.pending_requests}/>
+      <FeedSection/>
+    </div>
+  );
+}
+
+// ── ProfileTab ────────────────────────────────────────────────────────────
+function ProfileTab({profiles, setProfiles, onProfileSwitch, toast, hasUnsavedDrafts}) {
+  const [detailId,setDetailId]=useState(null);
+  const [renamingId,setRenamingId]=useState(null);
+  const [renameVal,setRenameVal]=useState("");
+  const [showCreate,setShowCreate]=useState(false);
 
   const detail=detailId!=null?profiles.find(p=>p.id===detailId):null;
 
@@ -3007,65 +3484,6 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
     toast("Профиль создан ✓");
   };
 
-  const handleInvite=async()=>{
-    if(!BOT_USERNAME){
-      window.alert("Юзернейм бота не настроен. Добавь VITE_BOT_USERNAME в переменные окружения фронтенда.");
-      return;
-    }
-    setInviteBusy(true);
-    try{
-      const {code}=await api.getInviteCode();
-      const link=`https://t.me/${BOT_USERNAME}?start=add_${code}`;
-      const shareUrl=`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Присоединяйся к моему дневнику тренировок 💪")}`;
-      if(window.Telegram?.WebApp?.openTelegramLink){
-        window.Telegram.WebApp.openTelegramLink(shareUrl);
-      }else{
-        window.open(shareUrl,"_blank");
-      }
-    }catch(e){
-      toast("Не удалось создать ссылку");
-    }
-    setInviteBusy(false);
-  };
-
-  const handleSearch=async()=>{
-    if(!friendQuery.trim())return;
-    setSearching(true);
-    try{
-      const res=await api.searchFriend(friendQuery.trim());
-      setFriendResults(res);
-    }catch(e){
-      setFriendResults([]);
-    }
-    setSearching(false);
-  };
-
-  const handleAddByUsername=async(result)=>{
-    try{
-      await api.addFriendByUsername(result.username);
-      setFriendResults(null);
-      setFriendQuery("");
-      setFriends(prev=>[...prev, {id:result.id, username:result.username, name:result.name}]);
-      toast("Друг добавлен ✓");
-    }catch(e){
-      window.alert("Не удалось добавить — возможно пользователь ещё не открывал приложение");
-    }
-  };
-
-  const handleRemoveFriend=async(id)=>{
-    if(!window.confirm("Удалить из друзей?"))return;
-    await api.removeFriend(id);
-    setFriends(prev=>prev.filter(f=>f.id!==id));
-  };
-
-  if(openFriendId) return (
-    <FriendProfileView
-      friendId={openFriendId}
-      onBack={()=>setOpenFriendId(null)}
-      onRemove={async()=>{await handleRemoveFriend(openFriendId);setOpenFriendId(null);}}
-    />
-  );
-
   if(detail){
     return(
       <div className="page">
@@ -3111,41 +3529,6 @@ function ProfileTab({profiles, setProfiles, friends, setFriends, onProfileSwitch
           <IconChevron/>
         </div>
       ))}
-
-      <div className="sec-lbl" style={{marginTop:32}}>Друзья</div>
-      <button className="btn ghost" onClick={handleInvite} disabled={inviteBusy}>
-        <IconLink/>{inviteBusy?"Готовим ссылку...":"Пригласить друга"}
-      </button>
-      <div className="search-row">
-        <input className="inp" placeholder="Юзернейм друга" value={friendQuery} onChange={e=>setFriendQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSearch()}/>
-        <button className="search-btn" onClick={handleSearch} disabled={searching}>{searching?"...":"Найти"}</button>
-      </div>
-      {friendResults&&(
-        friendResults.length===0
-          ?<p style={{color:"#555",fontSize:13,marginBottom:14}}>Никого не нашли</p>
-          :friendResults.map(r=>(
-            <div key={r.id} className="search-result">
-              <span>{r.name}{r.username&&<span style={{color:"#555"}}> · @{r.username}</span>}</span>
-              <button className="edit-badge" onClick={()=>handleAddByUsername(r)}>Добавить</button>
-            </div>
-          ))
-      )}
-
-      {friends.length===0
-        ?<p style={{color:"#555",fontSize:13,marginTop:4}}>Пока нет друзей — пригласи через ссылку или найди по юзернейму</p>
-        :friends.map(f=>(
-          <div key={f.id} className="card" onClick={()=>setOpenFriendId(f.id)}>
-            <div className="friend-row" style={{minWidth:0}}>
-              <div className="avatar">{(f.name||"?")[0].toUpperCase()}</div>
-              <div style={{minWidth:0}}>
-                <div className="card-title">{f.name}</div>
-                {f.username&&<div className="card-sub">@{f.username}</div>}
-              </div>
-            </div>
-            <IconChevron/>
-          </div>
-        ))}
-
       {showCreate&&<ProfileCreateSheet onSave={handleCreate} onClose={()=>setShowCreate(false)}/>}
     </div>
   );
@@ -3169,6 +3552,7 @@ export default function App() {
   const [measurementDraft,setMeasurementDraft]=useState(null); // {editId, name, date, vals, restoring}
   const [progressionDraft,setProgressionDraft]=useState(null); // {mode, ...поля мастера/формы, restoring}
   const [templateDraft,setTemplateDraft]=useState(null); // {editId, name, exercises, restoring}
+  const [communityBadge,setCommunityBadge]=useState({unread_news:false, pending_requests:0});
 
   const showToast=(msg)=>{
     setToastMsg(msg);
@@ -3227,6 +3611,7 @@ export default function App() {
     const legacyParam = params.get("invite");
     const rawInvite = legacyParam || nativeParam;
     let justAddedFriend = false;
+    let friendRequestSent = false;
 
     if(rawInvite && rawInvite.startsWith("add_")){
       const code = rawInvite.slice(4);
@@ -3239,12 +3624,14 @@ export default function App() {
       }
 
       try{
-        const before = await api.getFriends();
-        await api.addFriendByCode(code);
-        const after = await api.getFriends();
-        justAddedFriend = after.length > before.length;
+        // Добавление теперь требует подтверждения получателя — по ссылке
+        // отправляется заявка (или, если получатель уже сам отправил такую
+        // же заявку нам, они автоматически становятся друзьями сразу).
+        const res = await api.addFriendByCode(code);
+        justAddedFriend = res.status === "accepted";
+        friendRequestSent = res.status === "pending";
       }catch(e){
-        // ссылка невалидна или уже друзья — молча игнорируем
+        // ссылка невалидна — молча игнорируем
       }
     }
 
@@ -3259,6 +3646,7 @@ export default function App() {
       setFriends(f);
       setLoading(false);
       if(justAddedFriend) showToast("Вы добавлены в друзья ✓");
+      else if(friendRequestSent) showToast("Заявка в друзья отправлена ✓");
 
       // Если процесс приложения был убит в фоне до того, как незавершённая
       // тренировка/замер была сохранена или явно закрыта — предлагаем её
@@ -3286,6 +3674,18 @@ export default function App() {
   const reloadProgressions=()=>{
     api.getProgressions().then(setProgressions).catch(()=>{});
   };
+
+  const reloadCommunityBadge=()=>{
+    api.getCommunityBadge().then(setCommunityBadge).catch(()=>{});
+  };
+
+  // Бейдж «Сообщество» (непрочитанные новости + заявки в друзья) — грузим
+  // при старте и обновляем при каждом переключении на саму вкладку
+  // (например пользователь принял заявку и вернулся) — не требует опроса
+  // по таймеру, так как оба события инициированы либо этим же, либо другим
+  // пользователем и подтягиваются при следующем открытии вкладки.
+  useEffect(()=>{ reloadCommunityBadge(); },[]);
+  useEffect(()=>{ if(tab===2) reloadCommunityBadge(); },[tab]);
 
   // Отдельный, ни на что не блокирующий эффект: у большинства пользователей
   // премиума нет, это ожидаемый штатный ответ, а не ошибка — поэтому он не
@@ -3338,9 +3738,12 @@ export default function App() {
   const showWorkoutBar = workoutDraft && !workoutDraft.restoring && tab!==0;
   // Аналогично для замера — прячем на вкладке Замеры.
   const showMeasurementBar = measurementDraft && !measurementDraft.restoring && tab!==3;
-  // Аналогично для прогрессии — прячем на вкладке Прогрессия, и только для
-  // премиум-пользователей (если премиум отключили, старый черновик не всплывает).
-  const showProgressionBar = isPremium && progressionDraft && !progressionDraft.restoring && tab!==2;
+  // Прогрессия (как и шаблоны) больше не отдельная верхнеуровневая вкладка —
+  // вложена внутрь "Тренировки", поэтому плашка не прячется по вкладке (иначе
+  // на вкладке Тренировки, но не в разделе Прогрессия, её было бы не видно) —
+  // это единственный способ вернуться к незавершённой прогрессии откуда угодно.
+  // Премиум-условие сохранено: если премиум отключили, старый черновик не всплывает.
+  const showProgressionBar = isPremium && progressionDraft && !progressionDraft.restoring;
   // У шаблонов нет отдельной верхнеуровневой вкладки (раздел вложен внутрь
   // "Тренировки"), поэтому в отличие от остальных плашка не прячется по вкладке —
   // это единственный способ вернуться к незавершённому шаблону откуда угодно.
@@ -3364,15 +3767,18 @@ export default function App() {
       <style>{css}</style>
       <div className="app-frame" style={draftBarsCount?{"--draft-bars-h":`${draftBarsCount*80}px`}:undefined}>
         <div className="tab-bar">
-          {["Тренировки","Упражнения","Прогрессия","Замеры","Профиль"].map((t,i)=>(
-            <button key={i} className={`tab${tab===i?" active":""}`} onClick={()=>setTab(i)}>{t}</button>
+          {["Тренировки","Упражнения","Сообщество","Замеры","Профиль"].map((t,i)=>(
+            <button key={i} className={`tab${tab===i?" active":""}`} onClick={()=>setTab(i)}>
+              {t}
+              {i===2&&(communityBadge.unread_news||communityBadge.pending_requests>0)&&<span className="tab-badge-dot"/>}
+            </button>
           ))}
         </div>
-        {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft} progressions={progressions} onProgressionsChange={setProgressions} templates={templates} setTemplates={setTemplates} templateDraft={templateDraft} setTemplateDraft={setTemplateDraft}/>}
+        {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft} progressions={progressions} onProgressionsChange={setProgressions} templates={templates} setTemplates={setTemplates} templateDraft={templateDraft} setTemplateDraft={setTemplateDraft} isPremium={isPremium} premiumChecked={premiumChecked} reloadProgressions={reloadProgressions} progressionDraft={progressionDraft} setProgressionDraft={setProgressionDraft}/>}
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
-        {tab===2&&<ProgressionTab isPremium={isPremium} premiumChecked={premiumChecked} progressions={progressions} reloadProgressions={reloadProgressions} workouts={workouts} toast={showToast} progressionDraft={progressionDraft} setProgressionDraft={setProgressionDraft}/>}
+        {tab===2&&<CommunityTab friends={friends} setFriends={setFriends} toast={showToast} badge={communityBadge} onBadgeChange={setCommunityBadge} reloadBadge={reloadCommunityBadge}/>}
         {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
-        {tab===4&&<ProfileTab profiles={profiles} setProfiles={setProfiles} friends={friends} setFriends={setFriends} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
+        {tab===4&&<ProfileTab profiles={profiles} setProfiles={setProfiles} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
         {(showWorkoutBar||showMeasurementBar||showProgressionBar||showTemplateBar)&&(
           <div className="draft-bars-wrap">
             {showWorkoutBar&&(
@@ -3404,7 +3810,7 @@ export default function App() {
             {showProgressionBar&&(
               <div className="draft-bar" onClick={()=>{
                 setProgressionDraft(p=>({...p,restoring:true}));
-                setTab(2);
+                setTab(0);
               }}>
                 <span className="draft-bar-dot"/>
                 <div className="draft-bar-text">

@@ -111,6 +111,18 @@ export const api = {
   addFriendByCode:    (code)     => request("POST",   "/friends/add-by-code", { code }),
   removeFriend:       (id)       => request("DELETE", `/friends/${id}`),
   getFriendProfile:   (id)       => request("GET",    `/friends/${id}/profile`),
+  // Заявки в друзья — добавление теперь требует подтверждения получателя
+  getFriendRequests:   ()          => request("GET",  "/friends/requests"),
+  acceptFriendRequest: (requestId) => request("POST", "/friends/requests/accept", { request_id: requestId }),
+  declineFriendRequest:(requestId) => request("POST", "/friends/requests/decline", { request_id: requestId }),
+
+  // ── Сообщество: бейдж, новости, лента, лайки/комментарии ──────────────────
+  getCommunityBadge: ()        => request("GET", "/community/badge"),
+  getNews:           ()        => request("GET", "/news"),
+  getFeed:           (before)  => request("GET", `/community/feed${before?`?before=${encodeURIComponent(before)}`:""}`),
+  toggleLike:        (postType, postId)          => request("POST",   `/community/${postType}/${postId}/like`),
+  addComment:        (postType, postId, text)    => request("POST",   `/community/${postType}/${postId}/comments`, { text }),
+  deleteComment:     (commentId)                 => request("DELETE", `/community/comments/${commentId}`),
 
   // ── Прогрессия (премиум) ───────────────────────────────────────────────────
   getMyPremium:        ()             => request("GET",    "/me/premium"),
