@@ -329,8 +329,8 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .prog-lock-detail{font-size:13px;color:#6E6E6E;margin-top:14px;line-height:1.6;text-align:center}
 .prog-lock-dot{margin-left:6px;font-size:11px;opacity:.7}
 .tab{position:relative}
-.tab-label{position:relative;display:inline-block}
-.tab-badge-dot{position:absolute;top:-2px;right:-9px;width:6px;height:6px;border-radius:50%;background:#F6485B}
+.tab-label{position:relative;display:inline-flex;align-items:flex-start}
+.tab-badge-dot{width:5px;height:5px;border-radius:50%;background:#F6485B;margin-left:3px;flex-shrink:0}
 .comm-block{border:1px solid #3A3A3A;padding:14px 16px;margin-bottom:10px;cursor:pointer;background:#111;display:flex;align-items:center;gap:12px;transition:border-color .15s}
 .comm-block:hover{border-color:#555}
 .comm-block-icon{width:36px;height:36px;background:#1A1A1A;border:1px solid #3A3A3A;display:flex;align-items:center;justify-content:center;color:#CCC;flex-shrink:0}
