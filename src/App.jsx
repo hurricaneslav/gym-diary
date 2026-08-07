@@ -350,6 +350,9 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .feed-comment-del{background:none;border:none;color:#555;cursor:pointer;margin-left:auto;padding:2px}
 .feed-comment-input-row{display:flex;gap:8px;margin-top:8px}
 .news-body{font-size:14px;color:#CCC;line-height:1.6;padding:12px 14px}
+.news-body ul,.news-body ol{padding-left:22px;margin:4px 0}
+.news-body p{margin-bottom:8px}
+.news-body p:last-child{margin-bottom:0}
 `;
 
 // ── Аварийное сохранение черновика в localStorage ────────────────────────
@@ -2973,18 +2976,6 @@ function FriendProfileView({friendId, onBack, onRemove}) {
 
 // ── CommunityTab: Новости и обновления + Друзья + лента ─────────────────────
 
-function markdownLite(text){
-  // Простейший markdown: **жирный**, *курсив*, переносы строк — без внешних
-  // библиотек, ровно то, что поддерживает textarea в админке новостей.
-  const esc = html_escape(text);
-  const bold = esc.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  const italic = bold.replace(/\*(.+?)\*/g, "<em>$1</em>");
-  return italic.replace(/\n/g, "<br/>");
-}
-function html_escape(s){
-  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-}
-
 function NewsSection({onOpen, unread}) {
   return (
     <div className="comm-block" onClick={onOpen}>
@@ -3017,7 +3008,7 @@ function NewsView({onBack}) {
               <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between"}}>
                 <span>{p.title}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(p.created_at.slice(0,10))}</span>
               </div>
-              <div className="news-body" dangerouslySetInnerHTML={{__html:markdownLite(p.body)}}/>
+              <div className="news-body" dangerouslySetInnerHTML={{__html:p.body}}/>
             </div>
           ))}
     </div>
