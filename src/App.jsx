@@ -350,9 +350,14 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .feed-comment-del{background:none;border:none;color:#555;cursor:pointer;margin-left:auto;padding:2px}
 .feed-comment-input-row{display:flex;gap:8px;margin-top:8px}
 .news-body{font-size:14px;color:#CCC;line-height:1.6;padding:12px 14px}
-.news-body ul,.news-body ol{padding-left:22px;margin:4px 0}
-.news-body p{margin-bottom:8px}
+.news-body ul,.news-body ol{padding-left:22px;margin:10px 0}
+.news-body ul:first-child,.news-body ol:first-child{margin-top:0}
+.news-body li{margin-bottom:4px}
+.news-body li:last-child{margin-bottom:0}
+.news-body p{margin:0 0 10px}
 .news-body p:last-child{margin-bottom:0}
+.news-body div{margin-bottom:10px}
+.news-body div:last-child{margin-bottom:0}
 `;
 
 // ── Аварийное сохранение черновика в localStorage ────────────────────────
@@ -3617,9 +3622,11 @@ export default function App() {
       }
 
       try{
-        // Добавление теперь требует подтверждения получателя — по ссылке
-        // отправляется заявка (или, если получатель уже сам отправил такую
-        // же заявку нам, они автоматически становятся друзьями сразу).
+        // Добавление по персональной ссылке-приглашению — сразу в друзья, без
+        // заявки на подтверждение (в отличие от добавления через поиск по
+        // юзернейму) — сам факт перехода по такой ссылке уже подтверждает
+        // обе стороны. friendRequestSent тут не используется никогда — оставлен
+        // для единообразия с остальными местами, где статус "pending" возможен.
         const res = await api.addFriendByCode(code);
         justAddedFriend = res.status === "accepted";
         friendRequestSent = res.status === "pending";
