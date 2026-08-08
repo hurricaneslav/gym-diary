@@ -1954,9 +1954,8 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
   const [data,setData]=useState(null);
   const [loading,setLoading]=useState(true);
   const [logging,setLogging]=useState(null);
-  const [logForm,setLogForm]=useState({weight:"",reps:"",sets:"",rir:""});
+  const [logForm,setLogForm]=useState({weight:"",reps:"",sets:""});
   const [logDetail,setLogDetail]=useState(null); // массив {weight,reps} — только для сессий с planned_detail
-  const [logDetailRir,setLogDetailRir]=useState("");
   const [busy,setBusy]=useState(false);
   const [showEdit,setShowEdit]=useState(false);
   const [showReset,setShowReset]=useState(false);
@@ -2002,7 +2001,6 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
     setBusy(true);
     try{
       let payload;
-      const rir = logDetailRir!==""?Number(logDetailRir):null;
       if(logDetail){
         if(logDetail[0].bilateral){
           const detail=logDetail.map(d=>({weightL:Number(d.weightL),repsL:Number(d.repsL),weightR:Number(d.weightR),repsR:Number(d.repsR)}));
@@ -2011,7 +2009,6 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
             actual_reps: Math.min(...detail.flatMap(d=>[d.repsL,d.repsR])),
             actual_sets: detail.length,
             actual_detail: detail,
-            actual_rir: rir,
           };
         }else{
           const detail=logDetail.map(d=>({weight:Number(d.weight),reps:Number(d.reps)}));
@@ -2020,13 +2017,12 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
             actual_reps: Math.min(...detail.map(d=>d.reps)),
             actual_sets: detail.length,
             actual_detail: detail,
-            actual_rir: rir,
           };
         }
       }else{
         payload={
           actual_weight:Number(logForm.weight), actual_reps:Number(logForm.reps),
-          actual_sets:Number(logForm.sets), actual_rir: logForm.rir!==""?Number(logForm.rir):null,
+          actual_sets:Number(logForm.sets),
         };
       }
       await api.logProgressionSession(data.id, logging, payload);
@@ -2195,10 +2191,6 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
                     </div>
                   ))}
                   <button className="add-set" onClick={addLogDetailRow}><IconPlus/>Подход</button>
-                  <div className="field" style={{marginTop:10}}>
-                    <div className="lbl">RIR первого подхода (необязательно)</div>
-                    <input className="inp" type="text" inputMode="decimal" placeholder="сколько повторов оставалось в запасе" value={logDetailRir} onChange={e=>setLogDetailRir(normalizeDecimal(e.target.value))}/>
-                  </div>
                 </>
               ) : (
                 <div className="m-grid">
@@ -2213,10 +2205,6 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
                   <div className="field">
                     <div className="lbl">Подходы</div>
                     <input className="inp" type="number" inputMode="numeric" value={logForm.sets} onChange={e=>setLogForm(f=>({...f,sets:e.target.value}))}/>
-                  </div>
-                  <div className="field">
-                    <div className="lbl">RIR (необязательно)</div>
-                    <input className="inp" type="text" inputMode="decimal" value={logForm.rir} onChange={e=>setLogForm(f=>({...f,rir:normalizeDecimal(e.target.value)}))}/>
                   </div>
                 </div>
               )}
