@@ -1983,7 +1983,6 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
 
   const startLog=(s)=>{
     setLogging(s.id);
-    setLogDetailRir("");
     if(s.planned_detail){
       setLogDetail(s.planned_detail.map(d=>d.bilateral
         ? {bilateral:true, weightL:String(d.weightL), repsL:String(d.repsL), weightR:String(d.weightR), repsR:String(d.repsR)}
