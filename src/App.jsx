@@ -1648,7 +1648,6 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
   const [amrapEveryWeeks,setAmrapEveryWeeks]=useState(draft?.amrapEveryWeeks ?? null);
   const [startWeight,setStartWeight]=useState(draft?.startWeight ?? "");
   const [startReps,setStartReps]=useState(draft?.startReps ?? "");
-  const [startRir,setStartRir]=useState(draft?.startRir ?? "");
   const [increment,setIncrement]=useState(draft?.increment ?? "2.5");
   const [weeks,setWeeks]=useState(draft?.weeks ?? "8");
   const [saving,setSaving]=useState(false);
@@ -1676,14 +1675,14 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
     setStartReps(repLow || String(r));
   };
 
-  const buildDraft=()=>({ mode:"calculated", step, name, exType, goal, repLow, repHigh, frequency, setsCount, unilateral, unilateralMode, beginnerMode, amrapEveryWeeks, startWeight, startReps, startRir, increment, weeks });
+  const buildDraft=()=>({ mode:"calculated", step, name, exType, goal, repLow, repHigh, frequency, setsCount, unilateral, unilateralMode, beginnerMode, amrapEveryWeeks, startWeight, startReps, increment, weeks });
 
   // Автосохранение — как у тренировки/замера: чтобы прогресс по мастеру не
   // терялся, даже если процесс Telegram убьют в фоне на любом из 8 шагов.
   useEffect(()=>{
     const t=setTimeout(()=>{ saveDraftToStorage("progression", buildDraft()); },600);
     return ()=>clearTimeout(t);
-  },[step,name,exType,goal,repLow,repHigh,frequency,setsCount,startWeight,startReps,startRir,increment,weeks]);
+  },[step,name,exType,goal,repLow,repHigh,frequency,setsCount,startWeight,startReps,increment,weeks]);
 
   const pickGoal=(g)=>{
     setGoal(g);
@@ -1723,7 +1722,6 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
         rep_range_low: Number(repLow), rep_range_high: Number(repHigh),
         frequency, sets_count: Number(setsCount), increment: Number(increment),
         start_weight: Number(startWeight), start_reps: Number(startReps),
-        start_rir: startRir!==""?Number(startRir):null,
         weeks: Number(weeks), unilateral, unilateral_mode: unilateralMode, beginner_mode: beginnerMode, amrap_every_weeks: amrapEveryWeeks,
       });
       clearDraftFromStorage("progression");
@@ -1901,10 +1899,6 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
                 <div className="lbl">Повторы</div>
                 <input className="inp" type="number" inputMode="numeric" value={startReps} onChange={e=>setStartReps(e.target.value)}/>
               </div>
-              <div style={{gridColumn:"1 / -1"}}>
-                <div className="lbl">RIR (необязательно)</div>
-                <input className="inp" type="text" inputMode="decimal" value={startRir} onChange={e=>setStartRir(normalizeDecimal(e.target.value))}/>
-              </div>
             </div>
           </div>
         )}
@@ -1932,7 +1926,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
               <div className="card-title" style={{marginBottom:8}}>{name}</div>
               <div className="card-sub" style={{margin:"2px 0"}}>{EXERCISE_TYPE_LABELS[exType]} · {GOAL_LABELS[goal]}</div>
               <div className="card-sub" style={{margin:"2px 0"}}>Диапазон: {repLow}–{repHigh} повт · {frequency} раз/нед · {setsCount} подх.{unilateral?` · унилатерально (${unilateralMode==="equalize"?"выравнивание":"независимо"})`:""}{beginnerMode?" · режим новичка":""}{amrapEveryWeeks?` · AMRAP каждые ${amrapEveryWeeks} нед.`:""}</div>
-              <div className="card-sub" style={{margin:"2px 0"}}>Старт: {startWeight} кг × {startReps}{startRir?` @RIR${startRir}`:""}</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>Старт: {startWeight} кг × {startReps}</div>
               <div className="card-sub" style={{margin:"2px 0"}}>Шаг {increment} кг · цикл {weeks} нед.</div>
             </div>
           </div>
