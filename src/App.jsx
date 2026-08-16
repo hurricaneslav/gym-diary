@@ -1837,8 +1837,9 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
                 {beginnerMode?"✓ ":""}Режим новичка / возврат после перерыва
               </button>
               <div className="card-sub" style={{margin:"8px 0 0"}}>
-                Пока включён — шаг прибавки веса удвоенный, чтобы быстрее пройти лёгкие веса.
-                Выключается сам после первой тренировки, где вес не вырос.
+                Пока включён — повторы между тренировками растут быстрее (+2 за раз вместо +1),
+                чтобы быстрее пройти лёгкие веса. Сам вес прибавляется как обычно, без удвоения.
+                Выключается сам после первой тренировки, где что-то пошло не идеально.
               </div>
             </div>
             {!unilateral && (
@@ -2112,7 +2113,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
             <div><div className="lbl">Повторы</div><input className="inp" type="number" inputMode="numeric" value={resetReps} onChange={e=>setResetReps(e.target.value)}/></div>
           </div>
           <button className={`mini-btn${resetBeginner?"":" ghost"}`} style={{marginTop:8}} onClick={()=>setResetBeginner(v=>!v)}>
-            {resetBeginner?"✓ ":""}Включить режим новичка (удвоенный шаг до первой неудачи)
+            {resetBeginner?"✓ ":""}Включить режим новичка (ускоренный набор повторов до первой неудачи)
           </button>
           <div style={{marginTop:10}}>
             <button className="mini-btn" disabled={busy} onClick={doResetStart}>Сбросить</button>
