@@ -425,6 +425,80 @@ function useLockBodyScroll() {
   }, []);
 }
 
+// ── Свайп-навигация ──────────────────────────────────────────────────────
+// Общие пороги жеста для обоих хуков ниже: жест должен быть в основном
+// горизонтальным (иначе это скролл/вертикальный жест) и достаточно длинным,
+// чтобы не путать со случайным касанием или тапом по кнопке.
+const SWIPE_MIN_DX = 60;       // минимальная горизонтальная протяжка, px
+const SWIPE_MAX_DY_RATIO = 0.5; // вертикальное отклонение не должно превышать половину dx
+const SWIPE_EDGE_ZONE = 24;     // ширина зоны у левого края экрана, где стартует edge-свайп, px
+
+// Свайп "назад" на детальных экранах — жест должен НАЧАТЬСЯ у самого левого
+// края экрана (как системный edge-swipe в iOS), иначе он бы перехватывал
+// обычный свайп внутри списков/карточек (например drag для reorder в
+// шаблонах). enabled — включён только пока показан именно этот detail-экран
+// (компонент передаёт своё условие типа detail/data/selected).
+function useSwipeBack(onBack, enabled = true) {
+  const startRef = useRef(null);
+  useEffect(() => {
+    if (!enabled || !onBack) return;
+    const onTouchStart = (e) => {
+      const t = e.touches[0];
+      if (t.clientX > SWIPE_EDGE_ZONE) { startRef.current = null; return; }
+      startRef.current = { x: t.clientX, y: t.clientY };
+    };
+    const onTouchEnd = (e) => {
+      const start = startRef.current;
+      startRef.current = null;
+      if (!start) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - start.x;
+      const dy = Math.abs(t.clientY - start.y);
+      if (dx > SWIPE_MIN_DX && dy < dx * SWIPE_MAX_DY_RATIO) onBack();
+    };
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [onBack, enabled]);
+}
+
+// Свайп между нижними вкладками — работает где угодно на экране (не только
+// у края), листает по кругу. Если в момент жеста на странице открыт detail-
+// экран (список→детали внутри вкладки — все они используют один и тот же
+// класс .det-hd, см. useSwipeBack выше), свайп вкладок не срабатывает —
+// иначе он конфликтовал бы со свайпом "назад" внутри вкладки. Проверяем
+// DOM напрямую (а не пробрасываем detail-state через пропсы всех вкладок)
+// — так это работает одинаково для всех вкладок без правки их сигнатур.
+function useSwipeTabs(tab, setTab, count) {
+  const startRef = useRef(null);
+  useEffect(() => {
+    const onTouchStart = (e) => {
+      const t = e.touches[0];
+      startRef.current = { x: t.clientX, y: t.clientY };
+    };
+    const onTouchEnd = (e) => {
+      const start = startRef.current;
+      startRef.current = null;
+      if (!start) return;
+      if (document.querySelector(".det-hd") || document.querySelector(".overlay")) return; // открыт detail-экран или шторка
+      const t = e.changedTouches[0];
+      const dx = t.clientX - start.x;
+      const dy = Math.abs(t.clientY - start.y);
+      if (Math.abs(dx) <= SWIPE_MIN_DX || dy >= Math.abs(dx) * SWIPE_MAX_DY_RATIO) return;
+      setTab(prev => dx < 0 ? (prev + 1) % count : (prev - 1 + count) % count);
+    };
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [setTab, count]);
+}
+
 // ── Toast ──────────────────────────────────────────────────────────────────
 function Toast({ msg }) {
   return msg ? <div className="toast">{msg}</div> : null;
@@ -996,6 +1070,9 @@ function TemplatesView({templates, setTemplates, workouts, toast, templateDraft,
 
   const detail=detailId!=null?templates.find(t=>t.id===detailId):null;
   const editTarget=editId!=null?templates.find(t=>t.id===editId):null;
+  // detail=null -> список (свайп закрывает вкладку через onBack родителя);
+  // detail есть -> локальный detail-блок этого компонента (свайп закрывает его).
+  useSwipeBack(detail ? ()=>setDetailId(null) : onBack);
 
   useEffect(()=>{
     if(templateDraft?.restoring){
@@ -1126,6 +1203,11 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
 
   const detail=detailId!=null?workouts.find(w=>w.id===detailId):null;
   const editTarget=editId!=null?workouts.find(w=>w.id===editId):null;
+
+  // showTemplates/showProgression рендерят дочерние компоненты, которые сами
+  // управляют своим свайпом-назад — здесь свайп нужен только для локального
+  // detail-блока этой же вкладки (см. if(detail) ниже).
+  useSwipeBack(()=>setDetailId(null), !!detail && !showTemplates && !showProgression);
 
   // Когда черновик восстанавливается (клик по draft-bar/карточке), открываем нужную
   // шторку и сразу забираем данные локально — глобальный workoutDraft очищается, бар пропадает.
@@ -1359,6 +1441,7 @@ function ExercisesTab({workouts, setWorkouts, toast}) {
   const [selected,setSelected]=useState(null);
   const [renamingEx,setRenamingEx]=useState(false);
   const [renameExVal,setRenameExVal]=useState("");
+  useSwipeBack(()=>setSelected(null), !!selected);
 
   // Общие описания упражнений (техника, сетап и т.д.) — по имени, не по конкретной тренировке.
   const [notes,setNotes]=useState({});
@@ -1948,6 +2031,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
 function ProgressionDetail({ id, onBack, onChanged, toast }) {
   const [data,setData]=useState(null);
   const [loading,setLoading]=useState(true);
+  useSwipeBack(onBack);
   const [logging,setLogging]=useState(null);
   const [logForm,setLogForm]=useState({weight:"",reps:"",sets:""});
   const [logDetail,setLogDetail]=useState(null); // массив {weight,reps} — только для сессий с planned_detail
@@ -2225,6 +2309,11 @@ function ProgressionTab({ isPremium, premiumChecked, progressions, reloadProgres
   const [showChoice,setShowChoice]=useState(false);
   const [addMode,setAddMode]=useState(null);
   const [restoredDraft,setRestoredDraft]=useState(null);
+
+  // ProgressionDetail (рендерится ниже, когда detailId установлен) сама
+  // управляет своим свайпом-назад — здесь свайп работает для остальных
+  // веток этого компонента (premium-заглушки, главный список).
+  useSwipeBack(onBack, detailId==null);
 
   // Восстановление черновика (клик по плавающей плашке или по карточке в
   // списке) — открываем нужную шторку (произвольная/расчётная по draft.mode)
@@ -2561,6 +2650,7 @@ function MeasurementsTab({measurements,setMeasurements,toast,measurementDraft,se
 
   const detail=detailId!=null?measurements.find(m=>m.id===detailId):null;
   const editTarget=editId!=null?measurements.find(m=>m.id===editId):null;
+  useSwipeBack(()=>setDetailId(null), !!detail);
 
   useEffect(()=>{
     if(measurementDraft?.restoring){
@@ -2804,6 +2894,10 @@ function FriendProfileView({friendId, onBack, onRemove}) {
   const [subTab,setSubTab]=useState(0);
   const [selectedEx,setSelectedEx]=useState(null);
 
+  // Два уровня внутри этого экрана: список профиля друга -> история упражнения
+  // (selectedEx). Свайп-назад должен закрывать САМЫЙ глубокий открытый уровень.
+  useSwipeBack(selectedEx ? ()=>setSelectedEx(null) : onBack);
+
   useEffect(()=>{
     api.getFriendProfile(friendId).then(d=>{setData(d);setLoading(false);}).catch(()=>setLoading(false));
   },[friendId]);
@@ -2978,6 +3072,7 @@ function NewsSection({onOpen, unread}) {
 
 function NewsView({onBack}) {
   const [posts,setPosts]=useState(null);
+  useSwipeBack(onBack);
 
   useEffect(()=>{
     api.getNews().then(setPosts).catch(()=>setPosts([]));
@@ -3022,6 +3117,9 @@ function FriendsView({friends, setFriends, onBack, toast, onRequestsChanged}) {
   const [searching,setSearching]=useState(false);
   const [openFriendId,setOpenFriendId]=useState(null);
   const [inviteBusy,setInviteBusy]=useState(false);
+  // FriendProfileView (рендерится ниже, когда openFriendId установлен) сама
+  // управляет своим свайпом-назад — здесь его выключаем, чтобы не сработали оба сразу.
+  useSwipeBack(onBack, !openFriendId);
   const [requests,setRequests]=useState(null);
   const [busyReqId,setBusyReqId]=useState(null);
 
@@ -3381,6 +3479,7 @@ function ProfileTab({profiles, setProfiles, onProfileSwitch, toast, hasUnsavedDr
   const [showCreate,setShowCreate]=useState(false);
 
   const detail=detailId!=null?profiles.find(p=>p.id===detailId):null;
+  useSwipeBack(()=>setDetailId(null), !!detail);
 
   const startRename=(p)=>{setRenamingId(p.id);setRenameVal(p.name);};
   const commitRename=async(id)=>{
@@ -3533,6 +3632,8 @@ export default function App() {
   const [progressionDraft,setProgressionDraft]=useState(null); // {mode, ...поля мастера/формы, restoring}
   const [templateDraft,setTemplateDraft]=useState(null); // {editId, name, exercises, restoring}
   const [communityBadge,setCommunityBadge]=useState({unread_news:false, pending_requests:0});
+
+  useSwipeTabs(tab, setTab, 5);
 
   const showToast=(msg)=>{
     setToastMsg(msg);
