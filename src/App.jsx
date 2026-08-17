@@ -349,7 +349,7 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .feed-comment-text{color:#AAA;word-break:break-word}
 .feed-comment-del{background:none;border:none;color:#555;cursor:pointer;margin-left:auto;padding:2px}
 .feed-comment-input-row{display:flex;gap:8px;margin-top:8px}
-.news-body{font-size:14px;color:#CCC;line-height:1.6;padding:12px 14px}
+.news-body{font-size:14px;color:#CCC;line-height:1.6;padding:12px 14px;overflow-wrap:break-word;word-break:break-word}
 .news-body ul,.news-body ol{padding-left:22px;margin:10px 0}
 .news-body ul:first-child,.news-body ol:first-child{margin-top:0}
 .news-body li{margin-bottom:4px}
