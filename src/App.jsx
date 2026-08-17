@@ -438,18 +438,45 @@ const SWIPE_EDGE_ZONE = 24;     // ширина зоны у левого кра�
 // обычный свайп внутри списков/карточек (например drag для reorder в
 // шаблонах). enabled — включён только пока показан именно этот detail-экран
 // (компонент передаёт своё условие типа detail/data/selected).
+//
+// touchmove здесь не для срабатывания самого жеста (это по-прежнему решается
+// в touchend по итоговому dx/dy) — а чтобы ПОКА палец ещё движется, отменить
+// нативный скролл страницы, если направление уже явно горизонтальное. Без
+// этого браузер попутно скроллит контент вниз/вверх, а сам жест регистрируется
+// только постфактум в touchend — visually это выглядит как "свайпнул и
+// страница улетела вниз, а потом ещё и назад сработало". Решение о
+// горизонтальности принимается один раз, после того как палец сместился на
+// небольшой порог (иначе не отличить горизонтальный жест от вертикального
+// в первые же пиксели) — до этого момента разрешаем браузеру решать самому
+// (передаём событие как обычно), чтобы не блокировать обычный вертикальный
+// скролл целиком.
+const SWIPE_DIRECTION_LOCK_PX = 10; // после какого сдвига решаем горизонтальный жест или нет
 function useSwipeBack(onBack, enabled = true) {
   const startRef = useRef(null);
+  const lockedRef = useRef(null); // null=не решено, true=горизонтальный (блокируем скролл), false=вертикальный (пропускаем)
   useEffect(() => {
     if (!enabled || !onBack) return;
     const onTouchStart = (e) => {
       const t = e.touches[0];
+      lockedRef.current = null;
       if (t.clientX > SWIPE_EDGE_ZONE) { startRef.current = null; return; }
       startRef.current = { x: t.clientX, y: t.clientY };
+    };
+    const onTouchMove = (e) => {
+      const start = startRef.current;
+      if (!start) return;
+      const t = e.touches[0];
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      if (lockedRef.current === null && (Math.abs(dx) > SWIPE_DIRECTION_LOCK_PX || Math.abs(dy) > SWIPE_DIRECTION_LOCK_PX)) {
+        lockedRef.current = Math.abs(dx) > Math.abs(dy) && dx > 0; // только вправо — влево не наш жест
+      }
+      if (lockedRef.current) e.preventDefault();
     };
     const onTouchEnd = (e) => {
       const start = startRef.current;
       startRef.current = null;
+      lockedRef.current = null;
       if (!start) return;
       const t = e.changedTouches[0];
       const dx = t.clientX - start.x;
@@ -457,9 +484,11 @@ function useSwipeBack(onBack, enabled = true) {
       if (dx > SWIPE_MIN_DX && dy < dx * SWIPE_MAX_DY_RATIO) onBack();
     };
     document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
     document.addEventListener("touchend", onTouchEnd, { passive: true });
     return () => {
       document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
       document.removeEventListener("touchend", onTouchEnd);
     };
   }, [onBack, enabled]);
@@ -472,18 +501,34 @@ function useSwipeBack(onBack, enabled = true) {
 // иначе он конфликтовал бы со свайпом "назад" внутри вкладки. Проверяем
 // DOM напрямую (а не пробрасываем detail-state через пропсы всех вкладок)
 // — так это работает одинаково для всех вкладок без правки их сигнатур.
+// Тот же приём с touchmove/preventDefault, что и в useSwipeBack выше — не
+// даём браузеру скроллить страницу, пока палец уже явно движется горизонтально.
 function useSwipeTabs(tab, setTab, count) {
   const startRef = useRef(null);
+  const lockedRef = useRef(null);
   useEffect(() => {
     const onTouchStart = (e) => {
       const t = e.touches[0];
+      lockedRef.current = null;
+      if (document.querySelector(".det-hd") || document.querySelector(".overlay")) { startRef.current = null; return; }
       startRef.current = { x: t.clientX, y: t.clientY };
+    };
+    const onTouchMove = (e) => {
+      const start = startRef.current;
+      if (!start) return;
+      const t = e.touches[0];
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      if (lockedRef.current === null && (Math.abs(dx) > SWIPE_DIRECTION_LOCK_PX || Math.abs(dy) > SWIPE_DIRECTION_LOCK_PX)) {
+        lockedRef.current = Math.abs(dx) > Math.abs(dy);
+      }
+      if (lockedRef.current) e.preventDefault();
     };
     const onTouchEnd = (e) => {
       const start = startRef.current;
       startRef.current = null;
+      lockedRef.current = null;
       if (!start) return;
-      if (document.querySelector(".det-hd") || document.querySelector(".overlay")) return; // открыт detail-экран или шторка
       const t = e.changedTouches[0];
       const dx = t.clientX - start.x;
       const dy = Math.abs(t.clientY - start.y);
@@ -491,9 +536,11 @@ function useSwipeTabs(tab, setTab, count) {
       setTab(prev => dx < 0 ? (prev + 1) % count : (prev - 1 + count) % count);
     };
     document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
     document.addEventListener("touchend", onTouchEnd, { passive: true });
     return () => {
       document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
       document.removeEventListener("touchend", onTouchEnd);
     };
   }, [setTab, count]);
@@ -3648,6 +3695,12 @@ export default function App() {
     if(!tg) return;
     tg.ready?.();
     tg.expand?.();
+    // Отключаем системный свайп-вниз-для-сворачивания мини-приложения — иначе
+    // он перехватывает вертикальную часть жестов пользователя (включая случайный
+    // вертикальный дрейф во время горизонтального свайпа между вкладками) и
+    // сворачивает окно. Доступно с Bot API 7.7 — оборачиваем в try/catch на
+    // случай старого клиента без поддержки метода.
+    try{ tg.disableVerticalSwipes?.(); }catch{}
     // Плашка с названием мини-приложения ("Дневник тренировок") по умолчанию
     // подстраивается под тему самого Telegram — в светлой теме получается
     // светлой, что не сочетается с тёмным дизайном приложения. Делаем её
