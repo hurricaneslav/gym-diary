@@ -425,6 +425,20 @@ function useLockBodyScroll() {
   }, []);
 }
 
+// ── Сброс скролла при переходе на новый экран ────────────────────────────
+// Прокрутка идёт на уровне window/document (у .app-frame и .page нет своего
+// overflow-контейнера — см. историю бага), поэтому при переходе список→деталь
+// (или наоборот) браузер по умолчанию сохраняет прежнюю позицию скролла —
+// человек попадает в середину списка вместо шапки нового экрана с описанием
+// и датами. key — то значение, при изменении которого нужно проскроллить
+// наверх (обычно detailId/selected: null при списке, id/имя при открытой
+// детали — эффект срабатывает и на переход туда, и обратно).
+function useScrollTopOnChange(key) {
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [key]);
+}
+
 // ── Свайп-навигация ──────────────────────────────────────────────────────
 // Общие пороги жеста для обоих хуков ниже: жест должен быть в основном
 // горизонтальным (иначе это скролл/вертикальный жест) и достаточно длинным,
@@ -1120,6 +1134,7 @@ function TemplatesView({templates, setTemplates, workouts, toast, templateDraft,
   // detail=null -> список (свайп закрывает вкладку через onBack родителя);
   // detail есть -> локальный detail-блок этого компонента (свайп закрывает его).
   useSwipeBack(detail ? ()=>setDetailId(null) : onBack);
+  useScrollTopOnChange(detailId);
 
   useEffect(()=>{
     if(templateDraft?.restoring){
@@ -1255,6 +1270,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
   // управляют своим свайпом-назад — здесь свайп нужен только для локального
   // detail-блока этой же вкладки (см. if(detail) ниже).
   useSwipeBack(()=>setDetailId(null), !!detail && !showTemplates && !showProgression);
+  useScrollTopOnChange(showTemplates ? "templates" : showProgression ? "progression" : detailId);
 
   // Когда черновик восстанавливается (клик по draft-bar/карточке), открываем нужную
   // шторку и сразу забираем данные локально — глобальный workoutDraft очищается, бар пропадает.
@@ -1489,6 +1505,7 @@ function ExercisesTab({workouts, setWorkouts, toast}) {
   const [renamingEx,setRenamingEx]=useState(false);
   const [renameExVal,setRenameExVal]=useState("");
   useSwipeBack(()=>setSelected(null), !!selected);
+  useScrollTopOnChange(selected);
 
   // Общие описания упражнений (техника, сетап и т.д.) — по имени, не по конкретной тренировке.
   const [notes,setNotes]=useState({});
@@ -2079,6 +2096,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
   const [data,setData]=useState(null);
   const [loading,setLoading]=useState(true);
   useSwipeBack(onBack);
+  useScrollTopOnChange(id);
   const [logging,setLogging]=useState(null);
   const [logForm,setLogForm]=useState({weight:"",reps:"",sets:""});
   const [logDetail,setLogDetail]=useState(null); // массив {weight,reps} — только для сессий с planned_detail
@@ -2361,6 +2379,7 @@ function ProgressionTab({ isPremium, premiumChecked, progressions, reloadProgres
   // управляет своим свайпом-назад — здесь свайп работает для остальных
   // веток этого компонента (premium-заглушки, главный список).
   useSwipeBack(onBack, detailId==null);
+  useScrollTopOnChange(detailId);
 
   // Восстановление черновика (клик по плавающей плашке или по карточке в
   // списке) — открываем нужную шторку (произвольная/расчётная по draft.mode)
@@ -2698,6 +2717,7 @@ function MeasurementsTab({measurements,setMeasurements,toast,measurementDraft,se
   const detail=detailId!=null?measurements.find(m=>m.id===detailId):null;
   const editTarget=editId!=null?measurements.find(m=>m.id===editId):null;
   useSwipeBack(()=>setDetailId(null), !!detail);
+  useScrollTopOnChange(detailId);
 
   useEffect(()=>{
     if(measurementDraft?.restoring){
@@ -2944,6 +2964,7 @@ function FriendProfileView({friendId, onBack, onRemove}) {
   // Два уровня внутри этого экрана: список профиля друга -> история упражнения
   // (selectedEx). Свайп-назад должен закрывать САМЫЙ глубокий открытый уровень.
   useSwipeBack(selectedEx ? ()=>setSelectedEx(null) : onBack);
+  useScrollTopOnChange(selectedEx);
 
   useEffect(()=>{
     api.getFriendProfile(friendId).then(d=>{setData(d);setLoading(false);}).catch(()=>setLoading(false));
@@ -3167,6 +3188,7 @@ function FriendsView({friends, setFriends, onBack, toast, onRequestsChanged}) {
   // FriendProfileView (рендерится ниже, когда openFriendId установлен) сама
   // управляет своим свайпом-назад — здесь его выключаем, чтобы не сработали оба сразу.
   useSwipeBack(onBack, !openFriendId);
+  useScrollTopOnChange(openFriendId);
   const [requests,setRequests]=useState(null);
   const [busyReqId,setBusyReqId]=useState(null);
 
@@ -3527,6 +3549,7 @@ function ProfileTab({profiles, setProfiles, onProfileSwitch, toast, hasUnsavedDr
 
   const detail=detailId!=null?profiles.find(p=>p.id===detailId):null;
   useSwipeBack(()=>setDetailId(null), !!detail);
+  useScrollTopOnChange(detailId);
 
   const startRename=(p)=>{setRenamingId(p.id);setRenameVal(p.name);};
   const commitRename=async(id)=>{
@@ -3681,6 +3704,7 @@ export default function App() {
   const [communityBadge,setCommunityBadge]=useState({unread_news:false, pending_requests:0});
 
   useSwipeTabs(tab, setTab, 5);
+  useScrollTopOnChange(tab);
 
   const showToast=(msg)=>{
     setToastMsg(msg);
