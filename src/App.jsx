@@ -198,6 +198,12 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .tpl-picker-empty{padding:13px;color:#666;font-size:12px;text-align:center}
 .tpl-mode-pick{display:flex;flex-direction:column;gap:10px}
 .prev{margin:0 14px;padding:8px 0 10px;font-size:12px;color:#6E6E6E;border-bottom:1px solid #242424;font-style:italic}
+.prev.tappable{cursor:pointer;display:flex;align-items:flex-start;gap:8px;-webkit-tap-highlight-color:transparent}
+.prev.tappable:active{color:#AAA}
+.prev-body{flex:1;min-width:0}
+.prev-chev{flex-shrink:0;color:#555;display:flex;align-items:center;margin-top:1px}
+.hist-overlay{z-index:70}
+.hist-note{font-size:13px;color:#9A9A9A;line-height:1.55;font-style:italic;border-left:2px solid #333;padding:2px 0 2px 10px;margin-bottom:20px;white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word}
 .ex-note-hint{margin:0 14px 10px;padding:6px 0 6px 10px;font-size:12px;color:#8A8A8A;border-left:2px solid #333;line-height:1.5;font-style:italic;cursor:pointer;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ex-note-hint.expanded{-webkit-line-clamp:unset;display:block}
 .sets{padding:10px 14px;overflow:hidden;contain:layout}
@@ -699,6 +705,70 @@ function ExNameInput({ value, onChange, allExNames }) {
 }
 
 // ── WorkoutSheet ──────────────────────────────────────────────────────────
+// ── История упражнения (общая для вкладки «Упражнения» и шторки в тренировке) ──
+// Один и тот же список записей "дата · название тренировки + подходы + комментарий".
+// Вынесен, чтобы вид истории не разъезжался между двумя местами.
+function ExerciseHistoryList({ history }) {
+  return (
+    <>
+      {history.map(({workout,exercise},i)=>(
+        <div key={i} className="ex-hist-item">
+          <div className="ex-hist-date">{formatDate(workout.date)} · {workout.name}</div>
+          <div className="ex-sets-disp">
+            {exercise.sets.filter(s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps)).map((s,si)=>(
+              <div key={si}>
+                <span style={{color:"#555"}}>{si+1}.</span>{" "}
+                {s.bilateral?(
+                  <>
+                    <span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}
+                    {" · "}
+                    <span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}
+                  </>
+                ):(
+                  <>{s.weight?`${s.weight} кг`:"—"} × {s.reps?`${s.reps} повт`:"—"}</>
+                )}
+              </div>
+            ))}
+          </div>
+          {exercise.comment&&<div className="ex-hist-comment">{exercise.comment}</div>}
+        </div>
+      ))}
+    </>
+  );
+}
+
+// ── ExerciseHistorySheet ──────────────────────────────────────────────────
+// Открывается ПОВЕРХ формы тренировки по тапу на блок "Прошлый раз" — чтобы
+// посмотреть все прошлые разы упражнения, не выходя из тренировки. Только
+// просмотр (без переименования и правки заметки): форма тренировки под шторкой
+// остаётся смонтированной, поэтому введённые данные не теряются, а любые
+// побочные правки отсюда могли бы им помешать. Закрывается крестиком, тапом
+// по затемнению и свайпом от левого края (как экраны деталей).
+function ExerciseHistorySheet({ name, history, note, onClose }) {
+  useSwipeBack(onClose);
+  return (
+    <div className="overlay hist-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="sheet">
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-icon-btn" onClick={onClose} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <span className="det-title" style={{flex:1,minWidth:0,paddingRight:36}}>{name}</span>
+        </div>
+        {note ? <>
+          <div className="sec-lbl" style={{marginTop:0}}>Описание · техника выполнения</div>
+          <div className="hist-note">{note}</div>
+        </> : null}
+        <div className="sec-lbl" style={note?undefined:{marginTop:0}}>{history.length} {history.length===1?"запись":history.length<5?"записи":"записей"}</div>
+        {history.length===0
+          ? <div className="empty" style={{padding:"24px 0"}}>Записей пока нет</div>
+          : <ExerciseHistoryList history={history}/>}
+      </div>
+    </div>
+  );
+}
+
 function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, progressions = [], templates = [] }) {
   const isEdit = !!initial;
   // trueDefaultName — исходное сгенерированное имя ("Тренировка N" / имя при
@@ -718,6 +788,8 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   });
   const [appliedTemplateName, setAppliedTemplateName] = useState(draft?.appliedTemplateName ?? null);
   const [showTplPicker, setShowTplPicker] = useState(false);
+  // Имя упражнения, чья полная история сейчас открыта шторкой поверх формы (null — закрыта)
+  const [historyFor, setHistoryFor] = useState(null);
   const [saving, setSaving] = useState(false);
   const sheetRef = useRef(null);
   useKeyboardScroll(sheetRef);
@@ -812,6 +884,21 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
     setShowTplPicker(false);
   };
 
+  // Вся история упражнения (для шторки по тапу на "Прошлый раз"). Логика отбора
+  // та же, что у getPrev: при редактировании исключаем саму тренировку и берём
+  // только более ранние по дате — т.е. ровно то, что человек считает "прошлыми
+  // разами" относительно этой тренировки, а не будущее/текущее.
+  const getHistory=(exName)=>{
+    if(!exName||!exName.trim())return [];
+    const lc=exName.trim().toLowerCase();
+    const src=isEdit?workouts.filter(w=>w.id!==initial.id):workouts;
+    const rows=[];
+    src.filter(w=>w.date<date).forEach(w=>w.exercises.forEach(e=>{
+      if(e.name.trim().toLowerCase()===lc) rows.push({workout:w,exercise:e});
+    }));
+    return rows.sort((a,b)=>b.workout.date.localeCompare(a.workout.date));
+  };
+
   const getPrev=(exName)=>{
     if(!exName.trim())return null;
     const lc=exName.trim().toLowerCase();
@@ -872,6 +959,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   };
 
   return (
+    <>
     <div className="overlay" onClick={e=>e.target===e.currentTarget&&handleMinimize()}>
       <div className="sheet" ref={sheetRef}>
         <div className="handle"/>
@@ -933,15 +1021,18 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
                 </div>
               )}
               {prev&&(
-                <div className="prev">
-                  Прошлый раз ({formatDate(prev.workout.date)}):&nbsp;
-                  {prev.exercise.sets.filter(s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps)).map((s,i,arr)=>{
-                    const str=s.bilateral
-                      ?`Л${s.weightL||"—"}×${s.repsL||"—"} П${s.weightR||"—"}×${s.repsR||"—"}`
-                      :`${s.weight?s.weight+"кг":"—"}×${s.reps||"—"}`;
-                    return str+(i<arr.length-1?", ":"");
-                  })}
-                  {prev.exercise.comment?<><br/><span style={{fontStyle:"italic",color:"#555"}}>{prev.exercise.comment}</span></>:null}
+                <div className="prev tappable" onClick={()=>setHistoryFor(ex.name.trim())} title="Показать все прошлые разы">
+                  <div className="prev-body">
+                    Прошлый раз ({formatDate(prev.workout.date)}):&nbsp;
+                    {prev.exercise.sets.filter(s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps)).map((s,i,arr)=>{
+                      const str=s.bilateral
+                        ?`Л${s.weightL||"—"}×${s.repsL||"—"} П${s.weightR||"—"}×${s.repsR||"—"}`
+                        :`${s.weight?s.weight+"кг":"—"}×${s.reps||"—"}`;
+                      return str+(i<arr.length-1?", ":"");
+                    })}
+                    {prev.exercise.comment?<><br/><span style={{fontStyle:"italic",color:"#555"}}>{prev.exercise.comment}</span></>:null}
+                  </div>
+                  <span className="prev-chev"><IconChevron/></span>
                 </div>
               )}
               <div className="sets">
@@ -994,6 +1085,15 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
         <button className="btn ghost" onClick={handleCloseClick}>Отмена</button>
       </div>
     </div>
+    {historyFor!=null&&(
+      <ExerciseHistorySheet
+        name={historyFor}
+        history={getHistory(historyFor)}
+        note={getExNote(historyFor)}
+        onClose={()=>setHistoryFor(null)}
+      />
+    )}
+    </>
   );
 }
 
@@ -1627,28 +1727,7 @@ function ExercisesTab({workouts, setWorkouts, toast}) {
           disabled={!notesLoaded}
         />
         <div className="sec-lbl">{history.length} записей</div>
-        {history.map(({workout,exercise},i)=>(
-          <div key={i} className="ex-hist-item">
-            <div className="ex-hist-date">{formatDate(workout.date)} · {workout.name}</div>
-            <div className="ex-sets-disp">
-              {exercise.sets.filter(s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps)).map((s,si)=>(
-                <div key={si}>
-                  <span style={{color:"#555"}}>{si+1}.</span>{" "}
-                  {s.bilateral?(
-                    <>
-                      <span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}
-                      {" · "}
-                      <span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}
-                    </>
-                  ):(
-                    <>{s.weight?`${s.weight} кг`:"—"} × {s.reps?`${s.reps} повт`:"—"}</>
-                  )}
-                </div>
-              ))}
-            </div>
-            {exercise.comment&&<div className="ex-hist-comment">{exercise.comment}</div>}
-          </div>
-        ))}
+        <ExerciseHistoryList history={history}/>
       </div>
     );
   }
