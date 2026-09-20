@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { api, BOT_USERNAME } from "./api.js";
 
 /** Мой собственный Telegram user_id (строкой — как id приходят из API) —
@@ -433,9 +433,47 @@ function useLockBodyScroll() {
 // и датами. key — то значение, при изменении которого нужно проскроллить
 // наверх (обычно detailId/selected: null при списке, id/имя при открытой
 // детали — эффект срабатывает и на переход туда, и обратно).
+//
+// Восстановление позиции при возврате (диалог 18): вход в деталь по-прежнему
+// прыгает на 0 (там нужна шапка), а возврат в список (key стал null/false)
+// возвращает ту позицию, на которой список был до захода в деталь.
+//
+// Как это устроено. Читать window.scrollY в useEffect/useLayoutEffect при
+// входе в деталь ПОЗДНО: к этому моменту React уже заменил длинный список
+// короткой деталью, страница стала короче экрана, и браузер сам урезал
+// scrollY до 0 (проверено в реальном Chromium — эффект видел 0). Поэтому
+// позицию читаем прямо во время рендера, пока в DOM ещё старый список:
+// как только замечаем, что key стал непустым, а раньше был пустым —
+// запоминаем window.scrollY в ref. Чтение scrollY во время рендера — побочного
+// эффекта не создаёт (это чистое чтение), ref мутируется идемпотентно.
+// Каждый вызов хука хранит свой ref, поэтому вложенные уровни не мешают
+// друг другу.
 function useScrollTopOnChange(key) {
-  useEffect(() => {
-    window.scrollTo(0, 0);
+  const savedRef = useRef(0);
+  const prevKeyRef = useRef(key);
+  const inDetail = key != null && key !== false;
+  const prevInDetail = prevKeyRef.current != null && prevKeyRef.current !== false;
+  if (key !== prevKeyRef.current && !prevInDetail && inDetail) {
+    savedRef.current = window.scrollY; // DOM ещё старый — позиция списка цела
+  }
+  useLayoutEffect(() => {
+    const prev = prevKeyRef.current;
+    prevKeyRef.current = key;
+    if (prev === key) return; // первый рендер / ключ не менялся
+    const wasInDetail = prev != null && prev !== false;
+    if (wasInDetail && !inDetail) {
+      // деталь → список: вернуть позицию, запомненную при входе
+      const y = savedRef.current;
+      window.scrollTo(0, y);
+      // Список может дорисоваться позже (данные/шрифты) и на первом кадре
+      // оказаться короче нужной высоты — добиваем на следующем.
+      requestAnimationFrame(() => {
+        if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y);
+      });
+    } else {
+      // список → деталь, деталь → другая деталь, смена вкладки и т.п.
+      window.scrollTo(0, 0);
+    }
   }, [key]);
 }
 
@@ -3928,7 +3966,7 @@ export default function App() {
       <div className="app-frame" style={draftBarsCount?{"--draft-bars-h":`${draftBarsCount*80}px`}:undefined}>
         <div className="tab-bar">
           {["Тренировки","Упражнения","Сообщество","Замеры","Профиль"].map((t,i)=>(
-            <button key={i} className={`tab${tab===i?" active":""}`} onClick={()=>setTab(i)}>
+            <button key={i} className={`tab${tab===i?" active":""}`} onClick={()=>{ if(tab===i) window.scrollTo({top:0,behavior:"smooth"}); else setTab(i); }}>
               <span className="tab-label">
                 {t}
                 {i===2&&(communityBadge.unread_news||communityBadge.pending_requests>0)&&<span className="tab-badge-dot"/>}
