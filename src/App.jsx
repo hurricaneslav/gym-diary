@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import { api, BOT_USERNAME } from "./api.js";
 
 /** Мой собственный Telegram user_id (строкой — как id приходят из API) —
@@ -204,6 +204,54 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .prev-chev{flex-shrink:0;color:#555;display:flex;align-items:center;margin-top:1px}
 .hist-overlay{z-index:70}
 .hist-note{font-size:13px;color:#9A9A9A;line-height:1.55;font-style:italic;border-left:2px solid #333;padding:2px 0 2px 10px;margin-bottom:20px;white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word}
+.stats-hero{border:1px solid #282828;background:#111;padding:14px;margin-bottom:14px}
+.stats-hd{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#585858;font-weight:500;margin-bottom:10px}
+.stats-who{color:#8A8A8A;letter-spacing:.04em;text-transform:none;font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stats-main{display:flex;align-items:stretch;gap:10px}
+.stats-fig{flex:0 0 46%;max-width:164px;background:#0D0D0D;border:1px solid #1E1E1E;display:flex;align-items:flex-end;overflow:hidden}
+.stats-fig svg{display:block;width:100%;height:auto}
+.stats-list{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:space-between}
+.stat-cell{padding:3px 0;border-bottom:1px solid #1E1E1E}
+.stat-cell:last-child{border-bottom:none}
+.stat-cell:first-child{padding-top:0}
+.stat-line{display:flex;align-items:baseline;gap:7px;min-width:0}
+.stat-val{font-size:20px;font-weight:700;line-height:1.1;letter-spacing:-.01em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.stat-lbl{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#6E6E6E;margin-top:2px}
+.stat-sub{font-size:11px;color:#555;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.rec-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid #1E1E1E;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.rec-row:active{background:#151515}
+.rec-row.empty{border:1px dashed #333;padding:13px 14px;margin-top:8px;justify-content:center}
+.rec-left{min-width:0;flex:1}
+.rec-name{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rec-date{font-size:11px;color:#585858;margin-top:2px}
+.rec-val{font-size:17px;font-weight:700;white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums}
+.rec-x{color:#8A8A8A;font-weight:600}
+.rec-add{display:flex;align-items:center;gap:8px;color:#777;font-size:13px}
+.rec-empty{font-size:13px;color:#585858;padding:6px 0 2px}
+.pick-search{position:sticky;top:0;background:#0A0A0A;z-index:2;padding-bottom:4px}
+.pick-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 2px;border-bottom:1px solid #1E1E1E;cursor:pointer;font-size:15px;-webkit-tap-highlight-color:transparent}
+.pick-row:active{background:#151515}
+.pick-row.sel{font-weight:600}
+.pick-row.off{color:#4A4A4A;cursor:default}
+.pick-row.off:active{background:none}
+.pick-name{min-width:0;overflow-wrap:break-word;word-break:break-word}
+.pick-count{font-size:11px;color:#585858;flex-shrink:0}
+.flex-fig .ff-arm-l{transform-origin:24px 102px}
+.flex-fig .ff-arm-r{transform-origin:136px 102px}
+.flex-fig .ff-bicep,.flex-fig .ff-wink{transform-box:fill-box;transform-origin:center}
+.flex-fig .ff-body{transform-origin:80px 174px;animation:ffBob 3.2s ease-in-out infinite}
+.flex-fig .ff-arm-l{animation:ffSqueezeL 3.2s ease-in-out infinite}
+.flex-fig .ff-arm-r{animation:ffSqueezeR 3.2s ease-in-out infinite}
+.flex-fig .ff-bicep{animation:ffPump 3.2s ease-in-out infinite}
+.flex-fig .ff-wink{animation:ffWink 3.2s ease-in-out infinite}
+.flex-fig .ff-shine{animation:ffShine 3.2s ease-in-out infinite}
+@keyframes ffBob{0%,30%,72%,100%{transform:none}42%,60%{transform:translateY(-2px) scale(1.015)}}
+@keyframes ffSqueezeL{0%,30%,72%,100%{transform:none}42%,60%{transform:rotate(5deg)}}
+@keyframes ffSqueezeR{0%,30%,72%,100%{transform:none}42%,60%{transform:rotate(-5deg)}}
+@keyframes ffPump{0%,30%,72%,100%{transform:scale(1)}42%,60%{transform:scale(1.24)}}
+@keyframes ffWink{0%,38%,66%,100%{transform:scaleY(1)}44%,60%{transform:scaleY(.1)}}
+@keyframes ffShine{0%,32%,68%,100%{opacity:0}44%,58%{opacity:.95}}
+@media (prefers-reduced-motion:reduce){.flex-fig .ff-body,.flex-fig .ff-arm,.flex-fig .ff-bicep,.flex-fig .ff-wink,.flex-fig .ff-shine{animation:none!important}.flex-fig .ff-shine{opacity:0}}
 .ex-note-hint{margin:0 14px 10px;padding:6px 0 6px 10px;font-size:12px;color:#8A8A8A;border-left:2px solid #333;line-height:1.5;font-style:italic;cursor:pointer;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ex-note-hint.expanded{-webkit-line-clamp:unset;display:block}
 .sets{padding:10px 14px;overflow:hidden;contain:layout}
@@ -3658,12 +3706,310 @@ function CommunityTab({friends, setFriends, toast, badge, onBadgeChange, reloadB
 }
 
 // ── ProfileTab ────────────────────────────────────────────────────────────
-function ProfileTab({profiles, setProfiles, onProfileSwitch, toast, hasUnsavedDrafts}) {
+// ── Статистика профиля ────────────────────────────────────────────────────
+// Считается на лету из уже загруженных тренировок активного профиля (отдельного
+// запроса к серверу нет). Даже несколько сотен тренировок — это тысячи
+// подходов, то есть мгновенно; пересчёт только при изменении списка.
+const parseNum = (v) => {
+  const n = parseFloat(String(v ?? "").replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+};
+// Свой разделитель тысяч (неразрывный пробел) вместо toLocaleString: в части
+// старых WebView Telegram нет полных локальных данных, и формат "ru-RU" тихо
+// превращался бы в американский "1,523".
+const fmtInt = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, "\u00A0");
+const fmtTonnage = (kg) => {
+  if (kg < 10000) return `${fmtInt(kg)} кг`;
+  const t = kg / 1000;
+  return t < 100 ? `${t.toFixed(1)} т` : `${fmtInt(t)} т`;
+};
+// Склонение по числу: 1 раз, 2 раза, 5 раз, 11 раз, 21 раз, 22 раза.
+const ruPlural = (n, one, few, many) => {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && !(m100 >= 12 && m100 <= 14)) return few;
+  return many;
+};
+const setHasData = (s) => s.bilateral ? (s.weightL||s.repsL||s.weightR||s.repsR) : (s.weight||s.reps);
+
+function computeProfileStats(workouts) {
+  let tonnage = 0, sets = 0, exercises = 0;
+  const names = new Set();
+  workouts.forEach(w => (w.exercises || []).forEach(e => {
+    const filled = (e.sets || []).filter(setHasData);
+    // "Сделанное" упражнение — с хотя бы одним заполненным подходом. Пустая
+    // заготовка (например, из шаблона, где подходы так и не вписали) не считается.
+    if (!filled.length) return;
+    exercises++;
+    const nm = (e.name || "").trim().toLowerCase();
+    if (nm) names.add(nm);
+    filled.forEach(s => {
+      sets++;
+      tonnage += s.bilateral
+        ? parseNum(s.weightL) * parseNum(s.repsL) + parseNum(s.weightR) * parseNum(s.repsR)
+        : parseNum(s.weight) * parseNum(s.reps);
+    });
+  }));
+  return { workouts: workouts.length, sets, exercises, distinct: names.size, tonnage };
+}
+
+// Рекорд упражнения: самый тяжёлый вес; при равном весе — больше повторов; при
+// полном равенстве — та дата, когда это было впервые. У унилатеральных подходов
+// левая и правая сторона — отдельные кандидаты. Если во всей истории упражнения
+// нет ни одного веса (подтягивания, отжимания) — рекорд по повторам.
+function computeRecord(workouts, name) {
+  const lc = (name || "").trim().toLowerCase();
+  if (!lc) return null;
+  let bestW = null, bestR = null;
+  workouts.forEach(w => (w.exercises || []).forEach(e => {
+    if ((e.name || "").trim().toLowerCase() !== lc) return;
+    (e.sets || []).forEach(s => {
+      const pairs = s.bilateral ? [[s.weightL, s.repsL], [s.weightR, s.repsR]] : [[s.weight, s.reps]];
+      pairs.forEach(([wt, rp]) => {
+        const weight = parseNum(wt), reps = parseNum(rp);
+        if (weight > 0 && (!bestW || weight > bestW.weight
+            || (weight === bestW.weight && (reps > bestW.reps || (reps === bestW.reps && w.date < bestW.date))))) {
+          bestW = { weight, reps, date: w.date };
+        }
+        if (reps > 0 && (!bestR || reps > bestR.reps || (reps === bestR.reps && w.date < bestR.date))) {
+          bestR = { reps, date: w.date };
+        }
+      });
+    });
+  }));
+  if (bestW) return { kind: "weight", ...bestW };
+  if (bestR) return { kind: "reps", ...bestR };
+  return null;
+}
+
+// Упражнения, у которых есть хотя бы один заполненный подход, по убыванию частоты
+// (для подсказки по умолчанию и для списка выбора).
+function listExerciseNames(workouts) {
+  const map = new Map();
+  workouts.forEach(w => (w.exercises || []).forEach(e => {
+    const nm = (e.name || "").trim();
+    if (!nm || !(e.sets || []).some(setHasData)) return;
+    const k = nm.toLowerCase();
+    const cur = map.get(k);
+    if (cur) { cur.count++; if ((w.date || "") > cur.last) cur.last = w.date || ""; }
+    else map.set(k, { name: nm, count: 1, last: w.date || "" });
+  }));
+  return [...map.values()];
+}
+
+// Выбор трёх упражнений для рекордов хранится на устройстве отдельно для каждого
+// профиля (тренировки — тоже у каждого профиля свои, а имена упражнений могут
+// не совпадать). Как и черновики — localStorage, без запросов к серверу.
+const statsPinsKey = (profileId) => `gym_diary_stats_pins_v1_${profileId ?? "x"}`;
+function loadStatsPins(profileId) {
+  try {
+    const raw = localStorage.getItem(statsPinsKey(profileId));
+    if (!raw) return null;
+    const a = JSON.parse(raw);
+    if (!Array.isArray(a)) return null;
+    return [0, 1, 2].map(i => (typeof a[i] === "string" && a[i].trim()) ? a[i] : null);
+  } catch (e) { return null; }
+}
+function saveStatsPins(profileId, pins) {
+  try { localStorage.setItem(statsPinsKey(profileId), JSON.stringify(pins)); } catch (e) {}
+}
+
+// ── Персонаж ──────────────────────────────────────────────────────────────
+// Нарисован SVG-кодом (никаких картинок — ничего не грузится и остаётся
+// чётким на любом экране). Анимация — цикл ~3 сек: расслабился → напряг
+// бицепсы (бугры раздуваются, руки чуть сжимаются, тело подпрыгивает, летят
+// блики) → подмигнул → расслабился. Для тех, у кого в системе включено
+// "уменьшить движение", анимация отключается (см. CSS).
+function FlexFigure() {
+  const skin = "#E9B98C", skinLine = "#B98858", suit = "#2F6FD6", yellow = "#F2D04B";
+  const Fist = ({ x }) => (
+    <g transform={`translate(${x} 53)`}>
+      <circle r="10.5" fill={skin}/>
+      <path d="M-6 -3 L6 -3 M-6 1.5 L6 1.5 M-5 6 L5 6" stroke={skinLine} strokeWidth="1.7" fill="none"/>
+    </g>
+  );
+  return (
+    <svg className="flex-fig" viewBox="0 -5 160 179" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Качок напрягает бицепсы">
+      <g className="ff-body" stroke="#000" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round">
+        <g className="ff-arm ff-arm-l">
+          <path d="M50 98 L24 102" strokeWidth="31" fill="none"/>
+          <path d="M24 102 L23 76" strokeWidth="27" fill="none"/>
+          <path d="M23 76 L23 62" strokeWidth="20" fill="none"/>
+          <path d="M50 98 L24 102" stroke={skin} strokeWidth="25" fill="none"/>
+          <path d="M24 102 L23 76" stroke={skin} strokeWidth="21" fill="none"/>
+          <path d="M23 76 L23 62" stroke={skin} strokeWidth="14" fill="none"/>
+          <Fist x={23}/>
+          <g className="ff-bicep"><ellipse cx="38" cy="86" rx="15" ry="14" fill={skin}/><path d="M28 83 Q38 73 48 83" stroke={skinLine} strokeWidth="2.2" fill="none"/></g>
+        </g>
+        <g className="ff-arm ff-arm-r">
+          <path d="M110 98 L136 102" strokeWidth="31" fill="none"/>
+          <path d="M136 102 L137 76" strokeWidth="27" fill="none"/>
+          <path d="M137 76 L137 62" strokeWidth="20" fill="none"/>
+          <path d="M110 98 L136 102" stroke={skin} strokeWidth="25" fill="none"/>
+          <path d="M136 102 L137 76" stroke={skin} strokeWidth="21" fill="none"/>
+          <path d="M137 76 L137 62" stroke={skin} strokeWidth="14" fill="none"/>
+          <Fist x={137}/>
+          <g className="ff-bicep"><ellipse cx="122" cy="86" rx="15" ry="14" fill={skin}/><path d="M112 83 Q122 73 132 83" stroke={skinLine} strokeWidth="2.2" fill="none"/></g>
+        </g>
+        <path d="M46 92 Q80 82 114 92 L112 120 L108 180 L52 180 L48 120 Z" fill={suit}/>
+        <path d="M44 96 Q47 84 58 86 L60 112 L46 114 Q42 104 44 96 Z" fill={suit}/>
+        <path d="M116 96 Q113 84 102 86 L100 112 L114 114 Q118 104 116 96 Z" fill={suit}/>
+        <path d="M56 122 Q68 134 80 124 Q92 134 104 122" stroke="#1B4A9E" strokeWidth="2.4" fill="none"/>
+        <path d="M80 130 L80 180" stroke={yellow} strokeWidth="4.5" fill="none"/>
+        <path d="M62 88 L80 114 L98 88 L92 83 L80 100 L68 83 Z" fill={yellow}/>
+        <path d="M70 74 L70 87 L80 100 L90 87 L90 74 Z" fill={skin}/>
+        <circle cx="80" cy="50" r="27" fill="#F0C9A0"/>
+        <path d="M53 50 Q49 24 76 21 Q101 19 108 40 Q100 30 88 33 Q70 34 63 52 Z" fill={yellow}/>
+        <path d="M66 25 Q62 9 84 5 Q80 13 90 20 Q78 17 74 26 Z" fill={yellow}/>
+        <g className="ff-face" strokeLinecap="round">
+          <g><ellipse cx="70" cy="51" rx="4.6" ry="6" fill="#fff" strokeWidth="2"/><circle cx="71.2" cy="52" r="2.5" fill="#000" stroke="none"/></g>
+          <g className="ff-wink"><ellipse cx="91" cy="51" rx="4.6" ry="6" fill="#fff" strokeWidth="2"/><circle cx="89.8" cy="52" r="2.5" fill="#000" stroke="none"/></g>
+          <path d="M62 44 Q70 40 76 44" strokeWidth="2.6" fill="none"/>
+          <path d="M86 44 Q92 40 99 43" strokeWidth="2.6" fill="none"/>
+          <path d="M66 63 Q80 77 96 63 Q80 67 66 63 Z" fill="#fff" strokeWidth="2.2"/>
+          <path d="M73 66 L73 69 M80 67 L80 71 M87 66 L87 69" strokeWidth="1" fill="none"/>
+          <circle cx="62" cy="59" r="3.2" fill="#E58D7A" opacity=".55" stroke="none"/><circle cx="98" cy="59" r="3.2" fill="#E58D7A" opacity=".55" stroke="none"/>
+        </g>
+      </g>
+      <g className="ff-shine" stroke="#FFF" strokeWidth="2.2" strokeLinecap="round">
+        <path d="M5 80 L10 84 M3 92 L9 92 M5 104 L10 100"/>
+        <path d="M155 80 L150 84 M157 92 L151 92 M155 104 L150 100"/>
+      </g>
+    </svg>
+  );
+}
+
+// ── Шторка выбора упражнения для рекорда ──────────────────────────────────
+function RecordPickerSheet({ options, current, taken, onPick, onClear, onClose }) {
+  const sheetRef = useRef(null);
+  const [q, setQ] = useState("");
+  useLockBodyScroll();
+  useKeyboardScroll(sheetRef);
+  useSwipeBack(onClose);
+  const list = options
+    .filter(o => !q.trim() || o.name.toLowerCase().includes(q.trim().toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  const curLc = current ? current.toLowerCase() : null;
+  return (
+    <div className="overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="sheet" ref={sheetRef}>
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-icon-btn" onClick={onClose} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <span className="det-title" style={{flex:1,minWidth:0,paddingRight:36}}>Упражнение для рекорда</span>
+        </div>
+        <div className="pick-search">
+          <input className="inp" type="text" placeholder="Поиск по названию..." value={q} onChange={e => setQ(e.target.value)}/>
+        </div>
+        {current && <button className="btn ghost" style={{marginTop:12,marginBottom:4}} onClick={onClear}>Убрать из рекордов</button>}
+        {list.length === 0
+          ? <div className="empty" style={{padding:"28px 0"}}>{options.length === 0 ? "Упражнения появятся после первой тренировки" : "Ничего не найдено"}</div>
+          : list.map(o => {
+              const lc = o.name.toLowerCase();
+              const isCur = lc === curLc;
+              const isTaken = !isCur && taken.includes(lc);
+              return (
+                <div key={lc} className={`pick-row${isCur ? " sel" : ""}${isTaken ? " off" : ""}`} onClick={() => !isTaken && onPick(o.name)}>
+                  <span className="pick-name">{isCur ? "✓ " : ""}{o.name}</span>
+                  <span className="pick-count">{isTaken ? "уже выбрано" : `${o.count} ${ruPlural(o.count, "раз", "раза", "раз")}`}</span>
+                </div>
+              );
+            })}
+      </div>
+    </div>
+  );
+}
+
+// ── Блок статистики над списком профилей ──────────────────────────────────
+function StatsHero({ workouts, profileId, profileName }) {
+  const stats = useMemo(() => computeProfileStats(workouts), [workouts]);
+  const options = useMemo(() => listExerciseNames(workouts), [workouts]);
+  // Пока человек ничего не выбирал сам — подставляем 3 самых частых упражнения,
+  // чтобы блок не был пустым. Как только он выберет/уберёт хоть одно — берётся
+  // его собственный выбор (и он сохраняется).
+  const [saved, setSaved] = useState(() => loadStatsPins(profileId));
+  // Самые частые; при равенстве — те, что делали позже (порядок не зависит от
+  // того, в каком порядке сервер вернул тренировки).
+  const pins = saved ?? [...options]
+    .sort((a, b) => (b.count - a.count) || b.last.localeCompare(a.last))
+    .slice(0, 3).map(o => o.name).concat([null, null, null]).slice(0, 3);
+  const [pickSlot, setPickSlot] = useState(null);
+  const records = useMemo(() => pins.map(n => n ? computeRecord(workouts, n) : null), [workouts, pins.join("\u0001")]);
+
+  const choose = (slot, name) => {
+    const next = pins.slice(); next[slot] = name;
+    setSaved(next); saveStatsPins(profileId, next); setPickSlot(null);
+  };
+
+  const cells = [
+    { val: fmtTonnage(stats.tonnage), lbl: "Тоннаж" },
+    { val: fmtInt(stats.workouts), lbl: "Тренировок" },
+    { val: fmtInt(stats.sets), lbl: "Подходов" },
+    { val: fmtInt(stats.exercises), lbl: "Упражнений", sub: stats.distinct ? `${fmtInt(stats.distinct)} разных` : null },
+  ];
+
+  return (
+    <div className="stats-hero">
+      <div className="stats-hd"><span>Статистика</span>{profileName ? <span className="stats-who">{profileName}</span> : null}</div>
+      <div className="stats-main">
+        <div className="stats-fig"><FlexFigure/></div>
+        <div className="stats-list">
+          {cells.map(c => (
+            <div key={c.lbl} className="stat-cell">
+              <div className="stat-line"><span className="stat-val">{c.val}</span>{c.sub ? <span className="stat-sub">{c.sub}</span> : null}</div>
+              <div className="stat-lbl">{c.lbl}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="stats-hd" style={{marginTop:16}}><span>Рекорды</span></div>
+      {options.length === 0
+        ? <div className="rec-empty">Рекорды появятся после первой тренировки</div>
+        : pins.map((name, i) => {
+            const rec = records[i];
+            return (
+              <div key={i} className={`rec-row${name ? "" : " empty"}`} onClick={() => setPickSlot(i)}>
+                {name ? (
+                  <>
+                    <div className="rec-left">
+                      <div className="rec-name">{name}</div>
+                      <div className="rec-date">{rec ? formatDate(rec.date) : "нет записей"}</div>
+                    </div>
+                    <div className="rec-val">
+                      {rec ? (rec.kind === "weight"
+                        ? <>{String(rec.weight)} кг{rec.reps ? <span className="rec-x"> × {String(rec.reps)}</span> : null}</>
+                        : <>{String(rec.reps)} повт</>) : "—"}
+                    </div>
+                  </>
+                ) : (
+                  <div className="rec-add"><IconPlus/>Выбрать упражнение</div>
+                )}
+              </div>
+            );
+          })}
+      {pickSlot !== null && (
+        <RecordPickerSheet
+          options={options}
+          current={pins[pickSlot]}
+          taken={pins.filter(Boolean).map(n => n.toLowerCase())}
+          onPick={n => choose(pickSlot, n)}
+          onClear={() => choose(pickSlot, null)}
+          onClose={() => setPickSlot(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, hasUnsavedDrafts}) {
   const [detailId,setDetailId]=useState(null);
   const [renamingId,setRenamingId]=useState(null);
   const [renameVal,setRenameVal]=useState("");
   const [showCreate,setShowCreate]=useState(false);
 
+  const activeProfile=profiles.find(p=>p.is_active)||null;
   const detail=detailId!=null?profiles.find(p=>p.id===detailId):null;
   useSwipeBack(()=>setDetailId(null), !!detail);
   useScrollTopOnChange(detailId);
@@ -3782,6 +4128,7 @@ function ProfileTab({profiles, setProfiles, onProfileSwitch, toast, hasUnsavedDr
 
   return(
     <div className="page">
+      <StatsHero key={activeProfile?.id ?? "x"} workouts={workouts||[]} profileId={activeProfile?.id} profileName={activeProfile?.name}/>
       <button className="btn" onClick={()=>setShowCreate(true)}><IconPlus/>Новый профиль</button>
       {profiles.map(p=>(
         <div key={p.id} className="card" onClick={()=>setDetailId(p.id)}>
@@ -4057,7 +4404,7 @@ export default function App() {
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
         {tab===2&&<CommunityTab friends={friends} setFriends={setFriends} toast={showToast} badge={communityBadge} onBadgeChange={setCommunityBadge} reloadBadge={reloadCommunityBadge}/>}
         {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
-        {tab===4&&<ProfileTab profiles={profiles} setProfiles={setProfiles} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
+        {tab===4&&<ProfileTab profiles={profiles} workouts={workouts} setProfiles={setProfiles} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
         {(showWorkoutBar||showMeasurementBar||showProgressionBar||showTemplateBar)&&(
           <div className="draft-bars-wrap">
             {showWorkoutBar&&(
