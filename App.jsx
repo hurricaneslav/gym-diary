@@ -1,0 +1,4784 @@
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
+import { api, BOT_USERNAME } from "./api.js";
+
+/** Мой собственный Telegram user_id (строкой — как id приходят из API) —
+ * нужен на фронте только для одной вещи: показать кнопку удаления у своих
+ * же комментариев в ленте сообщества. Источник тот же, что использует
+ * getInitData() в api.js, только распарсенный, а не как строка. */
+function getMyUserId(){
+  const id = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+  return id!=null ? String(id) : "12345"; // тот же dev-фолбэк, что и в api.js
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+const formatDate = (iso) => { try { const [y,m,d]=iso.split("-"); return `${d}.${m}.${y}`; } catch { return iso; } };
+
+// Нормализация ввода веса/дробных чисел: на некоторых телефонах (особенно
+// iPhone с системной локалью, где принят десятичный разделитель "запятая")
+// экранная клавиатура для чисел выдаёт "," вместо "." — а после потери
+// соединения/восстановления из фона это иногда проскакивало в сохранённые
+// данные необработанным. Принудительно приводим к точке и отбрасываем всё,
+// что не цифра и не точка (и схлопываем повторные точки в одну) — прямо
+// при вводе, а не только при сохранении, чтобы запятая никогда не долетала
+// до состояния приложения.
+const normalizeDecimal = (raw) => {
+  if (raw == null) return raw;
+  let v = String(raw).replace(/,/g, ".").replace(/[^0-9.]/g, "");
+  const dot = v.indexOf(".");
+  if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, "");
+  return v;
+};
+
+// Есть ли в черновике тренировки/замера реально внесённые данные (не просто
+// пустая заготовка) — используется при предупреждении о переключении профиля.
+// Учитываем не только внесённые подходы, но и вручную изменённое имя (сверяем
+// с defaultName — исходным сгенерированным именем на момент открытия шторки),
+// а также названия упражнений без подходов (например, сразу после применения
+// шаблона — подходы ещё не вписаны, но структура уже введена).
+const workoutDraftHasData = (exercises=[], name="", defaultName="") => {
+  const hasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
+  if((name||"").trim() && (name||"").trim()!==(defaultName||"").trim()) return true;
+  return exercises.some(e=>e.name?.trim()||e.sets?.some(hasData));
+};
+const measurementDraftHasData = (vals={}) => Object.values(vals).some(v=>v!==""&&v!=null);
+// Черновик создания прогрессии — и произвольной, и расчётной, единая проверка:
+// есть название упражнения или уже выбран тип/цель/хоть один подход в сессии.
+const progressionDraftHasData = (d) => {
+  if(!d) return false;
+  if((d.name||"").trim()) return true;
+  if(d.mode==="manual") return (d.sessions||[]).some(sess=>sess.some(s=>s.weight!==""||s.reps!==""));
+  if(d.mode==="calculated") return !!d.exType || !!d.goal;
+  return false;
+};
+// Черновик шаблона тренировки — есть данные, если задано имя или хотя бы
+// у одного упражнения есть название.
+const templateDraftHasData = (d) => {
+  if(!d) return false;
+  if((d.name||"").trim()) return true;
+  return (d.exercises||[]).some(e=>e.name?.trim());
+};
+
+const MEASUREMENT_FIELDS = [
+  {key:"weight",label:"Вес тела"},{key:"waist",label:"Талия"},{key:"chest",label:"Грудь"},
+  {key:"shoulders",label:"Плечи"},{key:"armRight",label:"Правая рука"},{key:"armLeft",label:"Левая рука"},
+  {key:"forearmRight",label:"Правое предплечье"},{key:"forearmLeft",label:"Левое предплечье"},
+  {key:"glutes",label:"Ягодицы"},{key:"quadRight",label:"Правый квадрицепс"},{key:"quadLeft",label:"Левый квадрицепс"},
+  {key:"calfRight",label:"Правая икра"},{key:"calfLeft",label:"Левая икра"},
+];
+
+const IconPlus = () => <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>;
+const IconTrash = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3.5h10M5.5 3.5V2.5a.5.5 0 01.5-.5h2a.5.5 0 01.5.5v1M5 3.5l.5 7.5h3l.5-7.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IconChevron = ({dir="right"}) => <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{transform:dir==="left"?"rotate(180deg)":""}}><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IconEdit = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+
+const IconBilateral = () => <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 6.5h9M6.5 2v9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="2.5" cy="6.5" r="1.5" fill="currentColor" opacity=".7"/><circle cx="10.5" cy="6.5" r="1.5" fill="currentColor" opacity=".7"/></svg>;
+const IconClose = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
+const IconMinimize = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 8.5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>;
+const IconLink = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M6 8l2-2M5 9.5L3.5 11A2 2 0 111 8.5L2.5 7M9 5l1.5-1.5A2 2 0 1113 6L11.5 7.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IconArrowUp = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 11V3M3.5 6.5L7 3l3.5 3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IconArrowDown = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 3v8M3.5 7.5L7 11l3.5-3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IconTemplate = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1.5" y="1.5" width="11" height="11" rx="1" stroke="currentColor" strokeWidth="1.2"/><path d="M4 5h6M4 7.5h6M4 10h3.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/></svg>;
+const IconKeyboard = () => <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><rect x="1.5" y="4.5" width="17" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M4.5 8h1M8 8h1M11.5 8h1M15 8h1M4.5 11h1M8 11h1M11.5 11h1M15 11h1M6.5 13.5h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>;
+const IconProgression = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 10.5l3-3.5 2.5 2L11.5 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><path d="M8.5 3H11.5V6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IconBell = ({dot=false}) => <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M5 7.5a4 4 0 018 0v3l1 1.5H4l1-1.5v-3z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><path d="M7.3 13.5a1.7 1.7 0 003.4 0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>{dot&&<circle cx="13.5" cy="4" r="2.5" fill="#FF4444" stroke="#0A0A0A" strokeWidth="1"/>}</svg>;
+const IconPeople = ({dot=false}) => <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="6.5" cy="6" r="2.3" stroke="currentColor" strokeWidth="1.3"/><circle cx="12.5" cy="7" r="1.9" stroke="currentColor" strokeWidth="1.3"/><path d="M2 15c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><path d="M11.5 11.3c1.8.2 3 1.4 3 3.7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>{dot&&<circle cx="15" cy="3.5" r="2.5" fill="#FF4444" stroke="#0A0A0A" strokeWidth="1"/>}</svg>;
+const IconHeart = ({filled=false}) => <svg width="15" height="15" viewBox="0 0 15 15" fill={filled?"#F6485B":"none"}><path d="M7.5 12.8s-5.2-3.3-5.2-6.9a2.9 2.9 0 015.2-1.8 2.9 2.9 0 015.2 1.8c0 3.6-5.2 6.9-5.2 6.9z" stroke={filled?"#F6485B":"currentColor"} strokeWidth="1.2" strokeLinejoin="round"/></svg>;
+const IconComment = () => <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M2 3h11v7H6l-2.5 2.5V10H2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>;
+
+// ── Прогрессия: справочники (дублируют main.py по необходимости — как и
+// MEASUREMENT_FIELDS, это чисто визуальные подписи/дефолты, при правке
+// логики на бэкенде сюда лезть не нужно, они не участвуют в расчёте) ──────
+const ROLE_LABELS = { heavy: "Тяжёлая", light: "Лёгкая" };
+const EXERCISE_TYPE_LABELS = {
+  main_compound: "Основное базовое",
+  accessory_compound: "Вспомогательное многосуставное",
+  isolation: "Изоляция",
+  custom: "Произвольное",
+};
+const GOAL_LABELS = { strength: "Сила", hypertrophy: "Гипертрофия", strength_hypertrophy: "Сила + гипертрофия" };
+const VARYING_EX_TYPES = ["main_compound", "accessory_compound"];
+// Общие диапазоны повторов для основных и вспомогательных многосуставных упражнений.
+const COMPOUND_REP_RANGE_DEFAULTS = { strength: [1,5], hypertrophy: [6,10], strength_hypertrophy: [5,8] };
+// У изоляции диапазон фиксированный и не зависит от выбранной цели.
+const ISOLATION_REP_RANGE_DEFAULT = [10,15];
+const REP_RANGE_DEFAULTS = {
+  main_compound:      COMPOUND_REP_RANGE_DEFAULTS,
+  accessory_compound: COMPOUND_REP_RANGE_DEFAULTS,
+};
+const INCREMENT_PRESETS = [1, 2, 2.5, 5];
+const WEEKS_PRESETS = [4, 6, 8, 10, 12];
+
+// Оценка 1ПМ по формуле Эпли и обратный расчёт веса под целевое число повторов.
+// Это прикидка, а не точный максимум — насчитанное значение всегда можно
+// поправить руками на шаге ввода стартовой точки.
+const epley1RM = (weight, reps) => weight * (1 + reps / 30);
+const weightForTargetReps = (oneRM, targetReps, increment) => {
+  const raw = oneRM / (1 + targetReps / 30);
+  const step = increment || 2.5;
+  return Math.round(raw / step) * step;
+};
+// Лучший (по оценке 1ПМ) рабочий подход в самой свежей тренировке с этим упражнением.
+const findLastBestSet = (workouts, name) => {
+  const lc = name.trim().toLowerCase();
+  if (!lc) return null;
+  const entries = workouts
+    .filter(w => w.exercises.some(e => e.name.trim().toLowerCase() === lc))
+    .sort((a, b) => b.date.localeCompare(a.date));
+  if (!entries.length) return null;
+  const workout = entries[0];
+  const exercise = workout.exercises.find(e => e.name.trim().toLowerCase() === lc);
+  let best = null;
+  for (const s of exercise.sets) {
+    const w = s.bilateral ? Math.min(Number(s.weightL) || 0, Number(s.weightR) || 0) : Number(s.weight) || 0;
+    const r = s.bilateral ? Math.min(Number(s.repsL) || 0, Number(s.repsR) || 0) : Number(s.reps) || 0;
+    if (!w || !r) continue;
+    const oneRM = epley1RM(w, r);
+    if (!best || oneRM > best.oneRM) best = { weight: w, reps: r, oneRM, date: workout.date };
+  }
+  return best;
+};
+
+const css = `
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;-webkit-font-smoothing:antialiased}
+.app-frame{max-width:390px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;background:#0A0A0A}
+.tab-bar{display:flex;border-bottom:1px solid #3A3A3A;background:#0A0A0A;position:sticky;top:0;z-index:10}
+.tab{flex:1 1 0;min-width:0;padding:12px 0;text-align:center;font-size:8.5px;font-weight:500;letter-spacing:-0.02em;text-transform:uppercase;color:#666;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;background:none;border-left:none;border-right:none;border-top:none;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tab.active{color:#FFF;border-bottom-color:#FFF}
+.page{flex:1;padding:13px;padding-bottom:calc(32px + var(--draft-bars-h, 0px))}
+.card{border:1px solid #3A3A3A;padding:14px 16px;margin-bottom:10px;cursor:pointer;background:#111;display:flex;align-items:center;justify-content:space-between;gap:12px;transition:border-color .15s}
+.card:active{border-color:#666}
+.card-title{font-weight:600;font-size:15px}
+.card-sub{font-size:12px;color:#777;margin-top:3px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:14px;border:1px solid #FFF;background:transparent;color:#FFF;font-size:14px;font-weight:600;letter-spacing:.02em;cursor:pointer;transition:background .15s,color .15s;margin-bottom:20px;user-select:none;font-family:inherit}
+.btn:active{background:#FFF;color:#000}
+.btn.ghost{border-color:#444;color:#999}.btn.ghost:active{background:#1A1A1A;color:#FFF}
+.btn.danger{border-color:#FF4444;color:#FF4444}.btn.danger:active{background:#FF4444;color:#FFF}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;display:flex;flex-direction:column;justify-content:flex-end;max-width:390px;margin:0 auto;overflow:hidden}
+.sheet{position:relative;background:#0A0A0A;border-top:1px solid #3A3A3A;max-height:92dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 16px 40px;animation:up .22s ease;scroll-behavior:auto}
+@keyframes up{from{transform:translateY(30px);opacity:0}to{transform:none;opacity:1}}
+.handle{width:36px;height:4px;background:#444;margin:12px auto 16px}
+.sheet-top-actions{position:absolute;top:14px;right:12px;display:flex;align-items:center;gap:6px;z-index:5}
+.sheet-icon-btn{background:none;border:none;color:#777;cursor:pointer;padding:7px;display:flex;align-items:center;justify-content:center}
+.sheet-icon-btn:active{color:#FFF}
+.sheet-minimize-btn{background:none;border:1px solid #3A3A3A;color:#BBB;cursor:pointer;padding:6px 12px;font-size:12px;font-family:inherit;display:flex;align-items:center;gap:5px}
+.sheet-minimize-btn:active{border-color:#FFF;color:#FFF}
+.draft-card{border-color:#3A3220;background:#161208}
+.draft-pill{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#E0A030;border:1px solid #4A3A1A;padding:2px 6px;flex-shrink:0}
+.sheet-title-row{display:flex;align-items:center;gap:8px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #282828}
+.sheet-title-inp{flex:1;background:none;border:none;border-bottom:1px solid #444;color:#FFF;font-size:18px;font-weight:700;letter-spacing:-.02em;outline:none;font-family:inherit;padding-bottom:3px;min-width:0}
+.sheet-title-inp::placeholder{color:#444;font-weight:400}
+.sheet-title-inp:focus{border-bottom-color:#888}
+.field{margin-bottom:14px}
+.lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#777;font-weight:500;margin-bottom:6px}
+.inp{width:100%;background:#111;border:1px solid #3A3A3A;color:#FFF;font-size:15px;padding:11px 13px;outline:none;font-family:inherit;transition:border-color .15s;-webkit-appearance:none}
+.inp:focus{border-color:#FFF}
+.inp::placeholder{color:#444}
+input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
+.ex-note-inp{width:100%;background:#111;border:1px solid #3A3A3A;color:#FFF;font-size:14px;padding:11px 13px;outline:none;font-family:inherit;transition:border-color .15s;resize:vertical;min-height:84px;line-height:1.5;margin-bottom:20px;-webkit-appearance:none}
+.ex-note-inp:focus{border-color:#FFF}
+.ex-note-inp::placeholder{color:#444}
+.ex-note-inp:disabled{opacity:.5}
+.ex-block{border:1px solid #3A3A3A;margin-bottom:14px;background:#111}
+.ex-hd{padding:12px 14px;border-bottom:1px solid #282828;display:flex;align-items:center;gap:10px;position:relative}
+.ex-num{font-size:11px;color:#6E6E6E;font-weight:600;flex-shrink:0;width:22px}
+.ex-name-wrap{flex:1;position:relative;min-width:0}
+.ex-name-inp{width:100%;background:none;border:none;color:#FFF;font-size:15px;font-weight:600;outline:none;font-family:inherit;padding:0}
+.ex-name-inp::placeholder{color:#444;font-weight:400}
+.suggestions{position:absolute;top:calc(100% + 6px);left:-14px;right:-14px;background:#1A1A1A;border:1px solid #444;z-index:100;max-height:160px;overflow-y:auto}
+.sug-item{padding:10px 14px;font-size:14px;cursor:pointer;color:#CCC;border-bottom:1px solid #2C2C2C}
+.sug-item:last-child{border-bottom:none}
+.sug-item:active{background:#2A2A2A}
+.sug-match{color:#FFF;font-weight:600}
+.tpl-picker{border:1px solid #3A3A3A;background:#111;margin-top:8px;max-height:200px;overflow-y:auto}
+.tpl-picker-item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 13px;border-bottom:1px solid #242424;cursor:pointer;font-size:13px}
+.tpl-picker-item:last-child{border-bottom:none}
+.tpl-picker-item:active{background:#1A1A1A}
+.tpl-picker-empty{padding:13px;color:#666;font-size:12px;text-align:center}
+.tpl-mode-pick{display:flex;flex-direction:column;gap:10px}
+.prev{margin:0 14px;padding:8px 0 10px;font-size:12px;color:#6E6E6E;border-bottom:1px solid #242424;font-style:italic}
+.prev.tappable{cursor:pointer;display:flex;align-items:flex-start;gap:8px;-webkit-tap-highlight-color:transparent}
+.prev.tappable:active{color:#AAA}
+.prev-body{flex:1;min-width:0}
+.prev-chev{flex-shrink:0;color:#555;display:flex;align-items:center;margin-top:1px}
+.hist-overlay{z-index:70}
+.hist-note{font-size:13px;color:#9A9A9A;line-height:1.55;font-style:italic;border-left:2px solid #333;padding:2px 0 2px 10px;margin-bottom:20px;white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word}
+.stats-hero{border:1px solid #282828;background:#111;padding:14px;margin-bottom:14px}
+.stats-hd{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#585858;font-weight:500;margin-bottom:10px}
+.stats-who{color:#8A8A8A;letter-spacing:.04em;text-transform:none;font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stats-main{display:flex;align-items:stretch;gap:10px}
+.stats-fig{position:relative;flex:0 0 46%;max-width:164px;background:#0D0D0D;border:1px solid #1E1E1E;display:flex;align-items:flex-end;overflow:hidden}
+.fig-edit{position:absolute;bottom:6px;right:6px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);border:1px solid #444;color:#DDD;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent}
+.fig-edit:active{background:#222}
+.stats-fig svg{display:block;width:100%;height:auto}
+.stats-list{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:space-between}
+.stat-cell{padding:3px 0;border-bottom:1px solid #1E1E1E}
+.stat-cell:last-child{border-bottom:none}
+.stat-cell:first-child{padding-top:0}
+.stat-line{display:flex;align-items:baseline;gap:7px;min-width:0}
+.stat-val{font-size:20px;font-weight:700;line-height:1.1;letter-spacing:-.01em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.stat-lbl{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#6E6E6E;margin-top:2px}
+.stat-sub{font-size:11px;color:#555;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.rec-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid #1E1E1E;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.rec-row:active{background:#151515}
+.rec-row.ro{cursor:default}
+.rec-row.ro:active{background:none}
+.rec-row.empty{border:1px dashed #333;padding:13px 14px;margin-top:8px;justify-content:center}
+.rec-left{min-width:0;flex:1}
+.rec-name{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rec-date{font-size:11px;color:#585858;margin-top:2px}
+.rec-val{font-size:17px;font-weight:700;white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums}
+.rec-x{color:#8A8A8A;font-weight:600}
+.rec-add{display:flex;align-items:center;gap:8px;color:#777;font-size:13px}
+.rec-empty{font-size:13px;color:#585858;padding:6px 0 2px}
+.av-prev{position:sticky;top:0;z-index:4;background:#0A0A0A;display:flex;gap:12px;padding:6px 0 12px;border-bottom:1px solid #1E1E1E;margin-bottom:2px}
+.av-prev-fig{flex:0 0 46%;max-width:172px;border:1px solid #1E1E1E;display:flex;align-items:flex-end;overflow:hidden}
+.av-prev-fig svg{display:block;width:100%;height:auto}
+.av-prev-btns{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;justify-content:center}
+.av-prev-btns .btn{margin:0;padding:11px 8px;font-size:13px}
+@media (max-height:700px){.av-prev-fig{flex-basis:36%;max-width:124px}.av-prev-btns .btn{padding:9px 6px}}
+.av-sec{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#585858;font-weight:500;margin:18px 0 9px}
+.av-chips{display:flex;flex-wrap:wrap;gap:6px}
+.av-chip{padding:8px 11px;border:1px solid #333;background:transparent;color:#999;font-size:12.5px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.av-chip.on{border-color:#FFF;color:#FFF;background:#161616}
+.av-sws{display:flex;flex-wrap:wrap;gap:9px}
+.av-sw{width:32px;height:32px;border-radius:50%;border:2px solid #2A2A2A;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent}
+.av-sw.on{border-color:#FFF;box-shadow:0 0 0 2px #0A0A0A inset}
+.pick-search{position:sticky;top:0;background:#0A0A0A;z-index:2;padding-bottom:4px}
+.pick-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 2px;border-bottom:1px solid #1E1E1E;cursor:pointer;font-size:15px;-webkit-tap-highlight-color:transparent}
+.pick-row:active{background:#151515}
+.pick-row.sel{font-weight:600}
+.pick-row.off{color:#4A4A4A;cursor:default}
+.pick-row.off:active{background:none}
+.pick-name{min-width:0;overflow-wrap:break-word;word-break:break-word}
+.pick-count{font-size:11px;color:#585858;flex-shrink:0}
+.flex-fig .ff-bicep,.flex-fig .ff-wink{transform-box:fill-box;transform-origin:center}
+.flex-fig .ff-body{transform-origin:80px 174px;animation:ffBob 3.2s ease-in-out infinite}
+.flex-fig .ff-arm-l{animation:ffSqueezeL 3.2s ease-in-out infinite}
+.flex-fig .ff-arm-r{animation:ffSqueezeR 3.2s ease-in-out infinite}
+.flex-fig .ff-bicep{animation:ffPump 3.2s ease-in-out infinite}
+.flex-fig .ff-wink{animation:ffWink 3.2s ease-in-out infinite}
+.flex-fig .ff-shine{animation:ffShine 3.2s ease-in-out infinite}
+.flex-fig .ff-lift{animation:ffLift 3.2s ease-in-out infinite}
+.flex-fig.ff-still *{animation:none!important}
+.flex-fig.ff-still .ff-shine{opacity:0}
+@keyframes ffBob{0%,30%,72%,100%{transform:none}42%,60%{transform:translateY(-2px) scale(1.015)}}
+@keyframes ffSqueezeL{0%,30%,72%,100%{transform:none}42%,60%{transform:rotate(5deg)}}
+@keyframes ffSqueezeR{0%,30%,72%,100%{transform:none}42%,60%{transform:rotate(-5deg)}}
+@keyframes ffPump{0%,30%,72%,100%{transform:scale(1)}42%,60%{transform:scale(1.24)}}
+@keyframes ffWink{0%,38%,66%,100%{transform:scaleY(1)}44%,60%{transform:scaleY(.1)}}
+@keyframes ffLift{0%,30%,72%,100%{transform:none}42%,60%{transform:translateY(-3px)}}
+@keyframes ffShine{0%,32%,68%,100%{opacity:0}44%,58%{opacity:.95}}
+@media (prefers-reduced-motion:reduce){.flex-fig .ff-body,.flex-fig .ff-lift,.flex-fig .ff-arm-l,.flex-fig .ff-arm-r,.flex-fig .ff-arm,.flex-fig .ff-bicep,.flex-fig .ff-wink,.flex-fig .ff-shine{animation:none!important}.flex-fig .ff-shine{opacity:0}}
+.ex-note-hint{margin:0 14px 10px;padding:6px 0 6px 10px;font-size:12px;color:#8A8A8A;border-left:2px solid #333;line-height:1.5;font-style:italic;cursor:pointer;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ex-note-hint.expanded{-webkit-line-clamp:unset;display:block}
+.sets{padding:10px 14px;overflow:hidden;contain:layout}
+.set-row{display:flex;align-items:center;gap:5px;margin-bottom:8px;width:100%;min-width:0}
+.set-n{font-size:11px;color:#5C5C5C;font-weight:600;text-align:center;flex-shrink:0;width:18px}
+.set-inp{background:#1A1A1A;border:1px solid #3A3A3A;color:#FFF;font-size:14px;padding:8px 6px;outline:none;font-family:inherit;text-align:center;-webkit-appearance:none;min-width:0;width:0;flex:1}
+.set-inp:focus{border-color:#777}
+.set-inp::placeholder{color:#4A4A4A;font-size:12px}
+.set-inp.sm{font-size:12px;padding:7px 4px}
+.set-sep{color:#5C5C5C;font-weight:600;text-align:center;font-size:13px;flex-shrink:0;width:10px}
+.set-side{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#6E6E6E;font-weight:700;flex-shrink:0;width:14px;text-align:center}
+.set-side.L{color:#5B9CF6}
+.set-side.R{color:#F6845B}
+.set-bi-wrap{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+.set-bi-row{display:flex;align-items:center;gap:4px;min-width:0}
+.btn-bi{background:none;border:none;color:#4A4A4A;cursor:pointer;padding:3px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:color .15s}
+.btn-bi:active{color:#888}
+.btn-bi.active{color:#5B9CF6}
+.del-btn{background:none;border:none;color:#5C5C5C;cursor:pointer;padding:4px;display:flex;align-items:center;justify-content:center;line-height:1}
+.del-btn:disabled{opacity:.25;cursor:default}
+.del-btn:active{color:#FF4444}
+.ex-comment{padding:0 14px 12px;margin-top:2px}
+.ex-comment-inp{width:100%;background:none;border:none;border-top:1px solid #242424;color:#888;font-size:13px;padding:10px 0 0;outline:none;font-family:inherit;resize:none;line-height:1.5;min-height:36px}
+.ex-comment-inp::placeholder{color:#3A3A3A}
+.ex-comment-inp:focus{color:#CCC}
+.w-ex-comment{padding:6px 14px 10px;font-size:12px;color:#6E6E6E;font-style:italic;border-top:1px solid #242424;line-height:1.5}
+.ex-hist-comment{font-size:12px;color:#6E6E6E;font-style:italic;margin-top:6px;line-height:1.5}
+.add-set{background:none;border:1px dashed #444;color:#6E6E6E;width:100%;padding:8px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;font-family:inherit;margin-top:4px}
+.add-set:active{border-color:#777;color:#AAA}
+.add-ex{background:none;border:1px dashed #444;color:#6E6E6E;width:100%;padding:12px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;margin-bottom:16px}
+.add-ex:active{border-color:#888;color:#CCC}
+.det-hd{display:flex;align-items:center;gap:10px;padding:16px 0;border-bottom:1px solid #282828;margin-bottom:16px;position:sticky;top:37px;z-index:5;background:#0A0A0A}
+.back-btn{background:none;border:1px solid #3A3A3A;color:#FFF;padding:6px 10px;cursor:pointer;display:flex;align-items:center;gap:4px;font-size:13px;font-family:inherit}
+.back-btn:active{border-color:#FFF}
+.det-title{font-size:17px;font-weight:700;letter-spacing:-.02em;flex:1;min-width:0}
+.sec-lbl{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#585858;font-weight:500;margin-bottom:10px;margin-top:20px}
+.sec-lbl:first-child{margin-top:0}
+.ex-hist-item{border:1px solid #282828;padding:12px 14px;margin-bottom:8px;background:#111}
+.ex-hist-date{font-size:11px;color:#6E6E6E;margin-bottom:8px}
+.ex-sets-disp{font-size:13px;color:#CCC;line-height:1.7}
+.w-ex{border:1px solid #282828;margin-bottom:10px;background:#111}
+.w-ex-name{padding:10px 14px;font-weight:600;font-size:14px;border-bottom:1px solid #242424;color:#DDD}
+.w-sets{padding:10px 14px}
+.w-set-row{display:flex;gap:6px;align-items:center;font-size:13px;color:#888;margin-bottom:4px}
+.w-set-n{color:#585858;width:20px;flex-shrink:0}
+.w-set-v{color:#CCC}
+.w-set-bi{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;width:100%}
+.w-set-bi-side{color:#CCC}
+.w-set-bi-side:last-child{text-align:left}
+.w-set-bi-sep{color:#4A4A4A;text-align:center}
+.rename-inp{background:none;border:none;border-bottom:1px solid #555;color:#FFF;font-size:17px;font-weight:700;letter-spacing:-.02em;outline:none;font-family:inherit;flex:1;min-width:0;padding-bottom:2px}
+.tag{display:inline-block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#6E6E6E;border:1px solid #3A3A3A;padding:2px 6px;flex-shrink:0}
+.divider{border:none;border-top:1px solid #282828;margin:16px 0}
+.empty{text-align:center;padding:48px 24px;color:#585858;font-size:14px;line-height:1.6}
+.empty-icon{font-size:32px;margin-bottom:12px;opacity:.4}
+.m-prev-hint{display:flex;align-items:center;gap:6px;margin-top:4px}
+.m-prev-val{font-size:11px;color:#6E6E6E;font-style:italic}
+.m-prev-delta{font-size:11px;font-weight:600}
+.m-prev-delta.pos{color:#4CAF50}
+.m-prev-delta.neg{color:#EF5350}
+.m-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.m-grid .field{margin-bottom:0}
+.edit-badge{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#888;border:1px solid #3A3A3A;padding:3px 8px;cursor:pointer;background:none;font-family:inherit;flex-shrink:0}
+.edit-badge:active{border-color:#FFF;color:#FFF}
+.loading{text-align:center;padding:60px 24px;color:#585858;font-size:13px}
+.spinner{width:24px;height:24px;border:2px solid #3A3A3A;border-top-color:#FFF;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;border:1px solid #444;color:#CCC;font-size:13px;padding:10px 18px;z-index:200;white-space:nowrap;animation:fadeIn .2s ease}
+.kbd-dismiss-btn{position:fixed;right:13px;z-index:60;background:#1A1A1A;border:1px solid #3A3A3A;color:#DDD;font-size:12px;font-weight:600;padding:9px 13px;font-family:inherit;cursor:pointer;display:flex;align-items:center;gap:6px;box-shadow:0 2px 10px rgba(0,0,0,.5)}
+.kbd-dismiss-btn:active{border-color:#FFF;color:#FFF}
+@keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.draft-bars-wrap{position:fixed;bottom:0;left:0;right:0;max-width:390px;margin:0 auto;z-index:45;display:flex;flex-direction:column}
+.draft-bar{background:#1A1608;border-top:2px solid #E0A030;display:flex;align-items:center;gap:12px;padding:16px;cursor:pointer;animation:up .2s ease;box-shadow:0 -4px 20px rgba(0,0,0,.4)}
+.draft-bar-dot{width:9px;height:9px;background:#E0A030;flex-shrink:0;animation:pulse 1.6s ease infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.draft-bar-text{flex:1;min-width:0}
+.draft-bar-title{font-size:15px;font-weight:700;color:#FFF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.draft-bar-sub{font-size:12px;color:#C08A30;margin-top:2px;font-weight:500}
+.draft-bar-close{background:none;border:none;color:#8A7050;cursor:pointer;padding:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.draft-bar-close:active{color:#FFF}
+.badge-active{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#4CAF50;border:1px solid #2E4A2E;padding:2px 6px;flex-shrink:0}
+.badge-main{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#5B9CF6;border:1px solid #2A3A4A;padding:2px 6px;flex-shrink:0}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #242424;gap:12px}
+.toggle-row:last-child{border-bottom:none}
+.toggle-label{font-size:14px;color:#DDD}
+.toggle-sub{font-size:11px;color:#6E6E6E;margin-top:2px;line-height:1.4}
+.switch{position:relative;width:42px;height:24px;flex-shrink:0;background:#242424;border:1px solid #3A3A3A;cursor:pointer;transition:background .15s,border-color .15s;padding:0}
+.switch.on{background:#2E4A2E;border-color:#4CAF50}
+.switch-knob{position:absolute;top:2px;left:2px;width:18px;height:18px;background:#888;transition:left .15s,background .15s}
+.switch.on .switch-knob{left:22px;background:#4CAF50}
+.avatar{width:36px;height:36px;background:#1A1A1A;border:1px solid #3A3A3A;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;color:#888;flex-shrink:0}
+.friend-row{display:flex;align-items:center;gap:12px}
+.search-row{display:flex;gap:8px;margin-bottom:14px}
+.search-row .inp{flex:1}
+.search-btn{background:none;border:1px solid #3A3A3A;color:#FFF;padding:0 16px;cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0}
+.search-btn:active{border-color:#FFF}
+.search-btn:disabled{opacity:.4}
+.search-result{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid #3A3A3A;background:#111;margin-bottom:14px;gap:10px}
+.sub-tabs{display:flex;border-bottom:1px solid #3A3A3A;margin-bottom:16px}
+.sub-tabs button{flex:1;padding:10px 4px;text-align:center;font-size:11px;font-weight:500;letter-spacing:.02em;text-transform:uppercase;color:#666;cursor:pointer;border-bottom:2px solid transparent;background:none;border-left:none;border-right:none;border-top:none;font-family:inherit}
+.sub-tabs button.active{color:#FFF;border-bottom-color:#FFF}
+.choice-grid{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.choice-btn{flex:1 1 auto;min-width:90px;border:1px solid #3A3A3A;background:#111;color:#CCC;padding:12px 10px;font-size:13px;font-family:inherit;cursor:pointer;text-align:center;transition:border-color .15s,color .15s}
+.choice-btn:active{border-color:#777}
+.choice-btn.active{border-color:#FFF;color:#FFF;background:#1A1A1A}
+.choice-big-btn{display:block;width:100%;text-align:left;border:1px solid #3A3A3A;background:#111;color:#FFF;padding:16px;margin-bottom:12px;cursor:pointer;font-family:inherit}
+.choice-big-btn:active{border-color:#777}
+.wizard-dots{display:flex;justify-content:center;gap:6px;margin-bottom:22px}
+.wizard-dot{width:6px;height:6px;background:#3A3A3A;flex-shrink:0}
+.wizard-dot.active{background:#FFF}
+.wizard-dot.done{background:#666}
+.role-tag{font-size:9px;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;flex-shrink:0;border:1px solid;white-space:nowrap}
+.role-heavy{color:#FF8A5B;border-color:#4A2E1E}
+.role-light{color:#5B9CF6;border-color:#2A3A4A}
+.sess-row{display:flex;align-items:flex-start;gap:10px;border:1px solid #282828;background:#111;padding:10px 12px;margin-bottom:8px}
+.sess-row.done{border-color:#2E4A2E}
+.sess-row.skipped{opacity:.5}
+.sess-idx{font-size:11px;color:#585858;font-weight:600;flex-shrink:0;width:16px;padding-top:2px}
+.sess-body{flex:1;min-width:0}
+.sess-plan{font-size:13px;color:#CCC}
+.sess-fact{font-size:12px;color:#4CAF50;margin-top:2px}
+.sess-actions{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
+.mini-btn{background:none;border:1px solid #3A3A3A;color:#FFF;padding:6px 10px;font-size:12px;cursor:pointer;font-family:inherit;flex-shrink:0;white-space:nowrap}
+.mini-btn:active{border-color:#FFF}
+.mini-btn.ghost{border-color:#333;color:#888}
+.log-form{border:1px solid #3A3A3A;background:#0D0D0D;padding:12px;margin:0 0 10px}
+.prog-hint{margin:0 14px 10px;padding:10px 12px;font-size:12px;color:#CCC;border:1px solid #333;background:#141414;cursor:pointer;line-height:1.5}
+.prog-hint b{color:#FFF}
+.prog-lock-detail{font-size:13px;color:#6E6E6E;margin-top:14px;line-height:1.6;text-align:center}
+.prog-lock-dot{margin-left:6px;font-size:11px;opacity:.7}
+.tab{position:relative}
+.tab-label{position:relative;display:inline-flex;align-items:flex-start}
+.tab-badge-dot{width:5px;height:5px;border-radius:50%;background:#F6485B;margin-left:3px;flex-shrink:0}
+.comm-block{border:1px solid #3A3A3A;padding:14px 16px;margin-bottom:10px;cursor:pointer;background:#111;display:flex;align-items:center;gap:12px;transition:border-color .15s}
+.comm-block:hover{border-color:#555}
+.comm-block-icon{width:36px;height:36px;background:#1A1A1A;border:1px solid #3A3A3A;display:flex;align-items:center;justify-content:center;color:#CCC;flex-shrink:0}
+.comm-block-text{flex:1;min-width:0}
+.comm-block-title{font-size:14px;font-weight:600;color:#FFF}
+.comm-block-sub{font-size:12px;color:#777;margin-top:2px}
+.comm-badge-num{background:#F6485B;color:#FFF;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 5px;flex-shrink:0}
+.feed-post{border:1px solid #3A3A3A;background:#111;padding:14px 16px;margin-bottom:12px}
+.feed-post-hd{display:flex;align-items:center;gap:12px}
+.feed-post-actions{display:flex;gap:16px;margin-top:12px;padding-top:10px;border-top:1px solid #242424}
+.feed-action{display:flex;align-items:center;gap:5px;background:none;border:none;color:#888;font-size:12px;cursor:pointer;padding:4px 0}
+.feed-action.active{color:#F6485B}
+.feed-comments{margin-top:10px;padding-top:10px;border-top:1px solid #242424}
+.feed-comment{display:flex;align-items:baseline;gap:6px;font-size:13px;margin-bottom:6px;flex-wrap:wrap}
+.feed-comment-author{font-weight:600;color:#CCC;flex-shrink:0}
+.feed-comment-text{color:#AAA;word-break:break-word}
+.feed-comment-del{background:none;border:none;color:#555;cursor:pointer;margin-left:auto;padding:2px}
+.feed-comment-input-row{display:flex;gap:8px;margin-top:8px}
+.news-body{font-size:14px;color:#CCC;line-height:1.6;padding:12px 14px;overflow-wrap:break-word;word-break:break-word}
+.news-body ul,.news-body ol{padding-left:22px;margin:10px 0}
+.news-body ul:first-child,.news-body ol:first-child{margin-top:0}
+.news-body li{margin-bottom:4px}
+.news-body li:last-child{margin-bottom:0}
+.news-body p{margin:0 0 10px}
+.news-body p:last-child{margin-bottom:0}
+.news-body div{margin-bottom:10px}
+.news-body div:last-child{margin-bottom:0}
+`;
+
+// ── Аварийное сохранение черновика в localStorage ────────────────────────
+// В отличие от React-стейта (живёт только в памяти вкладки), это переживает
+// полное убийство процесса Telegram Mini App в фоне — самый частый сценарий
+// потери несохранённой тренировки на телефоне.
+// Два независимых слота — тренировка и замер можно вести одновременно,
+// не затирая черновик друг друга.
+const DRAFT_STORAGE_KEYS = {
+  workout: "gym_diary_draft_workout_v1",
+  measurement: "gym_diary_draft_measurement_v1",
+  progression: "gym_diary_draft_progression_v1",
+  template: "gym_diary_draft_template_v1",
+};
+
+function saveDraftToStorage(type, draft) {
+  try { localStorage.setItem(DRAFT_STORAGE_KEYS[type], JSON.stringify(draft)); } catch(e) {}
+}
+function loadDraftFromStorage(type) {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEYS[type]);
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+function clearDraftFromStorage(type) {
+  try { localStorage.removeItem(DRAFT_STORAGE_KEYS[type]); } catch(e) {}
+}
+
+// ── Keyboard-aware scroll ─────────────────────────────────────────────────
+// Единственный правильный способ: слушаем visualViewport.resize,
+// когда клавиатура поднимается — плавно подматываем .sheet к активному полю.
+// scrollIntoView НЕ используется — он вызывает прыжки body.
+function useKeyboardScroll(sheetRef) {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    let raf = null;
+    const onResize = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const sheet = sheetRef.current;
+        const active = document.activeElement;
+        if (!sheet || !active || !sheet.contains(active)) return;
+        const sheetRect = sheet.getBoundingClientRect();
+        const elRect = active.getBoundingClientRect();
+        const vpBottom = vv.offsetTop + vv.height;
+        // Сколько пикселей элемент выходит за нижнюю границу viewport
+        const overflow = elRect.bottom + 12 - vpBottom;
+        if (overflow > 0) {
+          sheet.scrollBy({ top: overflow, behavior: "smooth" });
+        }
+      });
+    };
+    vv.addEventListener("resize", onResize);
+    return () => { vv.removeEventListener("resize", onResize); if (raf) cancelAnimationFrame(raf); };
+  }, [sheetRef]);
+}
+
+// Блокируем скролл body пока шторка открыта
+function useLockBodyScroll() {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+}
+
+// ── Сброс скролла при переходе на новый экран ────────────────────────────
+// Прокрутка идёт на уровне window/document (у .app-frame и .page нет своего
+// overflow-контейнера — см. историю бага), поэтому при переходе список→деталь
+// (или наоборот) браузер по умолчанию сохраняет прежнюю позицию скролла —
+// человек попадает в середину списка вместо шапки нового экрана с описанием
+// и датами. key — то значение, при изменении которого нужно проскроллить
+// наверх (обычно detailId/selected: null при списке, id/имя при открытой
+// детали — эффект срабатывает и на переход туда, и обратно).
+//
+// Восстановление позиции при возврате (диалог 18): вход в деталь по-прежнему
+// прыгает на 0 (там нужна шапка), а возврат в список (key стал null/false)
+// возвращает ту позицию, на которой список был до захода в деталь.
+//
+// Как это устроено. Читать window.scrollY в useEffect/useLayoutEffect при
+// входе в деталь ПОЗДНО: к этому моменту React уже заменил длинный список
+// короткой деталью, страница стала короче экрана, и браузер сам урезал
+// scrollY до 0 (проверено в реальном Chromium — эффект видел 0). Поэтому
+// позицию читаем прямо во время рендера, пока в DOM ещё старый список:
+// как только замечаем, что key стал непустым, а раньше был пустым —
+// запоминаем window.scrollY в ref. Чтение scrollY во время рендера — побочного
+// эффекта не создаёт (это чистое чтение), ref мутируется идемпотентно.
+// Каждый вызов хука хранит свой ref, поэтому вложенные уровни не мешают
+// друг другу.
+function useScrollTopOnChange(key) {
+  const savedRef = useRef(0);
+  const prevKeyRef = useRef(key);
+  const inDetail = key != null && key !== false;
+  const prevInDetail = prevKeyRef.current != null && prevKeyRef.current !== false;
+  if (key !== prevKeyRef.current && !prevInDetail && inDetail) {
+    savedRef.current = window.scrollY; // DOM ещё старый — позиция списка цела
+  }
+  useLayoutEffect(() => {
+    const prev = prevKeyRef.current;
+    prevKeyRef.current = key;
+    if (prev === key) return; // первый рендер / ключ не менялся
+    const wasInDetail = prev != null && prev !== false;
+    if (wasInDetail && !inDetail) {
+      // деталь → список: вернуть позицию, запомненную при входе
+      const y = savedRef.current;
+      window.scrollTo(0, y);
+      // Список может дорисоваться позже (данные/шрифты) и на первом кадре
+      // оказаться короче нужной высоты — добиваем на следующем.
+      requestAnimationFrame(() => {
+        if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y);
+      });
+    } else {
+      // список → деталь, деталь → другая деталь, смена вкладки и т.п.
+      window.scrollTo(0, 0);
+    }
+  }, [key]);
+}
+
+// ── Свайп-навигация ──────────────────────────────────────────────────────
+// Общие пороги жеста для обоих хуков ниже: жест должен быть в основном
+// горизонтальным (иначе это скролл/вертикальный жест) и достаточно длинным,
+// чтобы не путать со случайным касанием или тапом по кнопке.
+const SWIPE_MIN_DX = 60;       // минимальная горизонтальная протяжка, px
+const SWIPE_MAX_DY_RATIO = 0.5; // вертикальное отклонение не должно превышать половину dx
+const SWIPE_EDGE_ZONE = 24;     // ширина зоны у левого края экрана, где стартует edge-свайп, px
+
+// Свайп "назад" на детальных экранах — жест должен НАЧАТЬСЯ у самого левого
+// края экрана (как системный edge-swipe в iOS), иначе он бы перехватывал
+// обычный свайп внутри списков/карточек (например drag для reorder в
+// шаблонах). enabled — включён только пока показан именно этот detail-экран
+// (компонент передаёт своё условие типа detail/data/selected).
+//
+// touchmove здесь не для срабатывания самого жеста (это по-прежнему решается
+// в touchend по итоговому dx/dy) — а чтобы ПОКА палец ещё движется, отменить
+// нативный скролл страницы, если направление уже явно горизонтальное. Без
+// этого браузер попутно скроллит контент вниз/вверх, а сам жест регистрируется
+// только постфактум в touchend — visually это выглядит как "свайпнул и
+// страница улетела вниз, а потом ещё и назад сработало". Решение о
+// горизонтальности принимается один раз, после того как палец сместился на
+// небольшой порог (иначе не отличить горизонтальный жест от вертикального
+// в первые же пиксели) — до этого момента разрешаем браузеру решать самому
+// (передаём событие как обычно), чтобы не блокировать обычный вертикальный
+// скролл целиком.
+const SWIPE_DIRECTION_LOCK_PX = 10; // после какого сдвига решаем горизонтальный жест или нет
+function useSwipeBack(onBack, enabled = true) {
+  const startRef = useRef(null);
+  const lockedRef = useRef(null); // null=не решено, true=горизонтальный (блокируем скролл), false=вертикальный (пропускаем)
+  useEffect(() => {
+    if (!enabled || !onBack) return;
+    const onTouchStart = (e) => {
+      const t = e.touches[0];
+      lockedRef.current = null;
+      if (t.clientX > SWIPE_EDGE_ZONE) { startRef.current = null; return; }
+      startRef.current = { x: t.clientX, y: t.clientY };
+    };
+    const onTouchMove = (e) => {
+      const start = startRef.current;
+      if (!start) return;
+      const t = e.touches[0];
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      if (lockedRef.current === null && (Math.abs(dx) > SWIPE_DIRECTION_LOCK_PX || Math.abs(dy) > SWIPE_DIRECTION_LOCK_PX)) {
+        lockedRef.current = Math.abs(dx) > Math.abs(dy) && dx > 0; // только вправо — влево не наш жест
+      }
+      if (lockedRef.current) e.preventDefault();
+    };
+    const onTouchEnd = (e) => {
+      const start = startRef.current;
+      startRef.current = null;
+      lockedRef.current = null;
+      if (!start) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - start.x;
+      const dy = Math.abs(t.clientY - start.y);
+      if (dx > SWIPE_MIN_DX && dy < dx * SWIPE_MAX_DY_RATIO) onBack();
+    };
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [onBack, enabled]);
+}
+
+// Свайп между нижними вкладками — работает где угодно на экране (не только
+// у края), листает по кругу. Если в момент жеста на странице открыт detail-
+// экран (список→детали внутри вкладки — все они используют один и тот же
+// класс .det-hd, см. useSwipeBack выше), свайп вкладок не срабатывает —
+// иначе он конфликтовал бы со свайпом "назад" внутри вкладки. Проверяем
+// DOM напрямую (а не пробрасываем detail-state через пропсы всех вкладок)
+// — так это работает одинаково для всех вкладок без правки их сигнатур.
+// Тот же приём с touchmove/preventDefault, что и в useSwipeBack выше — не
+// даём браузеру скроллить страницу, пока палец уже явно движется горизонтально.
+function useSwipeTabs(tab, setTab, count) {
+  const startRef = useRef(null);
+  const lockedRef = useRef(null);
+  useEffect(() => {
+    const onTouchStart = (e) => {
+      const t = e.touches[0];
+      lockedRef.current = null;
+      if (document.querySelector(".det-hd") || document.querySelector(".overlay")) { startRef.current = null; return; }
+      startRef.current = { x: t.clientX, y: t.clientY };
+    };
+    const onTouchMove = (e) => {
+      const start = startRef.current;
+      if (!start) return;
+      const t = e.touches[0];
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      if (lockedRef.current === null && (Math.abs(dx) > SWIPE_DIRECTION_LOCK_PX || Math.abs(dy) > SWIPE_DIRECTION_LOCK_PX)) {
+        lockedRef.current = Math.abs(dx) > Math.abs(dy);
+      }
+      if (lockedRef.current) e.preventDefault();
+    };
+    const onTouchEnd = (e) => {
+      const start = startRef.current;
+      startRef.current = null;
+      lockedRef.current = null;
+      if (!start) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - start.x;
+      const dy = Math.abs(t.clientY - start.y);
+      if (Math.abs(dx) <= SWIPE_MIN_DX || dy >= Math.abs(dx) * SWIPE_MAX_DY_RATIO) return;
+      setTab(prev => dx < 0 ? (prev + 1) % count : (prev - 1 + count) % count);
+    };
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [setTab, count]);
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function Toast({ msg }) {
+  return msg ? <div className="toast">{msg}</div> : null;
+}
+
+// ── Кнопка "Скрыть клавиатуру" ───────────────────────────────────────────
+// Не связана с useKeyboardScroll/dvh-логикой выше и не трогает её — отдельная,
+// полностью независимая фича. Идея: многие клавиатуры (особенно цифровые на
+// Android) не имеют своей кнопки закрытия, тапать в пустую область не всегда
+// удобно/очевидно. Отслеживаем фокус на любом текстовом/числовом поле через
+// document.addEventListener("focusin"/"focusout") — работает глобально, во
+// всех шторках и на всех вкладках без отдельного подключения к каждой форме.
+// Позиция кнопки считается через window.visualViewport (тот же приём, что и
+// в useKeyboardScroll), чтобы она всегда была видна над клавиатурой, а не
+// перекрывалась ею.
+const KBD_SKIP_TYPES = ["button","submit","checkbox","radio","range","color","file","image","reset"];
+function isTextField(el) {
+  if (!el) return false;
+  if (el.tagName === "TEXTAREA") return true;
+  if (el.tagName === "INPUT") return !KBD_SKIP_TYPES.includes((el.type||"text").toLowerCase());
+  return false;
+}
+function KeyboardDismissButton() {
+  const [visible, setVisible] = useState(false);
+  const [top, setTop] = useState(null);
+  const hideTimer = useRef(null);
+  const fieldRef = useRef(null);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const updatePos = () => { if (vv) setTop(vv.offsetTop + vv.height - 52); };
+    const onFocusIn = (e) => {
+      if (!isTextField(e.target)) return;
+      fieldRef.current = e.target;
+      if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
+      updatePos();
+      setVisible(true);
+    };
+    const onFocusOut = () => {
+      hideTimer.current = setTimeout(() => {
+        if (!isTextField(document.activeElement)) setVisible(false);
+      }, 80);
+    };
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+    if (vv) vv.addEventListener("resize", updatePos);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+      if (vv) vv.removeEventListener("resize", updatePos);
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, []);
+
+  if (!visible) return null;
+  const handleDismiss = () => {
+    fieldRef.current?.blur();
+    setVisible(false);
+  };
+  return (
+    <button className="kbd-dismiss-btn" style={top!=null?{top}:{bottom:16}} onClick={handleDismiss}>
+      <IconKeyboard/>Скрыть
+    </button>
+  );
+}
+
+// ── Autocomplete input ────────────────────────────────────────────────────
+function ExNameInput({ value, onChange, allExNames }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const suggestions = value.trim().length > 0
+    ? allExNames.filter(n => n.toLowerCase().includes(value.trim().toLowerCase()) && n.toLowerCase() !== value.trim().toLowerCase())
+    : [];
+  useEffect(() => {
+    const h = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  const highlight = (name) => {
+    const idx = name.toLowerCase().indexOf(value.trim().toLowerCase());
+    if (idx === -1) return <span>{name}</span>;
+    return <span>{name.slice(0,idx)}<span className="sug-match">{name.slice(idx,idx+value.trim().length)}</span>{name.slice(idx+value.trim().length)}</span>;
+  };
+  return (
+    <div className="ex-name-wrap" ref={wrapRef}>
+      <input className="ex-name-inp" placeholder="Название упражнения" value={value}
+        onChange={e=>{onChange(e.target.value);setOpen(true);}} onFocus={()=>setOpen(true)} autoComplete="off"/>
+      {open && suggestions.length > 0 && (
+        <div className="suggestions">
+          {suggestions.map(s => (
+            <div key={s} className="sug-item" onMouseDown={e=>{e.preventDefault();onChange(s);setOpen(false);}}>
+              {highlight(s)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── WorkoutSheet ──────────────────────────────────────────────────────────
+// ── История упражнения (общая для вкладки «Упражнения» и шторки в тренировке) ──
+// Один и тот же список записей "дата · название тренировки + подходы + комментарий".
+// Вынесен, чтобы вид истории не разъезжался между двумя местами.
+function ExerciseHistoryList({ history }) {
+  return (
+    <>
+      {history.map(({workout,exercise},i)=>(
+        <div key={i} className="ex-hist-item">
+          <div className="ex-hist-date">{formatDate(workout.date)} · {workout.name}</div>
+          <div className="ex-sets-disp">
+            {exercise.sets.filter(s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps)).map((s,si)=>(
+              <div key={si}>
+                <span style={{color:"#555"}}>{si+1}.</span>{" "}
+                {s.bilateral?(
+                  <>
+                    <span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}
+                    {" · "}
+                    <span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}
+                  </>
+                ):(
+                  <>{s.weight?`${s.weight} кг`:"—"} × {s.reps?`${s.reps} повт`:"—"}</>
+                )}
+              </div>
+            ))}
+          </div>
+          {exercise.comment&&<div className="ex-hist-comment">{exercise.comment}</div>}
+        </div>
+      ))}
+    </>
+  );
+}
+
+// ── ExerciseHistorySheet ──────────────────────────────────────────────────
+// Открывается ПОВЕРХ формы тренировки по тапу на блок "Прошлый раз" — чтобы
+// посмотреть все прошлые разы упражнения, не выходя из тренировки. Только
+// просмотр (без переименования и правки заметки): форма тренировки под шторкой
+// остаётся смонтированной, поэтому введённые данные не теряются, а любые
+// побочные правки отсюда могли бы им помешать. Закрывается крестиком, тапом
+// по затемнению и свайпом от левого края (как экраны деталей).
+function ExerciseHistorySheet({ name, history, note, onClose }) {
+  useSwipeBack(onClose);
+  return (
+    <div className="overlay hist-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="sheet">
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-icon-btn" onClick={onClose} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <span className="det-title" style={{flex:1,minWidth:0,paddingRight:36}}>{name}</span>
+        </div>
+        {note ? <>
+          <div className="sec-lbl" style={{marginTop:0}}>Описание · техника выполнения</div>
+          <div className="hist-note">{note}</div>
+        </> : null}
+        <div className="sec-lbl" style={note?undefined:{marginTop:0}}>{history.length} {history.length===1?"запись":history.length<5?"записи":"записей"}</div>
+        {history.length===0
+          ? <div className="empty" style={{padding:"24px 0"}}>Записей пока нет</div>
+          : <ExerciseHistoryList history={history}/>}
+      </div>
+    </div>
+  );
+}
+
+function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, progressions = [], templates = [] }) {
+  const isEdit = !!initial;
+  // trueDefaultName — исходное сгенерированное имя ("Тренировка N" / имя при
+  // редактировании), не зависящее от черновика. Используется только для проверки
+  // "имя было изменено вручную" — отдельно от defName (которым инициализируется
+  // сам инпут и который при восстановлении черновика равен уже введённому имени).
+  const trueDefaultName = isEdit ? initial.name : `Тренировка ${workouts.length + 1}`;
+  const defName = draft?.name ?? trueDefaultName;
+  const [name, setName] = useState(defName);
+  const [date, setDate] = useState(draft?.date ?? (isEdit ? initial.date : today()));
+  const [exercises, setExercises] = useState(() => {
+    if (draft?.exercises) return draft.exercises;
+    if (isEdit && initial.exercises.length > 0) {
+      return initial.exercises.map(e=>({...e,id:e.id??Date.now()+Math.random(),sets:e.sets.map(s=>({...s}))}));
+    }
+    return [newEx()];
+  });
+  const [appliedTemplateName, setAppliedTemplateName] = useState(draft?.appliedTemplateName ?? null);
+  const [showTplPicker, setShowTplPicker] = useState(false);
+  // Имя упражнения, чья полная история сейчас открыта шторкой поверх формы (null — закрыта)
+  const [historyFor, setHistoryFor] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const sheetRef = useRef(null);
+  useKeyboardScroll(sheetRef);
+  useLockBodyScroll();
+
+  // Заметки к упражнениям (техника/сетап), заданные во вкладке "Упражнения" —
+  // показываем их прямо во время тренировки, чтобы не приходилось выходить
+  // из тренировки и искать упражнение отдельно. По умолчанию свёрнуты в 2
+  // строки (минимально), разворачиваются по тапу, если текст длиннее.
+  const [exNotes, setExNotes] = useState({});
+  useEffect(() => { api.getExerciseNotes().then(d=>setExNotes(d||{})).catch(()=>{}); }, []);
+  const [expandedNotes, setExpandedNotes] = useState({});
+  const getExNote = (name) => { const k=(name||"").trim().toLowerCase(); return k ? (exNotes[k] || "") : ""; };
+  const toggleNoteExpand = (id) => setExpandedNotes(p=>({...p,[id]:!p[id]}));
+
+  const allExNames = [...new Set(
+    workouts.filter(w=>!isEdit||w.id!==initial?.id).flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean))
+  )];
+
+  function newEx(){return{id:Date.now()+Math.random(),name:"",sets:[newSet()],comment:""};}
+  function newSet(){return{weight:"",reps:"",bilateral:false,weightL:"",repsL:"",weightR:"",repsR:""};}
+  const addEx=()=>setExercises(p=>[...p,newEx()]);
+  const upEx=(id,f,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,[f]:v}:e));
+  const setHasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
+  // Если в упражнении уже есть внесённые подходы — спрашиваем подтверждение
+  // (случайное нажатие иначе стирает записанные данные без возможности отменить).
+  const remEx=(id)=>{
+    const ex=exercises.find(e=>e.id===id);
+    if(ex && ex.sets.some(setHasData) && !window.confirm("Удалить упражнение? Внесённые подходы будут потеряны."))return;
+    setExercises(p=>p.filter(e=>e.id!==id));
+  };
+  // Перемещение упражнения в списке — на 1 позицию за нажатие (вверх/вниз).
+  const moveEx=(id,dir)=>setExercises(p=>{
+    const i=p.findIndex(e=>e.id===id);
+    const j=i+dir;
+    if(i<0||j<0||j>=p.length)return p;
+    const copy=[...p];
+    [copy[i],copy[j]]=[copy[j],copy[i]];
+    return copy;
+  });
+  const addSet=(id)=>setExercises(p=>p.map(e=>{
+    if(e.id!==id)return e;
+    const last=e.sets[e.sets.length-1];
+    const s=newSet();
+    if(last&&last.bilateral)s.bilateral=true;
+    return {...e,sets:[...e.sets,s]};
+  }));
+  const upSet=(id,si,f,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,[f]:v}:s)}:e));
+  const remSet=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.filter((_,i)=>i!==si)}:e));
+  const toggleBilateral=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,bilateral:!s.bilateral}:s)}:e));
+
+  // Есть ли реально внесённые данные — не только подходы с весом/повторами, но и
+  // вручную изменённое имя тренировки, и названия упражнений без подходов (так
+  // бывает сразу после применения шаблона — подходы ещё не вписаны, но структура
+  // уже введена пользователем и её жалко потерять по случайному крестику).
+  const hasRealData = () => name.trim()!==trueDefaultName.trim() || exercises.some(e=>e.name.trim()||e.sets.some(setHasData));
+
+  const buildDraft = () => ({ name, date, exercises, appliedTemplateName, defaultName: trueDefaultName });
+
+  // Аварийное автосохранение: пишем в localStorage с небольшой задержкой после
+  // каждого изменения (не на каждую букву). Сохраняем всегда, даже если пока
+  // ничего не внесено — свернуть/потерять процесс можно на любом этапе.
+  // Переживает убийство процесса Telegram в фоне — не только сворачивание внутри приложения.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      saveDraftToStorage("workout", { editId: isEdit?initial.id:null, name, date, exercises, appliedTemplateName, defaultName: trueDefaultName });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [name, date, exercises, appliedTemplateName]);
+
+  // Применить шаблон: заменяет список упражнений на структуру из шаблона
+  // (только названия + количество подходов, без веса/повторов — их вписываем
+  // уже по факту). Название тренировки помечается именем шаблона в скобках.
+  // Если уже применяли другой шаблон — его пометка в названии заменяется, а не копится.
+  const applyTemplate = (t) => {
+    if(hasRealData() && !window.confirm(`Заменить упражнения на шаблон «${t.name}»? Внесённые подходы будут потеряны.`)) return;
+    setExercises(t.exercises.map(te=>({
+      id: Date.now()+Math.random(),
+      name: te.name,
+      sets: Array.from({length: Math.max(1, te.sets_count||1)}, ()=>te.bilateral?{...newSet(),bilateral:true}:newSet()),
+      comment: "",
+    })));
+    setName(prev=>{
+      let base = prev;
+      if(appliedTemplateName){
+        const suffix = ` (${appliedTemplateName})`;
+        if(base.endsWith(suffix)) base = base.slice(0, -suffix.length);
+      }
+      return `${base} (${t.name})`;
+    });
+    setAppliedTemplateName(t.name);
+    setShowTplPicker(false);
+  };
+
+  // Вся история упражнения (для шторки по тапу на "Прошлый раз"). Логика отбора
+  // та же, что у getPrev: при редактировании исключаем саму тренировку и берём
+  // только более ранние по дате — т.е. ровно то, что человек считает "прошлыми
+  // разами" относительно этой тренировки, а не будущее/текущее.
+  const getHistory=(exName)=>{
+    if(!exName||!exName.trim())return [];
+    const lc=exName.trim().toLowerCase();
+    const src=isEdit?workouts.filter(w=>w.id!==initial.id):workouts;
+    const rows=[];
+    src.filter(w=>w.date<date).forEach(w=>w.exercises.forEach(e=>{
+      if(e.name.trim().toLowerCase()===lc) rows.push({workout:w,exercise:e});
+    }));
+    return rows.sort((a,b)=>b.workout.date.localeCompare(a.workout.date));
+  };
+
+  const getPrev=(exName)=>{
+    if(!exName.trim())return null;
+    const lc=exName.trim().toLowerCase();
+    const src=isEdit?workouts.filter(w=>w.id!==initial.id):workouts;
+    const earlier=src.filter(w=>w.date<date);
+    earlier.sort((a,b)=>b.date.localeCompare(a.date));
+    for(const w of earlier){
+      const f=w.exercises.find(e=>e.name.trim().toLowerCase()===lc);
+      if(f)return{workout:w,exercise:f};
+    }
+    return null;
+  };
+
+  // Цель активной прогрессии по названию упражнения (без учёта регистра) — если
+  // есть совпадение и ближайшая невыполненная сессия, показываем подсказку и даём
+  // заполнить подходы одним тапом. Никак не влияет на тех, у кого прогрессий нет —
+  // progressions в этом случае просто пустой массив, getProg всегда возвращает null.
+  const getProg=(exName)=>{
+    if(!exName.trim())return null;
+    const lc=exName.trim().toLowerCase();
+    return progressions.find(p=>p.exercise_name_lc===lc && p.status==="active" && p.next_session) || null;
+  };
+  const fillFromProgression=(exId, session)=>{
+    const setsSrc = session.planned_detail
+      ? session.planned_detail.map(d=>d.bilateral
+          ? ({bilateral:true, weightL:String(d.weightL), repsL:String(d.repsL), weightR:String(d.weightR), repsR:String(d.repsR), weight:"", reps:""})
+          : ({bilateral:false, weight:String(d.weight), reps:String(d.reps), weightL:"", repsL:"", weightR:"", repsR:""}))
+      : Array.from({length:session.planned_sets},()=>({bilateral:false, weight:String(session.planned_weight),reps:String(session.planned_reps), weightL:"", repsL:"", weightR:"", repsR:""}));
+    setExercises(p=>p.map(e=>e.id===exId?{ ...e, sets: setsSrc }:e));
+  };
+
+  const handleSave=async()=>{
+    setSaving(true);
+    const hasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
+    const filtered=exercises
+      .filter(e=>e.name.trim()||e.sets.some(hasData))
+      .map(e=>({...e,sets:e.sets.filter(hasData)}));
+    const payload={id:isEdit?initial.id:-1,name:name.trim()||defName,date,exercises:filtered};
+    const res=await onSave(payload);
+    clearDraftFromStorage("workout");
+    setSaving(false);
+    return res;
+  };
+
+  // Свернуть: всегда сохраняем черновик (и в память, и на диск) — даже пустую
+  // заготовку, чтобы ничего не терялось на любом этапе заполнения.
+  const handleMinimize=()=>{
+    const d = buildDraft();
+    saveDraftToStorage("workout", { editId: isEdit?initial.id:null, ...d });
+    onMinimize(d);
+  };
+
+  // Закрыть крестиком: если есть данные — спросим подтверждение (можно случайно стереть тренировку)
+  const handleCloseClick=()=>{
+    if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+    clearDraftFromStorage("workout");
+    onClose();
+  };
+
+  return (
+    <>
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&handleMinimize()}>
+      <div className="sheet" ref={sheetRef}>
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-minimize-btn" onClick={handleMinimize} title="Свернуть"><IconMinimize/>Свернуть</button>
+          <button className="sheet-icon-btn" onClick={handleCloseClick} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName}/>
+        </div>
+        <div className="field">
+          <div className="lbl">Дата</div>
+          <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)}/>
+        </div>
+        <div style={{marginTop:14}}>
+          <button className="btn ghost" onClick={()=>setShowTplPicker(v=>!v)}><IconTemplate/>Выбрать из шаблона</button>
+          {showTplPicker&&(
+            <div className="tpl-picker">
+              {templates.length===0
+                ? <div className="tpl-picker-empty">Шаблонов пока нет. Создайте их в разделе «Шаблоны тренировок».</div>
+                : templates.map(t=>(
+                  <div key={t.id} className="tpl-picker-item" onClick={()=>applyTemplate(t)}>
+                    <span>{t.name}</span>
+                    <span style={{color:"#666",fontSize:11,flexShrink:0}}>{t.exercises.length} упр.</span>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+        <div className="sec-lbl" style={{marginTop:20,marginBottom:12}}>Упражнения</div>
+        {exercises.map((ex,ei)=>{
+          const prev=getPrev(ex.name);
+          const prog=getProg(ex.name);
+          const exNote=getExNote(ex.name);
+          return(
+            <div key={ex.id} className="ex-block">
+              <div className="ex-hd">
+                <span className="ex-num">{ei+1}</span>
+                <ExNameInput value={ex.name} onChange={v=>upEx(ex.id,"name",v)} allExNames={allExNames}/>
+                <button className="del-btn" disabled={ei===0} onClick={()=>moveEx(ex.id,-1)} title="Переместить выше"><IconArrowUp/></button>
+                <button className="del-btn" disabled={ei===exercises.length-1} onClick={()=>moveEx(ex.id,1)} title="Переместить ниже"><IconArrowDown/></button>
+                {exercises.length>1&&<button className="del-btn" onClick={()=>remEx(ex.id)}><IconTrash/></button>}
+              </div>
+              {exNote&&(
+                <div className={`ex-note-hint${expandedNotes[ex.id]?" expanded":""}`} onClick={()=>toggleNoteExpand(ex.id)}>
+                  {exNote}
+                </div>
+              )}
+              {prog&&(
+                <div className="prog-hint" onClick={()=>fillFromProgression(ex.id,prog.next_session)}>
+                  {prog.next_session.role&&<span className={`role-tag role-${prog.next_session.role}`} style={{marginRight:6}}>{ROLE_LABELS[prog.next_session.role]}</span>}
+                  {prog.next_session.is_amrap&&<span className="role-tag" style={{marginRight:6,color:"#FF9800",borderColor:"#5A4020"}}>AMRAP</span>}
+                  Цель прогрессии: <b>
+                    {prog.next_session.planned_detail
+                      ? prog.next_session.planned_detail.map(d=>d.bilateral?`Л ${d.weightL}×${d.repsL} · П ${d.weightR}×${d.repsR}`:`${d.weight} кг × ${d.reps}`).join("; ")
+                      : `${prog.next_session.planned_weight} кг × ${prog.next_session.planned_reps} × ${prog.next_session.planned_sets} подх.`}
+                  </b> — нажми, чтобы заполнить
+                  {prog.next_session.is_amrap&&<div style={{marginTop:4,color:"#FF9800",fontSize:12}}>Последний подход — в отказ, а не по плану</div>}
+                </div>
+              )}
+              {prev&&(
+                <div className="prev tappable" onClick={()=>setHistoryFor(ex.name.trim())} title="Показать все прошлые разы">
+                  <div className="prev-body">
+                    Прошлый раз ({formatDate(prev.workout.date)}):&nbsp;
+                    {prev.exercise.sets.filter(s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps)).map((s,i,arr)=>{
+                      const str=s.bilateral
+                        ?`Л${s.weightL||"—"}×${s.repsL||"—"} П${s.weightR||"—"}×${s.repsR||"—"}`
+                        :`${s.weight?s.weight+"кг":"—"}×${s.reps||"—"}`;
+                      return str+(i<arr.length-1?", ":"");
+                    })}
+                    {prev.exercise.comment?<><br/><span style={{fontStyle:"italic",color:"#555"}}>{prev.exercise.comment}</span></>:null}
+                  </div>
+                  <span className="prev-chev"><IconChevron/></span>
+                </div>
+              )}
+              <div className="sets">
+                {ex.sets.map((s,si)=>(
+                  <div key={si} className="set-row">
+                    <span className="set-n">{si+1}</span>
+                    {s.bilateral?(
+                      <div className="set-bi-wrap">
+                        <div className="set-bi-row">
+                          <span className="set-side L">Л</span>
+                          <input className="set-inp sm" type="text" inputMode="decimal" placeholder="кг" value={s.weightL} onChange={e=>upSet(ex.id,si,"weightL",normalizeDecimal(e.target.value))}/>
+                          <span className="set-sep">×</span>
+                          <input className="set-inp sm" type="number" inputMode="numeric" placeholder="повт" value={s.repsL} onChange={e=>upSet(ex.id,si,"repsL",e.target.value)}/>
+                        </div>
+                        <div className="set-bi-row">
+                          <span className="set-side R">П</span>
+                          <input className="set-inp sm" type="text" inputMode="decimal" placeholder="кг" value={s.weightR} onChange={e=>upSet(ex.id,si,"weightR",normalizeDecimal(e.target.value))}/>
+                          <span className="set-sep">×</span>
+                          <input className="set-inp sm" type="number" inputMode="numeric" placeholder="повт" value={s.repsR} onChange={e=>upSet(ex.id,si,"repsR",e.target.value)}/>
+                        </div>
+                      </div>
+                    ):(
+                      <>
+                        <input className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",normalizeDecimal(e.target.value))}/>
+                        <span className="set-sep">×</span>
+                        <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)}/>
+                      </>
+                    )}
+                    <button className={`btn-bi${s.bilateral?" active":""}`} onClick={()=>toggleBilateral(ex.id,si)} title="Унилатеральный режим"><IconBilateral/></button>
+                    <button className="del-btn" onClick={()=>remSet(ex.id,si)}><IconTrash/></button>
+                  </div>
+                ))}
+                <button className="add-set" onClick={()=>addSet(ex.id)}><IconPlus/>подход</button>
+              </div>
+              <div className="ex-comment">
+                <textarea
+                  className="ex-comment-inp"
+                  placeholder="Комментарий к упражнению..."
+                  value={ex.comment||""}
+                  onChange={e=>upEx(ex.id,"comment",e.target.value)}
+                  rows={1}
+                  onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}}
+                />
+              </div>
+            </div>
+          );
+        })}
+        <button className="add-ex" onClick={addEx}><IconPlus/>Добавить упражнение</button>
+        <button className="btn" onClick={handleSave} disabled={saving}>{saving?"Сохранение...":(isEdit?"Сохранить изменения":"Сохранить тренировку")}</button>
+        <button className="btn ghost" onClick={handleCloseClick}>Отмена</button>
+      </div>
+    </div>
+    {historyFor!=null&&(
+      <ExerciseHistorySheet
+        name={historyFor}
+        history={getHistory(historyFor)}
+        note={getExNote(historyFor)}
+        onClose={()=>setHistoryFor(null)}
+      />
+    )}
+    </>
+  );
+}
+
+// ── TemplateSheet ─────────────────────────────────────────────────────────
+// Шаблон хранит только структуру: название упражнения + количество подходов
+// (без веса/повторов — их вписывают уже во время самой тренировки). Можно
+// начать с пустого списка и вбить всё вручную, либо скопировать структуру
+// из уже проведённой тренировки. Черновик/сворачивание — та же система,
+// что и у тренировок и замеров.
+function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, onMinimize }) {
+  const isEdit = !!initial;
+  const defName = draft?.name ?? (isEdit ? initial.name : `Шаблон ${templates.length + 1}`);
+  const [name, setName] = useState(defName);
+  const [exercises, setExercises] = useState(() => {
+    if (draft?.exercises) return draft.exercises;
+    if (isEdit) {
+      return initial.exercises.map(e=>({
+        id: Date.now()+Math.random(),
+        name: e.name,
+        bilateral: !!e.bilateral,
+        sets: Array.from({length: Math.max(1, e.sets_count||1)}, ()=>({id:Date.now()+Math.random()})),
+      }));
+    }
+    return [];
+  });
+  const [showWorkoutPicker, setShowWorkoutPicker] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const sheetRef = useRef(null);
+  useKeyboardScroll(sheetRef);
+  useLockBodyScroll();
+
+  const allExNames = [...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))];
+
+  function newExRow(){ return { id: Date.now()+Math.random(), name:"", bilateral:false, sets:[{id:Date.now()+Math.random()}] }; }
+  const addEx=()=>setExercises(p=>[...p,newExRow()]);
+  const upEx=(id,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,name:v}:e));
+  const remEx=(id)=>setExercises(p=>p.filter(e=>e.id!==id));
+  const moveEx=(id,dir)=>setExercises(p=>{
+    const i=p.findIndex(e=>e.id===id);
+    const j=i+dir;
+    if(i<0||j<0||j>=p.length)return p;
+    const copy=[...p];
+    [copy[i],copy[j]]=[copy[j],copy[i]];
+    return copy;
+  });
+  const addSet=(exId)=>setExercises(p=>p.map(e=>e.id===exId?{...e,sets:[...e.sets,{id:Date.now()+Math.random()}]}:e));
+  const remSet=(exId,setId)=>setExercises(p=>p.map(e=>e.id===exId?{...e,sets:e.sets.filter(s=>s.id!==setId)}:e));
+  const toggleExBilateral=(exId)=>setExercises(p=>p.map(e=>e.id===exId?{...e,bilateral:!e.bilateral}:e));
+
+  const hasRealData = () => exercises.some(e=>e.name.trim());
+  const buildDraft = () => ({ name, exercises });
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      saveDraftToStorage("template", { editId: isEdit?initial.id:null, name, exercises });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [name, exercises]);
+
+  const startFresh = () => setExercises([newExRow()]);
+  const applyFromWorkout = (w) => {
+    setExercises(w.exercises.filter(e=>e.name.trim()).map(e=>({
+      id: Date.now()+Math.random(),
+      name: e.name,
+      bilateral: e.sets.length>0 && !!e.sets[e.sets.length-1].bilateral,
+      sets: Array.from({length: Math.max(1, e.sets.length)}, ()=>({id:Date.now()+Math.random()})),
+    })));
+    setShowWorkoutPicker(false);
+  };
+  // Возврат к выбору способа создания (с нуля / из тренировки) — например если
+  // выбрали не ту тренировку или передумали. Спрашиваем подтверждение только
+  // если уже успели что-то назвать вручную (иначе, сразу после выбора — просто откатываем).
+  const goBackToModePick = () => {
+    if (hasRealData() && !window.confirm("Вернуться к выбору? Текущий список упражнений будет очищён.")) return;
+    setExercises([]);
+    setShowWorkoutPicker(false);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const filtered = exercises.filter(e=>e.name.trim()).map(e=>({name:e.name.trim(), sets_count:Math.max(1,e.sets.length), bilateral:!!e.bilateral}));
+    const payload = { id: isEdit?initial.id:-1, name: name.trim()||defName, exercises: filtered };
+    const res = await onSave(payload);
+    clearDraftFromStorage("template");
+    setSaving(false);
+    return res;
+  };
+
+  const handleMinimize = () => {
+    const d = buildDraft();
+    saveDraftToStorage("template", { editId: isEdit?initial.id:null, ...d });
+    onMinimize(d);
+  };
+
+  const handleCloseClick = () => {
+    if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+    clearDraftFromStorage("template");
+    onClose();
+  };
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&handleMinimize()}>
+      <div className="sheet" ref={sheetRef}>
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-minimize-btn" onClick={handleMinimize} title="Свернуть"><IconMinimize/>Свернуть</button>
+          <button className="sheet-icon-btn" onClick={handleCloseClick} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName}/>
+        </div>
+        <div className="sec-lbl" style={{marginTop:20,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span>Упражнения</span>
+          {exercises.length>0&&<button className="edit-badge" onClick={goBackToModePick}>← Назад к выбору</button>}
+        </div>
+        {exercises.length===0 ? (
+          <div className="tpl-mode-pick">
+            <button className="btn" onClick={startFresh}><IconPlus/>Начать с нуля</button>
+            <button className="btn ghost" onClick={()=>setShowWorkoutPicker(v=>!v)}><IconTemplate/>Скопировать из тренировки</button>
+            {showWorkoutPicker&&(
+              <div className="tpl-picker">
+                {workouts.length===0
+                  ? <div className="tpl-picker-empty">Тренировок пока нет.</div>
+                  : [...workouts].sort((a,b)=>b.date.localeCompare(a.date)).map(w=>(
+                    <div key={w.id} className="tpl-picker-item" onClick={()=>applyFromWorkout(w)}>
+                      <span>{w.name}</span>
+                      <span style={{color:"#666",fontSize:11,flexShrink:0}}>{formatDate(w.date)}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {exercises.map((ex,ei)=>(
+              <div key={ex.id} className="ex-block">
+                <div className="ex-hd">
+                  <span className="ex-num">{ei+1}</span>
+                  <ExNameInput value={ex.name} onChange={v=>upEx(ex.id,v)} allExNames={allExNames}/>
+                  <button className={`btn-bi${ex.bilateral?" active":""}`} onClick={()=>toggleExBilateral(ex.id)} title="Унилатеральное упражнение по умолчанию"><IconBilateral/></button>
+                  <button className="del-btn" disabled={ei===0} onClick={()=>moveEx(ex.id,-1)} title="Переместить выше"><IconArrowUp/></button>
+                  <button className="del-btn" disabled={ei===exercises.length-1} onClick={()=>moveEx(ex.id,1)} title="Переместить ниже"><IconArrowDown/></button>
+                  <button className="del-btn" onClick={()=>remEx(ex.id)} title="Удалить"><IconTrash/></button>
+                </div>
+                <div className="sets">
+                  {ex.sets.map((s,si)=>(
+                    <div key={s.id} className="set-row">
+                      <span className="set-n">{si+1}</span>
+                      <span style={{flex:1,color:"#888",fontSize:13}}>Подход {si+1}</span>
+                      {ex.sets.length>1&&<button className="del-btn" onClick={()=>remSet(ex.id,s.id)}><IconTrash/></button>}
+                    </div>
+                  ))}
+                  <button className="add-set" onClick={()=>addSet(ex.id)}><IconPlus/>подход</button>
+                </div>
+              </div>
+            ))}
+            <button className="add-ex" onClick={addEx}><IconPlus/>Добавить упражнение</button>
+          </>
+        )}
+        <button className="btn" style={{marginTop:16}} onClick={handleSave} disabled={saving||exercises.every(e=>!e.name.trim())}>{saving?"Сохранение...":(isEdit?"Сохранить изменения":"Сохранить шаблон")}</button>
+        <button className="btn ghost" onClick={handleCloseClick}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+// ── TemplatesView ─────────────────────────────────────────────────────────
+function TemplatesView({templates, setTemplates, workouts, toast, templateDraft, setTemplateDraft, onBack}) {
+  const [showNew,setShowNew]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [detailId,setDetailId]=useState(null);
+  const [restoredDraft,setRestoredDraft]=useState(null);
+
+  const detail=detailId!=null?templates.find(t=>t.id===detailId):null;
+  const editTarget=editId!=null?templates.find(t=>t.id===editId):null;
+  // detail=null -> список (свайп закрывает вкладку через onBack родителя);
+  // detail есть -> локальный detail-блок этого компонента (свайп закрывает его).
+  useSwipeBack(detail ? ()=>setDetailId(null) : onBack);
+  useScrollTopOnChange(detailId);
+
+  useEffect(()=>{
+    if(templateDraft?.restoring){
+      setRestoredDraft(templateDraft);
+      if(templateDraft.editId!=null){ setEditId(templateDraft.editId); setDetailId(null); }
+      else { setShowNew(true); }
+      setTemplateDraft(null);
+    }
+  },[templateDraft]);
+
+  const draft = restoredDraft;
+
+  const handleCreate=async(t)=>{
+    const res=await api.saveTemplate(t);
+    const saved={...t,id:res.id};
+    setTemplates(p=>[saved,...p]);
+    setShowNew(false);
+    setRestoredDraft(null);
+    toast("Шаблон сохранён ✓");
+  };
+  const handleUpdate=async(t)=>{
+    await api.saveTemplate(t);
+    setTemplates(p=>p.map(x=>x.id===t.id?t:x));
+    setEditId(null); setDetailId(t.id);
+    setRestoredDraft(null);
+    toast("Изменения сохранены ✓");
+  };
+  const handleDelete=async(id)=>{
+    if(!window.confirm("Удалить шаблон?"))return;
+    await api.deleteTemplate(id);
+    setTemplates(p=>p.filter(t=>t.id!==id));
+    setDetailId(null);
+    toast("Удалено");
+  };
+
+  const handleMinimize=(draftData)=>{
+    setShowNew(false);
+    setEditId(null);
+    setRestoredDraft(null);
+    setTemplateDraft({editId: editTarget?.id ?? null, ...draftData});
+  };
+  const handleSheetClose=()=>{
+    setShowNew(false);
+    setEditId(null);
+    setRestoredDraft(null);
+  };
+
+  const guardOpen=(openFn)=>{
+    if(templateDraft && !templateDraft.restoring){
+      window.alert("Сначала заверши текущий шаблон — он ещё не сохранён. Нажми на плашку внизу, чтобы продолжить.");
+      return;
+    }
+    openFn();
+  };
+
+  if(detail) return (
+    <div className="page">
+      <div className="det-hd">
+        <button className="back-btn" onClick={()=>setDetailId(null)}><IconChevron dir="left"/>Назад</button>
+        <span className="det-title">{detail.name}</span>
+      </div>
+      <div className="sec-lbl">Упражнения — {detail.exercises.length}</div>
+      {detail.exercises.length===0
+        ?<div className="empty"><div className="empty-icon">📋</div>Упражнения не заданы</div>
+        :detail.exercises.map((e,i)=>(
+          <div key={i} className="w-ex">
+            <div className="w-ex-name">{e.name}</div>
+            <div style={{color:"#888",fontSize:12}}>{e.sets_count} подход{e.sets_count===1?"":(e.sets_count>=2&&e.sets_count<=4?"а":"ов")}{e.bilateral?" · унилатерально":""}</div>
+          </div>
+        ))}
+      <div style={{marginTop:16}}>
+        <button className="edit-badge" onClick={()=>guardOpen(()=>{setDetailId(null);setEditId(detail.id);})}>✎ Редактировать</button>
+      </div>
+      <hr className="divider"/>
+      <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить шаблон</button>
+      {editTarget&&<TemplateSheet templates={templates} workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+    </div>
+  );
+
+  return (
+    <div className="page">
+      <div className="det-hd">
+        <button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button>
+        <span className="det-title">Шаблоны тренировок</span>
+      </div>
+      <button className="btn" onClick={()=>guardOpen(()=>setShowNew(true))}><IconPlus/>Создать шаблон</button>
+      {templates.length===0
+        ?<div className="empty"><div className="empty-icon">📋</div>Шаблонов пока нет.<br/>Создай первый!</div>
+        :templates.map(t=>(
+          <div key={t.id} className="card" onClick={()=>setDetailId(t.id)}>
+            <div style={{minWidth:0}}>
+              <div className="card-title">{t.name}</div>
+              <div className="card-sub">{t.exercises.length} упр.</div>
+            </div>
+            <IconChevron/>
+          </div>
+        ))}
+      {showNew&&<TemplateSheet templates={templates} workouts={workouts} initial={null} draft={draft} onSave={handleCreate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+      {editTarget&&<TemplateSheet templates={templates} workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+    </div>
+  );
+}
+
+// ── WorkoutsTab ───────────────────────────────────────────────────────────
+function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraft, progressions=[], onProgressionsChange, templates=[], setTemplates, templateDraft, setTemplateDraft, isPremium, premiumChecked, reloadProgressions, progressionDraft, setProgressionDraft}) {
+  const [showNew,setShowNew]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [detailId,setDetailId]=useState(null);
+  const [renamingId,setRenamingId]=useState(null);
+  const [renameVal,setRenameVal]=useState("");
+  const [restoredDraft,setRestoredDraft]=useState(null); // черновик, восстановленный в текущей открытой шторке
+  const [showTemplates,setShowTemplates]=useState(false);
+  // Раздел «Прогрессия» переехал сюда же (над шаблонами) — своя под-страница,
+  // тот же паттерн, что и showTemplates.
+  const [showProgression,setShowProgression]=useState(false);
+
+  // Если плашка-черновик шаблона восстанавливается кликом снаружи (пока мы,
+  // допустим, смотрели список тренировок) — переходим в раздел шаблонов сами.
+  useEffect(()=>{
+    if(templateDraft?.restoring) setShowTemplates(true);
+  },[templateDraft]);
+
+  // Аналогично для черновика прогрессии — если он восстанавливается кликом
+  // по плавающей плашке снаружи (мы на списке тренировок), открываем раздел.
+  useEffect(()=>{
+    if(progressionDraft?.restoring) setShowProgression(true);
+  },[progressionDraft]);
+
+  const detail=detailId!=null?workouts.find(w=>w.id===detailId):null;
+  const editTarget=editId!=null?workouts.find(w=>w.id===editId):null;
+
+  // showTemplates/showProgression рендерят дочерние компоненты, которые сами
+  // управляют своим свайпом-назад — здесь свайп нужен только для локального
+  // detail-блока этой же вкладки (см. if(detail) ниже).
+  useSwipeBack(()=>setDetailId(null), !!detail && !showTemplates && !showProgression);
+  useScrollTopOnChange(showTemplates ? "templates" : showProgression ? "progression" : detailId);
+
+  // Когда черновик восстанавливается (клик по draft-bar/карточке), открываем нужную
+  // шторку и сразу забираем данные локально — глобальный workoutDraft очищается, бар пропадает.
+  useEffect(()=>{
+    if(workoutDraft?.restoring){
+      setRestoredDraft(workoutDraft);
+      if(workoutDraft.editId!=null){ setEditId(workoutDraft.editId); setDetailId(null); }
+      else { setShowNew(true); }
+      setWorkoutDraft(null);
+    }
+  },[workoutDraft]);
+
+  const draft = restoredDraft;
+
+  // Сверка сохранённых упражнений с активными прогрессиями по имени и
+  // автологирование факта. Осознанно только на СОЗДАНИИ тренировки, не на
+  // редактировании — иначе правка старой тренировки могла бы задвоить лог.
+  // Ничего не блокирует и не бросает ошибку наружу: если прогрессий нет
+  // (progressions=[]) — цикл просто не находит совпадений и не делает ничего.
+  const autoLogProgress = async (workoutId, savedExercises) => {
+    if(!progressions.length) return;
+    let touched = false;
+    for(const ex of savedExercises){
+      const lc = ex.name.trim().toLowerCase();
+      const prog = progressions.find(p=>p.exercise_name_lc===lc && p.status==="active" && p.next_session);
+      if(!prog) continue;
+      // унилатеральные прогрессии считаются по Л/П сетам, обычные — по билатеральным
+      const workingSets = prog.unilateral
+        ? ex.sets.filter(s=>s.bilateral ? (s.weightL!=="" && s.repsL!=="" && s.weightR!=="" && s.repsR!=="") : (s.weight!=="" && s.reps!==""))
+        : ex.sets.filter(s=>!s.bilateral && s.weight!=="" && s.reps!=="");
+      if(!workingSets.length) continue;
+      const plannedSets = prog.next_session.planned_detail ? prog.next_session.planned_detail.length : prog.next_session.planned_sets;
+      const used = workingSets.slice(0, plannedSets);
+      const weight = Number(prog.unilateral ? (used[0].bilateral?used[0].weightL:used[0].weight) : used[0].weight);
+      const reps = Math.min(...used.map(s=>prog.unilateral
+        ? (s.bilateral?Math.min(Number(s.repsL),Number(s.repsR)):Number(s.reps))
+        : Number(s.reps)));
+      const plannedW = prog.next_session.planned_weight;
+      if(plannedW && Math.abs(weight-plannedW)/plannedW > 0.2){
+        if(!window.confirm(`Вес по прогрессии «${prog.exercise_name}» сильно отличается от плана (план ${plannedW} кг, введено ${weight} кг). Всё равно засчитать в прогрессию?`))continue;
+      }
+      const payload = { actual_weight: weight, actual_reps: reps, actual_sets: used.length, workout_id: workoutId };
+      // план детализирован по каждому подходу — пишем и факт по каждому подходу, а не только сводку
+      if(prog.next_session.planned_detail){
+        payload.actual_detail = used.map(s=>s.bilateral
+          ? { weightL:Number(s.weightL), repsL:Number(s.repsL), weightR:Number(s.weightR), repsR:Number(s.repsR) }
+          : { weight:Number(s.weight), reps:Number(s.reps) });
+      }
+      try{
+        await api.logProgressionSession(prog.id, prog.next_session.id, payload);
+        touched = true;
+      }catch(e){ /* тихо игнорируем — сохранение тренировки не должно от этого зависеть */ }
+    }
+    if(touched && onProgressionsChange){
+      try{ const fresh = await api.getProgressions(); onProgressionsChange(fresh); }catch(e){}
+    }
+  };
+
+  const handleCreate=async(w)=>{
+    const res=await api.saveWorkout(w);
+    const saved={...w,id:res.id};
+    setWorkouts(p=>[...p,saved]);
+    setShowNew(false);
+    setRestoredDraft(null);
+    toast("Тренировка сохранена ✓");
+    autoLogProgress(res.id, saved.exercises);
+  };
+  const handleUpdate=async(w)=>{
+    await api.saveWorkout(w);
+    setWorkouts(p=>p.map(x=>x.id===w.id?w:x));
+    setEditId(null); setDetailId(w.id);
+    setRestoredDraft(null);
+    toast("Изменения сохранены ✓");
+  };
+  const handleDelete=async(id)=>{
+    if(!window.confirm("Удалить тренировку?"))return;
+    await api.deleteWorkout(id);
+    setWorkouts(p=>p.filter(w=>w.id!==id));
+    setDetailId(null);
+    toast("Удалено");
+  };
+  const startRename=(w)=>{setRenamingId(w.id);setRenameVal(w.name);};
+  const commitRename=async(id)=>{
+    if(!renameVal.trim()){setRenamingId(null);return;}
+    const w=workouts.find(x=>x.id===id);
+    const updated={...w,name:renameVal.trim()};
+    await api.saveWorkout(updated);
+    setWorkouts(p=>p.map(x=>x.id===id?updated:x));
+    setRenamingId(null);
+  };
+
+  const handleMinimize=(draftData)=>{
+    setShowNew(false);
+    setEditId(null);
+    setRestoredDraft(null);
+    setWorkoutDraft({editId: editTarget?.id ?? null, ...draftData});
+  };
+  const handleSheetClose=()=>{
+    setShowNew(false);
+    setEditId(null);
+    setRestoredDraft(null);
+  };
+
+  // Пока есть незавершённый черновик (тренировка) — запрещаем открывать
+  // новую или другую тренировку на редактирование, чтобы старую не потерять.
+  const guardOpen=(openFn)=>{
+    if(workoutDraft && !workoutDraft.restoring){
+      window.alert("Сначала заверши текущую тренировку — она ещё не сохранена. Нажми на неё в списке, чтобы продолжить.");
+      return;
+    }
+    openFn();
+  };
+
+  // Черновик, свёрнутый именно здесь (тренировка) — показываем прямо в списке,
+  // на том месте, где он был бы, если бы уже был сохранён, вместо плавающего
+  // блока внизу (чтобы не путать со старой уже сохранённой версией при редактировании).
+  const listDraft = workoutDraft && !workoutDraft.restoring ? workoutDraft : null;
+
+  let listItems = [...workouts].sort((a,b)=>b.date.localeCompare(a.date)).map(w=>({isDraft:false,w}));
+  if(listDraft){
+    const foundIdx = listDraft.editId!=null ? listItems.findIndex(item=>item.w.id===listDraft.editId) : -1;
+    if(foundIdx!==-1){
+      listItems[foundIdx] = {isDraft:true,draft:listDraft};
+    }else{
+      listItems.push({isDraft:true,draft:listDraft});
+      listItems.sort((a,b)=>{
+        const da=a.isDraft?a.draft.date:a.w.date;
+        const db=b.isDraft?b.draft.date:b.w.date;
+        return db.localeCompare(da);
+      });
+    }
+  }
+
+  if(showTemplates) return (
+    <TemplatesView
+      templates={templates} setTemplates={setTemplates} workouts={workouts} toast={toast}
+      templateDraft={templateDraft} setTemplateDraft={setTemplateDraft}
+      onBack={()=>setShowTemplates(false)}
+    />
+  );
+
+  if(showProgression) return (
+    <ProgressionTab
+      isPremium={isPremium} premiumChecked={premiumChecked} progressions={progressions}
+      reloadProgressions={reloadProgressions} workouts={workouts} toast={toast}
+      progressionDraft={progressionDraft} setProgressionDraft={setProgressionDraft}
+      onBack={()=>setShowProgression(false)}
+    />
+  );
+
+  if(detail) return (
+    <div className="page">
+      <div className="det-hd">
+        <button className="back-btn" onClick={()=>setDetailId(null)}><IconChevron dir="left"/>Назад</button>
+        {renamingId===detail.id
+          ?<input className="rename-inp" value={renameVal} onChange={e=>setRenameVal(e.target.value)} onBlur={()=>commitRename(detail.id)} onKeyDown={e=>e.key==="Enter"&&commitRename(detail.id)} autoFocus/>
+          :<span className="det-title">{detail.name}</span>}
+        <button className="del-btn" onClick={()=>startRename(detail)}><IconEdit/></button>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:20}}>
+        <span style={{color:"#888",fontSize:13,flex:1,alignSelf:"center"}}>{formatDate(detail.date)}</span>
+        <button className="edit-badge" onClick={()=>guardOpen(()=>{setDetailId(null);setEditId(detail.id);})}>✎ Редактировать</button>
+      </div>
+      <div className="sec-lbl">Упражнения — {detail.exercises.length}</div>
+      {detail.exercises.length===0
+        ?<div className="empty"><div className="empty-icon">📋</div>Упражнения не записаны</div>
+        :detail.exercises.map((ex,i)=>(
+          <div key={ex.id||i} className="w-ex">
+            <div className="w-ex-name">{ex.name||`Упражнение ${i+1}`}</div>
+            <div className="w-sets">
+              {ex.sets.map((s,si)=>(
+                <div key={si} className="w-set-row">
+                  <span className="w-set-n">{si+1}</span>
+                  {s.bilateral?(
+                    <span className="w-set-v w-set-bi">
+                      <span className="w-set-bi-side"><span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}</span>
+                      <span className="w-set-bi-sep">|</span>
+                      <span className="w-set-bi-side"><span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}</span>
+                    </span>
+                  ):(
+                    <span className="w-set-v">{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
+                  )}
+                </div>
+              ))}
+            </div>
+            {ex.comment&&<div className="w-ex-comment">{ex.comment}</div>}
+          </div>
+        ))}
+      <hr className="divider"/>
+      <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить тренировку</button>
+      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize} progressions={progressions} templates={templates}/>}
+    </div>
+  );
+
+  return (
+    <div className="page">
+      <button className="btn ghost" style={{marginBottom:10}} onClick={()=>setShowProgression(true)}><IconProgression/>Прогрессия{!isPremium&&premiumChecked&&<span className="prog-lock-dot">🔒</span>}</button>
+      <button className="btn ghost" style={{marginBottom:10}} onClick={()=>setShowTemplates(true)}><IconTemplate/>Шаблоны тренировок</button>
+      <button className="btn" onClick={()=>guardOpen(()=>setShowNew(true))}><IconPlus/>Новая тренировка</button>
+      {workouts.length===0 && !listDraft
+        ?<div className="empty"><div className="empty-icon">🏋️</div>Тренировок пока нет.<br/>Начни первую!</div>
+        :listItems.map((item,i,arr)=>item.isDraft?(
+          <div key="draft-card" className="card draft-card" onClick={()=>setWorkoutDraft(prev=>({...prev,restoring:true}))}>
+            <div style={{minWidth:0}}>
+              <div className="card-title">{item.draft.name||"Тренировка"}</div>
+              <div className="card-sub">{formatDate(item.draft.date)} · не сохранено</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+              <span className="draft-pill">Черновик</span><IconChevron/>
+            </div>
+          </div>
+        ):(
+          <div key={item.w.id} className="card" onClick={()=>setDetailId(item.w.id)}>
+            <div style={{minWidth:0}}>
+              <div className="card-title">{item.w.name}</div>
+              <div className="card-sub">{formatDate(item.w.date)} · {item.w.exercises.length} упр.</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+              <span className="tag">#{arr.length-i}</span><IconChevron/>
+            </div>
+          </div>
+        ))}
+      {showNew&&<WorkoutSheet workouts={workouts} initial={null} draft={draft} onSave={handleCreate} onClose={handleSheetClose} onMinimize={handleMinimize} progressions={progressions} templates={templates}/>}
+      {editTarget&&<WorkoutSheet workouts={workouts} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize} progressions={progressions} templates={templates}/>}
+    </div>
+  );
+}
+
+// ── ExercisesTab ──────────────────────────────────────────────────────────
+function ExercisesTab({workouts, setWorkouts, toast}) {
+  const [selected,setSelected]=useState(null);
+  const [renamingEx,setRenamingEx]=useState(false);
+  const [renameExVal,setRenameExVal]=useState("");
+  useSwipeBack(()=>setSelected(null), !!selected);
+  useScrollTopOnChange(selected);
+
+  // Общие описания упражнений (техника, сетап и т.д.) — по имени, не по конкретной тренировке.
+  const [notes,setNotes]=useState({});
+  const [notesLoaded,setNotesLoaded]=useState(false);
+  useEffect(()=>{
+    api.getExerciseNotes().then(d=>{setNotes(d||{});setNotesLoaded(true);}).catch(()=>setNotesLoaded(true));
+  },[]);
+  const noteKey = selected ? selected.trim().toLowerCase() : null;
+  const noteVal = noteKey!=null ? (notes[noteKey] ?? "") : "";
+  const setNoteVal = (v) => setNotes(prev=>({...prev,[noteKey]:v}));
+  // Автосохранение с задержкой, как и остальные черновики в приложении — но
+  // только после того, как исходные заметки уже загружены (иначе можем
+  // случайно затереть существующую заметку пустой строкой до загрузки).
+  useEffect(()=>{
+    if(!selected || !notesLoaded) return;
+    const t=setTimeout(()=>{ api.saveExerciseNote(selected, notes[noteKey] ?? "").catch(()=>{}); }, 600);
+    return ()=>clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[selected, notesLoaded, notes[noteKey]]);
+
+  const allNames=[...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))].sort((a,b)=>a.localeCompare(b,"ru"));
+  const getHistory=(name)=>{
+    const lc=name.toLowerCase(),rows=[];
+    workouts.forEach(w=>w.exercises.forEach(e=>{if(e.name.trim().toLowerCase()===lc)rows.push({workout:w,exercise:e});}));
+    return rows.sort((a,b)=>b.workout.date.localeCompare(a.workout.date));
+  };
+
+  const startRenameEx=()=>{setRenameExVal(selected);setRenamingEx(true);};
+  const commitRenameEx=async()=>{
+    const newName=renameExVal.trim();
+    if(!newName||newName===selected){setRenamingEx(false);return;}
+    const lc=selected.toLowerCase();
+    // Update all workouts that contain this exercise name
+    const toUpdate=workouts.filter(w=>w.exercises.some(e=>e.name.trim().toLowerCase()===lc));
+    await Promise.all(toUpdate.map(w=>{
+      const updated={...w,exercises:w.exercises.map(e=>e.name.trim().toLowerCase()===lc?{...e,name:newName}:e)};
+      return api.saveWorkout(updated).then(()=>updated);
+    })).then(updatedList=>{
+      setWorkouts(prev=>prev.map(w=>{
+        const found=updatedList.find(u=>u.id===w.id);
+        return found||w;
+      }));
+    });
+    // Переносим заметку с описанием техники на новое имя вместе с самим упражнением
+    const newLc=newName.trim().toLowerCase();
+    api.renameExerciseNote(selected,newName).catch(()=>{});
+    setNotes(prev=>{
+      if(!(lc in prev)) return prev;
+      const {[lc]:val,...rest}=prev;
+      return {...rest,[newLc]:val};
+    });
+    toast(`«${selected}» → «${newName}» ✓`);
+    setSelected(newName);
+    setRenamingEx(false);
+  };
+
+  if(selected){
+    const history=getHistory(selected);
+    return(
+      <div className="page">
+        <div className="det-hd">
+          <button className="back-btn" onClick={()=>{setSelected(null);setRenamingEx(false);}}><IconChevron dir="left"/>Назад</button>
+          {renamingEx
+            ?<input
+                className="rename-inp"
+                value={renameExVal}
+                onChange={e=>setRenameExVal(e.target.value)}
+                onBlur={commitRenameEx}
+                onKeyDown={e=>{if(e.key==="Enter")commitRenameEx();if(e.key==="Escape"){setRenamingEx(false);}}}
+                autoFocus
+              />
+            :<span className="det-title">{selected}</span>}
+          <button className="del-btn" onClick={startRenameEx}><IconEdit/></button>
+        </div>
+        <div className="sec-lbl" style={{marginTop:0}}>Описание · техника выполнения</div>
+        <textarea
+          className="ex-note-inp"
+          placeholder="Сетап, техника выполнения, на что обратить внимание..."
+          value={noteVal}
+          onChange={e=>setNoteVal(e.target.value)}
+          disabled={!notesLoaded}
+        />
+        <div className="sec-lbl">{history.length} записей</div>
+        <ExerciseHistoryList history={history}/>
+      </div>
+    );
+  }
+  return(
+    <div className="page">
+      {allNames.length===0
+        ?<div className="empty"><div className="empty-icon">📝</div>Упражнения появятся здесь<br/>после первой тренировки</div>
+        :<>
+          <div className="sec-lbl">{allNames.length} упражнений</div>
+          {allNames.map(name=>{
+            const count=workouts.filter(w=>w.exercises.some(e=>e.name.trim().toLowerCase()===name.toLowerCase())).length;
+            return(
+              <div key={name} className="card" onClick={()=>setSelected(name)}>
+                <div style={{minWidth:0}}>
+                  <div className="card-title">{name}</div>
+                  <div className="card-sub">{count} {count===1?"запись":count<5?"записи":"записей"}</div>
+                </div>
+                <IconChevron/>
+              </div>
+            );
+          })}
+        </>}
+    </div>
+  );
+}
+
+// ── Прогрессия: общие мелкие компоненты ──────────────────────────────────
+function ChoiceGrid({ options, value, onChange }) {
+  return (
+    <div className="choice-grid">
+      {options.map(o => (
+        <button key={o.value} className={`choice-btn${value===o.value?" active":""}`} onClick={()=>onChange(o.value)}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function ProgWeightGraph({ sessions }) {
+  const pts = sessions
+    .filter(s=>s.status==="done"||s.status==="pending")
+    .map(s=>({ x:s.session_index, y:s.status==="done"?s.actual_weight:s.planned_weight, done:s.status==="done" }));
+  if (pts.length < 2) return null;
+  const w=280, h=84, pad=10;
+  const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+  const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+  const sx = x => maxX===minX ? w/2 : pad+(x-minX)/(maxX-minX)*(w-2*pad);
+  const sy = y => maxY===minY ? h/2 : h-pad-(y-minY)/(maxY-minY)*(h-2*pad);
+  const path = pts.map((p,i)=>`${i===0?"M":"L"}${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join(" ");
+  return (
+    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} style={{display:"block",margin:"4px 0 18px"}}>
+      <path d={path} fill="none" stroke="#FFF" strokeWidth="1.5"/>
+      {pts.map((p,i)=><circle key={i} cx={sx(p.x)} cy={sy(p.y)} r="2.5" fill={p.done?"#4CAF50":"#3A3A3A"}/>)}
+    </svg>
+  );
+}
+
+// ── ProgressionChoiceSheet: выбор произвольная/расчётная ──────────────────
+function ProgressionChoiceSheet({ onPick, onClose }) {
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="sheet">
+        <div className="handle"/>
+        <div className="sheet-top-actions"><button className="sheet-icon-btn" onClick={onClose}><IconClose/></button></div>
+        <div className="sheet-title-row"><span style={{fontSize:18,fontWeight:700}}>Новая прогрессия</span></div>
+        <button className="choice-big-btn" onClick={()=>onPick("calculated")}>
+          <div className="card-title">Расчётная</div>
+          <div className="card-sub">Мастер из нескольких шагов — приложение само посчитает цели по неделям и подстроится под факт</div>
+        </button>
+        <button className="choice-big-btn" onClick={()=>onPick("manual")}>
+          <div className="card-title">Произвольная</div>
+          <div className="card-sub">Сам вводишь план по тренировкам — без каких-либо расчётов</div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── ManualProgressionSheet ──────────────────────────────────────────────
+// Каждая тренировка — список подходов, у каждого свой вес/повторы (не общий
+// на всю тренировку), чтобы можно было расписать, например, "разминочный
+// полегче, а рабочие тяжелее" прямо в плане.
+function ManualProgressionSheet({ workouts, draft, onSaved, onClose, onMinimize }) {
+  const [name,setName]=useState(draft?.name ?? "");
+  const [sessions,setSessions]=useState(draft?.sessions ?? [[{weight:"",reps:""}]]);
+  const [saving,setSaving]=useState(false);
+  const allExNames=[...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))];
+
+  // Автосохранение черновика — как у тренировки/замера, чтобы ничего не терялось,
+  // даже если процесс Telegram убьют в фоне, а не только при явном сворачивании.
+  useEffect(()=>{
+    const t=setTimeout(()=>{
+      saveDraftToStorage("progression", { mode:"manual", name, sessions });
+    },600);
+    return ()=>clearTimeout(t);
+  },[name,sessions]);
+
+  const addSession=()=>setSessions(p=>[...p,[{weight:"",reps:""}]]);
+  const remSession=(i)=>setSessions(p=>p.filter((_,ix)=>ix!==i));
+  const addSet=(si)=>setSessions(p=>p.map((sess,ix)=>ix===si?[...sess,{weight:"",reps:""}]:sess));
+  const remSet=(si,seti)=>setSessions(p=>p.map((sess,ix)=>ix===si?sess.filter((_,six)=>six!==seti):sess));
+  const upSet=(si,seti,field,val)=>setSessions(p=>p.map((sess,ix)=>ix===si?sess.map((s,six)=>six===seti?{...s,[field]:val}:s):sess));
+
+  const canSave = name.trim() && sessions.every(sess=>sess.length>0 && sess.every(s=>s.weight!==""&&s.reps!==""));
+
+  const save=async()=>{
+    setSaving(true);
+    try{
+      await api.createProgression({
+        exercise_name: name.trim(), mode: "manual",
+        manual_sessions: sessions.map(sess=>({ sets: sess.map(s=>({ weight:Number(s.weight), reps:Number(s.reps) })) })),
+      });
+      clearDraftFromStorage("progression");
+      onSaved();
+    }catch(e){ window.alert("Не удалось создать прогрессию: "+(e.message||"")); }
+    setSaving(false);
+  };
+
+  const handleMinimize=()=>{
+    const d={ mode:"manual", name, sessions };
+    saveDraftToStorage("progression", d);
+    onMinimize(d);
+  };
+  const handleCloseClick=()=>{
+    if(progressionDraftHasData({mode:"manual",name,sessions}) && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны."))return;
+    clearDraftFromStorage("progression");
+    onClose();
+  };
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&handleMinimize()}>
+      <div className="sheet">
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-minimize-btn" onClick={handleMinimize} title="Свернуть"><IconMinimize/>Свернуть</button>
+          <button className="sheet-icon-btn" onClick={handleCloseClick} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row"><span style={{fontSize:18,fontWeight:700}}>Произвольная прогрессия</span></div>
+        <div className="field">
+          <div className="lbl">Упражнение</div>
+          <div className="inp" style={{padding:0}}><ExNameInput value={name} onChange={setName} allExNames={allExNames}/></div>
+        </div>
+        <div className="sec-lbl">План по тренировкам</div>
+        {sessions.map((sess,si)=>(
+          <div key={si} className="ex-block" style={{padding:"12px 14px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <span className="card-sub" style={{margin:0}}>Тренировка {si+1}</span>
+              {sessions.length>1&&<button className="del-btn" onClick={()=>remSession(si)}><IconTrash/></button>}
+            </div>
+            {sess.map((s,seti)=>(
+              <div key={seti} className="set-row">
+                <span className="sess-idx" style={{paddingTop:8}}>{seti+1}</span>
+                <input className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(si,seti,"weight",normalizeDecimal(e.target.value))}/>
+                <span className="set-sep">×</span>
+                <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(si,seti,"reps",e.target.value)}/>
+                {sess.length>1&&<button className="del-btn" onClick={()=>remSet(si,seti)}><IconTrash/></button>}
+              </div>
+            ))}
+            <button className="add-set" onClick={()=>addSet(si)}><IconPlus/>Подход</button>
+          </div>
+        ))}
+        <button className="add-ex" onClick={addSession}><IconPlus/>Добавить тренировку</button>
+        <button className="btn" disabled={!canSave||saving} onClick={save}>{saving?"Сохранение...":"Создать прогрессию"}</button>
+        <button className="btn ghost" onClick={handleCloseClick}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+// ── CalculatedProgressionWizard: мастер из 8 шагов + обзор ────────────────
+function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMinimize }) {
+  const [step,setStep]=useState(draft?.step ?? 1);
+  const [name,setName]=useState(draft?.name ?? "");
+  const [exType,setExType]=useState(draft?.exType ?? null);
+  const [goal,setGoal]=useState(draft?.goal ?? null);
+  const [repLow,setRepLow]=useState(draft?.repLow ?? "");
+  const [repHigh,setRepHigh]=useState(draft?.repHigh ?? "");
+  const [frequency,setFrequency]=useState(draft?.frequency ?? null);
+  const [setsCount,setSetsCount]=useState(draft?.setsCount ?? "3");
+  const [unilateral,setUnilateral]=useState(draft?.unilateral ?? false);
+  const [unilateralMode,setUnilateralMode]=useState(draft?.unilateralMode ?? "equalize");
+  const [beginnerMode,setBeginnerMode]=useState(draft?.beginnerMode ?? false);
+  const [amrapEveryWeeks,setAmrapEveryWeeks]=useState(draft?.amrapEveryWeeks ?? null);
+  const [startWeight,setStartWeight]=useState(draft?.startWeight ?? "");
+  const [startReps,setStartReps]=useState(draft?.startReps ?? "");
+  const [increment,setIncrement]=useState(draft?.increment ?? "2.5");
+  const [weeks,setWeeks]=useState(draft?.weeks ?? "8");
+  const [saving,setSaving]=useState(false);
+  const [showTest,setShowTest]=useState(false);
+  const [testWeight,setTestWeight]=useState("");
+  const [testReps,setTestReps]=useState("");
+  const [testRir,setTestRir]=useState("");
+
+  const allExNames=[...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))];
+  const isVarying = VARYING_EX_TYPES.includes(exType);
+  const lastBestSet = findLastBestSet(workouts, name);
+  const suggestedFromHistory = lastBestSet && repLow!==""
+    ? weightForTargetReps(lastBestSet.oneRM, Number(repLow), Number(increment))
+    : null;
+
+  const applyHistorySuggestion=()=>{
+    setStartWeight(String(suggestedFromHistory));
+    setStartReps(repLow);
+  };
+  const applyTestSuggestion=()=>{
+    const w = Number(testWeight), r = Number(testReps), rir = Number(testRir)||0;
+    if(!w || !r) return;
+    const oneRM = epley1RM(w, r + rir); // повторы "в отказ" ≈ выполненные + RIR
+    setStartWeight(String(weightForTargetReps(oneRM, Number(repLow)||r, Number(increment))));
+    setStartReps(repLow || String(r));
+  };
+
+  const buildDraft=()=>({ mode:"calculated", step, name, exType, goal, repLow, repHigh, frequency, setsCount, unilateral, unilateralMode, beginnerMode, amrapEveryWeeks, startWeight, startReps, increment, weeks });
+
+  // Автосохранение — как у тренировки/замера: чтобы прогресс по мастеру не
+  // терялся, даже если процесс Telegram убьют в фоне на любом из 8 шагов.
+  useEffect(()=>{
+    const t=setTimeout(()=>{ saveDraftToStorage("progression", buildDraft()); },600);
+    return ()=>clearTimeout(t);
+  },[step,name,exType,goal,repLow,repHigh,frequency,setsCount,startWeight,startReps,increment,weeks]);
+
+  const pickGoal=(g)=>{
+    setGoal(g);
+    const def = exType==="isolation" ? ISOLATION_REP_RANGE_DEFAULT : REP_RANGE_DEFAULTS[exType]?.[g];
+    if(def){ setRepLow(String(def[0])); setRepHigh(String(def[1])); }
+  };
+
+  const STEP_COUNT = 8;
+  const canNext = {
+    1: name.trim()!=="",
+    2: exType!=null,
+    3: goal!=null && repLow!=="" && repHigh!=="" && Number(repHigh)>Number(repLow),
+    4: frequency!=null,
+    5: setsCount!==""&&Number(setsCount)>=1,
+    6: startWeight!==""&&startReps!=="",
+    7: increment!==""&&Number(increment)>0,
+    8: weeks!==""&&Number(weeks)>=1,
+  }[step];
+
+  const handleMinimize=()=>{
+    const d=buildDraft();
+    saveDraftToStorage("progression", d);
+    onMinimize(d);
+  };
+  const handleCloseClick=()=>{
+    if(progressionDraftHasData(buildDraft()) && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны."))return;
+    clearDraftFromStorage("progression");
+    onClose();
+  };
+
+  const submit=async()=>{
+    setSaving(true);
+    try{
+      await api.createProgression({
+        exercise_name: name.trim(), mode: "calculated",
+        exercise_type: exType, goal, rep_unit: "reps",
+        rep_range_low: Number(repLow), rep_range_high: Number(repHigh),
+        frequency, sets_count: Number(setsCount), increment: Number(increment),
+        start_weight: Number(startWeight), start_reps: Number(startReps),
+        weeks: Number(weeks), unilateral, unilateral_mode: unilateralMode, beginner_mode: beginnerMode, amrap_every_weeks: amrapEveryWeeks,
+      });
+      clearDraftFromStorage("progression");
+      onSaved();
+    }catch(e){ window.alert("Не удалось создать прогрессию: "+(e.message||"")); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&handleMinimize()}>
+      <div className="sheet">
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-minimize-btn" onClick={handleMinimize} title="Свернуть"><IconMinimize/>Свернуть</button>
+          <button className="sheet-icon-btn" onClick={handleCloseClick} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row"><span style={{fontSize:18,fontWeight:700}}>Расчётная прогрессия</span></div>
+        {step<=STEP_COUNT && (
+          <div className="wizard-dots">
+            {Array.from({length:STEP_COUNT}).map((_,i)=>(
+              <span key={i} className={`wizard-dot${i+1===step?" active":i+1<step?" done":""}`}/>
+            ))}
+          </div>
+        )}
+
+        {step===1 && (
+          <div className="field">
+            <div className="lbl">Упражнение</div>
+            <div className="inp" style={{padding:0}}><ExNameInput value={name} onChange={setName} allExNames={allExNames}/></div>
+          </div>
+        )}
+
+        {step===2 && (
+          <div className="field">
+            <div className="lbl">Тип упражнения</div>
+            <ChoiceGrid value={exType} onChange={setExType} options={[
+              {value:"main_compound",label:"Основное базовое"},
+              {value:"accessory_compound",label:"Вспомогательное многосуставное"},
+              {value:"isolation",label:"Изоляция"},
+              {value:"custom",label:"Произвольное"},
+            ]}/>
+            <div className="card-sub" style={{margin:0}}>
+              {isVarying
+                ? "У этого типа при частоте больше 1 раза в неделю тренировки будут разной тяжести (тяжёлая/лёгкая)."
+                : "Каждая тренировка будет одинаковой по смыслу и прогрессирует независимо от дня."}
+            </div>
+          </div>
+        )}
+
+        {step===3 && (
+          <>
+            <div className="field">
+              <div className="lbl">Цель</div>
+              <ChoiceGrid value={goal} onChange={pickGoal} options={[
+                {value:"strength",label:"Сила"},
+                {value:"hypertrophy",label:"Гипертрофия"},
+                {value:"strength_hypertrophy",label:"Сила + гипертрофия"},
+              ]}/>
+            </div>
+            <div className="m-grid field">
+              <div>
+                <div className="lbl">Повторов от</div>
+                <input className="inp" type="number" inputMode="numeric" value={repLow} onChange={e=>setRepLow(e.target.value)}/>
+              </div>
+              <div>
+                <div className="lbl">Повторов до</div>
+                <input className="inp" type="number" inputMode="numeric" value={repHigh} onChange={e=>setRepHigh(e.target.value)}/>
+              </div>
+            </div>
+            <div className="card-sub" style={{margin:"0 0 14px"}}>Диапазон подставлен по умолчанию — можно поправить.</div>
+          </>
+        )}
+
+        {step===4 && (
+          <div className="field">
+            <div className="lbl">Частота в неделю</div>
+            <ChoiceGrid value={frequency} onChange={setFrequency} options={[1,2,3,4].map(n=>({value:n,label:`${n} раз${n===1?"":"а"}`}))}/>
+            {isVarying && frequency>1 && (
+              <div className="card-sub" style={{margin:0}}>
+                Схема: {(({1:["heavy"],2:["heavy","light"],3:["heavy","light","heavy"],4:["heavy","light","heavy","light"]})[frequency]).map(r=>ROLE_LABELS[r]).join(" → ")}
+                {" "}· Лёгкий день — тот же вес, но меньше повторов (не влияет на прогресс)
+              </div>
+            )}
+          </div>
+        )}
+
+        {step===5 && (
+          <div className="field">
+            <div className="lbl">Рабочих подходов</div>
+            <input className="inp" type="number" inputMode="numeric" value={setsCount} onChange={e=>setSetsCount(e.target.value)}/>
+            <div style={{marginTop:14}}>
+              <button className={`mini-btn${unilateral?"":" ghost"}`} onClick={()=>{setUnilateral(v=>!v); setAmrapEveryWeeks(null);}}>
+                {unilateral?"✓ ":""}Унилатеральное упражнение (раздельно по сторонам)
+              </button>
+              {unilateral && (
+                <div style={{marginTop:10}}>
+                  <button className={`mini-btn${unilateralMode==="equalize"?"":" ghost"}`} onClick={()=>setUnilateralMode("equalize")} style={{marginRight:8}}>
+                    {unilateralMode==="equalize"?"✓ ":""}Выравнивание
+                  </button>
+                  <button className={`mini-btn${unilateralMode==="independent"?"":" ghost"}`} onClick={()=>setUnilateralMode("independent")}>
+                    {unilateralMode==="independent"?"✓ ":""}Независимо
+                  </button>
+                  <div className="card-sub" style={{margin:"8px 0 0"}}>
+                    {unilateralMode==="equalize"
+                      ? "Вес общий на обе стороны, повторы считаются отдельно. Слабая сторона подтягивается к сильной — вес не поднимется, пока обе стороны не доберутся до верха диапазона. Подходит, когда важна симметрия (например, в бодибилдинге)."
+                      : "У каждой стороны полностью свой вес и свои повторы — стороны могут разойтись и не сравняться. Подходит, когда одна сторона объективно сильнее и это нормально (например, в силовых видах)."}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div style={{marginTop:14}}>
+              <button className={`mini-btn${beginnerMode?"":" ghost"}`} onClick={()=>setBeginnerMode(v=>!v)}>
+                {beginnerMode?"✓ ":""}Режим новичка / возврат после перерыва
+              </button>
+              <div className="card-sub" style={{margin:"8px 0 0"}}>
+                Пока включён — повторы между тренировками растут быстрее (+2 за раз вместо +1),
+                чтобы быстрее пройти лёгкие веса. Сам вес прибавляется как обычно, без удвоения.
+                Выключается сам после первой тренировки, где что-то пошло не идеально.
+              </div>
+            </div>
+            {!unilateral && (
+              <div style={{marginTop:14}}>
+                <div className="lbl">AMRAP-тест (проверка "в отказ")</div>
+                <ChoiceGrid value={amrapEveryWeeks} onChange={setAmrapEveryWeeks} options={[
+                  {value:null,label:"Выкл."},
+                  {value:2,label:"Каждые 2 нед."},
+                  {value:4,label:"Каждые 4 нед."},
+                ]}/>
+                <div className="card-sub" style={{margin:"8px 0 0"}}>
+                  Раз в N недель последний подход тяжёлой тренировки — в отказ, а не по плану.
+                  По факту пересчитываем рабочий вес от реального максимума, а не по одному шагу —
+                  быстрее ловим и резкий прогресс, и застой.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {step===6 && (
+          <div className="field">
+            {suggestedFromHistory!=null && (
+              <div className="card-sub" style={{background:"#16241A",border:"1px solid #2A4A32",borderRadius:10,padding:10,marginBottom:10}}>
+                В истории есть {lastBestSet.weight} кг × {lastBestSet.reps} ({formatDate(lastBestSet.date)}).
+                {" "}По формуле Эпли (оценка, не точный максимум) — старт с <b>{suggestedFromHistory} кг × {repLow}</b>.
+                <div><button className="mini-btn" style={{marginTop:8}} onClick={applyHistorySuggestion}>Применить</button></div>
+              </div>
+            )}
+            <button className="mini-btn ghost" style={{marginBottom:10}} onClick={()=>setShowTest(v=>!v)}>
+              {showTest ? "Скрыть тестовый подход" : "Не знаю, с чего начать → тестовый подход"}
+            </button>
+            {showTest && (
+              <div className="m-grid" style={{marginBottom:14}}>
+                <div>
+                  <div className="lbl">Вес теста, кг</div>
+                  <input className="inp" type="text" inputMode="decimal" value={testWeight} onChange={e=>setTestWeight(normalizeDecimal(e.target.value))}/>
+                </div>
+                <div>
+                  <div className="lbl">Повторы (почти до отказа)</div>
+                  <input className="inp" type="number" inputMode="numeric" value={testReps} onChange={e=>setTestReps(e.target.value)}/>
+                </div>
+                <div style={{gridColumn:"1 / -1"}}>
+                  <div className="lbl">RIR — сколько ещё оставалось в запасе</div>
+                  <input className="inp" type="number" inputMode="numeric" value={testRir} onChange={e=>setTestRir(e.target.value)}/>
+                </div>
+                <div style={{gridColumn:"1 / -1"}}>
+                  <button className="mini-btn" onClick={applyTestSuggestion}>Рассчитать стартовый вес</button>
+                </div>
+              </div>
+            )}
+            <div className="m-grid">
+              <div>
+                <div className="lbl">Рабочий вес, кг</div>
+                <input className="inp" type="text" inputMode="decimal" value={startWeight} onChange={e=>setStartWeight(normalizeDecimal(e.target.value))}/>
+              </div>
+              <div>
+                <div className="lbl">Повторы</div>
+                <input className="inp" type="number" inputMode="numeric" value={startReps} onChange={e=>setStartReps(e.target.value)}/>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {step===7 && (
+          <div className="field">
+            <div className="lbl">Шаг прибавки веса, кг</div>
+            <ChoiceGrid value={Number(increment)} onChange={v=>setIncrement(String(v))} options={INCREMENT_PRESETS.map(v=>({value:v,label:String(v)}))}/>
+            <input className="inp" type="text" inputMode="decimal" placeholder="или своё значение" value={increment} onChange={e=>setIncrement(normalizeDecimal(e.target.value))}/>
+          </div>
+        )}
+
+        {step===8 && (
+          <div className="field">
+            <div className="lbl">Длительность цикла, недель</div>
+            <ChoiceGrid value={Number(weeks)} onChange={v=>setWeeks(String(v))} options={WEEKS_PRESETS.map(v=>({value:v,label:String(v)}))}/>
+            <input className="inp" type="number" inputMode="numeric" placeholder="или своё значение" value={weeks} onChange={e=>setWeeks(e.target.value)}/>
+          </div>
+        )}
+
+        {step===9 && (
+          <div className="field">
+            <div className="sec-lbl" style={{marginTop:0}}>Проверь перед созданием</div>
+            <div className="ex-block" style={{padding:"14px 16px"}}>
+              <div className="card-title" style={{marginBottom:8}}>{name}</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>{EXERCISE_TYPE_LABELS[exType]} · {GOAL_LABELS[goal]}</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>Диапазон: {repLow}–{repHigh} повт · {frequency} раз/нед · {setsCount} подх.{unilateral?` · унилатерально (${unilateralMode==="equalize"?"выравнивание":"независимо"})`:""}{beginnerMode?" · режим новичка":""}{amrapEveryWeeks?` · AMRAP каждые ${amrapEveryWeeks} нед.`:""}</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>Старт: {startWeight} кг × {startReps}</div>
+              <div className="card-sub" style={{margin:"2px 0"}}>Шаг {increment} кг · цикл {weeks} нед.</div>
+            </div>
+          </div>
+        )}
+
+        <div style={{display:"flex",gap:8,marginTop:20}}>
+          {step>1 && <button className="btn ghost" style={{marginBottom:0}} onClick={()=>setStep(s=>s-1)}>Назад</button>}
+          {step<9
+            ? <button className="btn" style={{marginBottom:0}} disabled={!canNext} onClick={()=>setStep(s=>s+1)}>Далее</button>
+            : <button className="btn" style={{marginBottom:0}} disabled={saving} onClick={submit}>{saving?"Создание...":"Создать прогрессию"}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── ProgressionDetail ──────────────────────────────────────────────────
+function ProgressionDetail({ id, onBack, onChanged, toast }) {
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  useSwipeBack(onBack);
+  useScrollTopOnChange(id);
+  const [logging,setLogging]=useState(null);
+  const [logForm,setLogForm]=useState({weight:"",reps:"",sets:""});
+  const [logDetail,setLogDetail]=useState(null); // массив {weight,reps} — только для сессий с planned_detail
+  const [busy,setBusy]=useState(false);
+  const [showEdit,setShowEdit]=useState(false);
+  const [showReset,setShowReset]=useState(false);
+  const [resetWeight,setResetWeight]=useState("");
+  const [resetReps,setResetReps]=useState("");
+  const [resetBeginner,setResetBeginner]=useState(true);
+
+  const load=()=>{
+    setLoading(true);
+    api.getProgression(id).then(d=>{setData(d);setLoading(false);}).catch(()=>setLoading(false));
+  };
+  useEffect(load,[id]);
+
+  if(loading) return <div className="loading"><div className="spinner"/><div>Загрузка...</div></div>;
+  if(!data) return (
+    <div>
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button></div>
+      <div className="empty"><div className="empty-icon">⚠️</div>Не удалось загрузить прогрессию</div>
+    </div>
+  );
+
+  const nextPending = data.sessions.find(s=>s.status==="pending");
+  const anyDone = data.sessions.some(s=>s.status==="done");
+  const repUnit = "";
+
+  const startLog=(s)=>{
+    setLogging(s.id);
+    if(s.planned_detail){
+      setLogDetail(s.planned_detail.map(d=>d.bilateral
+        ? {bilateral:true, weightL:String(d.weightL), repsL:String(d.repsL), weightR:String(d.weightR), repsR:String(d.repsR)}
+        : {bilateral:false, weight:String(d.weight), reps:String(d.reps)}));
+    }else{
+      setLogDetail(null);
+      setLogForm({weight:String(s.planned_weight), reps:String(s.planned_reps), sets:String(s.planned_sets), rir:""});
+    }
+  };
+  const upLogDetail=(i,field,val)=>setLogDetail(p=>p.map((d,ix)=>ix===i?{...d,[field]:val}:d));
+  const addLogDetailRow=()=>setLogDetail(p=>[...p, p.length&&p[0].bilateral?{bilateral:true,weightL:"",repsL:"",weightR:"",repsR:""}:{bilateral:false,weight:"",reps:""}]);
+  const remLogDetailRow=(i)=>setLogDetail(p=>p.filter((_,ix)=>ix!==i));
+
+  const submitLog=async()=>{
+    setBusy(true);
+    try{
+      let payload;
+      if(logDetail){
+        if(logDetail[0].bilateral){
+          const detail=logDetail.map(d=>({weightL:Number(d.weightL),repsL:Number(d.repsL),weightR:Number(d.weightR),repsR:Number(d.repsR)}));
+          payload={
+            actual_weight: detail[0].weightL,
+            actual_reps: Math.min(...detail.flatMap(d=>[d.repsL,d.repsR])),
+            actual_sets: detail.length,
+            actual_detail: detail,
+          };
+        }else{
+          const detail=logDetail.map(d=>({weight:Number(d.weight),reps:Number(d.reps)}));
+          payload={
+            actual_weight: detail[0].weight,
+            actual_reps: Math.min(...detail.map(d=>d.reps)),
+            actual_sets: detail.length,
+            actual_detail: detail,
+          };
+        }
+      }else{
+        payload={
+          actual_weight:Number(logForm.weight), actual_reps:Number(logForm.reps),
+          actual_sets:Number(logForm.sets),
+        };
+      }
+      await api.logProgressionSession(data.id, logging, payload);
+      setLogging(null);
+      load(); onChanged();
+      toast("Записано ✓");
+    }catch(e){ window.alert("Не удалось сохранить: "+(e.message||"")); }
+    setBusy(false);
+  };
+  const doSkip=async(s)=>{
+    if(!window.confirm("Пропустить эту сессию без пересчёта весов?"))return;
+    await api.skipProgressionSession(data.id, s.id);
+    load(); onChanged();
+  };
+  const doUndo=async()=>{
+    if(!window.confirm("Отменить последнюю запись и пересчитать план?"))return;
+    setBusy(true);
+    try{ await api.undoLastProgressionLog(data.id); load(); onChanged(); toast("Отменено ✓"); }
+    catch(e){ window.alert("Не удалось отменить: "+(e.message||"")); }
+    setBusy(false);
+  };
+  const doDelete=async()=>{
+    if(!window.confirm("Удалить прогрессию из базы? Вся история планирования этого цикла будет безвозвратно удалена. (Данные о фактически выполненных тренировках сохранятся в дневнике)."))return;
+    setBusy(true);
+    try{ await api.deleteProgression(data.id); onChanged(); onBack(); }
+    catch(e){ window.alert("Не удалось удалить: "+(e.message||"")); setBusy(false); }
+  };
+  const doNewCycle=async()=>{
+    if(!window.confirm(`Начать новый цикл с текущей точки — ${data.current_weight} кг × ${data.current_reps}${repUnit}?`))return;
+    setBusy(true);
+    try{ await api.startNewProgressionCycle(data.id, {}); onChanged(); load(); toast("Новый цикл начат ✓"); }
+    catch(e){ window.alert("Не удалось начать новый цикл: "+(e.message||"")); }
+    setBusy(false);
+  };
+  const doComplete=async()=>{
+    if(!window.confirm("Завершить прогрессию? Дальше можно начать новый цикл с изменёнными параметрами."))return;
+    setBusy(true);
+    try{ await api.completeProgression(data.id); onChanged(); load(); toast("Прогрессия завершена ✓"); }
+    catch(e){ window.alert("Не удалось завершить: "+(e.message||"")); }
+    setBusy(false);
+  };
+  const doFlagAmrap=async()=>{
+    if(!window.confirm("Пометить ближайшую тренировку как AMRAP-тест (последний подход — в отказ)?"))return;
+    setBusy(true);
+    try{ await api.flagAmrapSession(data.id); load(); toast("Следующая тренировка — AMRAP ✓"); }
+    catch(e){ window.alert("Не удалось: "+(e.message||"")); }
+    setBusy(false);
+  };
+  const doResetStart=async()=>{
+    if(!resetWeight || !resetReps) return;
+    setBusy(true);
+    try{
+      await api.resetProgressionStart(data.id, {start_weight:Number(resetWeight), start_reps:Number(resetReps), beginner_mode:resetBeginner});
+      setShowReset(false); setResetWeight(""); setResetReps("");
+      onChanged(); load(); toast("Стартовая точка сброшена ✓");
+    }catch(e){ window.alert("Не удалось сбросить старт: "+(e.message||"")); }
+    setBusy(false);
+  };
+
+  return (
+    <div>
+      <div className="det-hd">
+        <button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button>
+        <span className="det-title">{data.exercise_name}</span>
+      </div>
+
+      <div className="card-sub" style={{marginBottom:4}}>
+        {data.mode==="manual" ? "Произвольная прогрессия" : (
+          <>{EXERCISE_TYPE_LABELS[data.exercise_type]} · {GOAL_LABELS[data.goal]} · диапазон {data.rep_range_low}–{data.rep_range_high}{repUnit} · шаг {data.increment} кг{data.unilateral?` · унилатерально (${data.unilateral_mode==="equalize"?"выравнивание":"независимо"})`:""}{data.beginner_mode?" · режим новичка":""}</>
+        )}
+      </div>
+      <div className="card-sub" style={{marginBottom:14}}>
+        Статус: {data.status==="active"?"активна":"завершена"}
+        {" · "}{data.sessions.filter(s=>s.status==="done").length}/{data.sessions.length} тренировок
+      </div>
+
+      <ProgWeightGraph sessions={data.sessions}/>
+
+      <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+        {data.mode==="calculated" && data.status==="active" && <button className="mini-btn" onClick={()=>setShowEdit(true)}>Редактировать</button>}
+        {anyDone && <button className="mini-btn ghost" disabled={busy} onClick={doUndo}>Отменить последний лог</button>}
+        {data.status==="completed" && data.mode==="calculated" && <button className="mini-btn" disabled={busy} onClick={doNewCycle}>Начать новый цикл</button>}
+        {data.mode==="calculated" && data.status==="active" && <button className="mini-btn ghost" disabled={busy} onClick={()=>setShowReset(v=>!v)}>Сбросить старт</button>}
+        {data.mode==="calculated" && data.status==="active" && !data.unilateral && <button className="mini-btn ghost" disabled={busy} onClick={doFlagAmrap}>Запросить AMRAP</button>}
+        {data.mode==="calculated" && data.status==="active" && <button className="mini-btn ghost" disabled={busy} onClick={doComplete}>Завершить</button>}
+        <button className="mini-btn ghost" disabled={busy} onClick={doDelete}>Удалить</button>
+      </div>
+
+      {showReset && (
+        <div className="card-sub" style={{background:"#241A16",border:"1px solid #4A322A",borderRadius:10,padding:10,marginBottom:18}}>
+          <div style={{marginBottom:8}}>Новая стартовая точка — если переоценили силы или возвращаетесь после перерыва.</div>
+          <div className="m-grid">
+            <div><div className="lbl">Вес, кг</div><input className="inp" type="text" inputMode="decimal" value={resetWeight} onChange={e=>setResetWeight(normalizeDecimal(e.target.value))}/></div>
+            <div><div className="lbl">Повторы</div><input className="inp" type="number" inputMode="numeric" value={resetReps} onChange={e=>setResetReps(e.target.value)}/></div>
+          </div>
+          <button className={`mini-btn${resetBeginner?"":" ghost"}`} style={{marginTop:8}} onClick={()=>setResetBeginner(v=>!v)}>
+            {resetBeginner?"✓ ":""}Включить режим новичка (ускоренный набор повторов до первой неудачи)
+          </button>
+          <div style={{marginTop:10}}>
+            <button className="mini-btn" disabled={busy} onClick={doResetStart}>Сбросить</button>
+          </div>
+        </div>
+      )}
+
+      <div className="sec-lbl" style={{marginTop:0}}>План по сессиям</div>
+      {data.sessions.map(s=>(
+        <div key={s.id}>
+          <div className={`sess-row ${s.status}`}>
+            <span className="sess-idx">{s.session_index}</span>
+            <div className="sess-body">
+              {s.role && <span className={`role-tag role-${s.role}`} style={{marginBottom:5,display:"inline-block"}}>{ROLE_LABELS[s.role]}</span>}
+              {s.is_amrap && <span className="role-tag" style={{marginBottom:5,marginLeft:6,display:"inline-block",color:"#FF9800",borderColor:"#5A4020"}}>AMRAP</span>}
+              {s.planned_detail ? (
+                <div className="sess-plan">План: {s.planned_detail.map(d=>d.bilateral?`Л ${d.weightL}×${d.repsL} · П ${d.weightR}×${d.repsR}`:`${d.weight} кг × ${d.reps}${repUnit}`).join("; ")}</div>
+              ) : (
+                <div className="sess-plan">План: {s.planned_weight} кг × {s.planned_reps}{repUnit} × {s.planned_sets} подх.</div>
+              )}
+              {s.status==="done" && (
+                s.actual_detail ? (
+                  <div className="sess-fact">Факт: {s.actual_detail.map(d=>d.bilateral?`Л ${d.weightL}×${d.repsL} · П ${d.weightR}×${d.repsR}`:`${d.weight} кг × ${d.reps}${repUnit}`).join("; ")}</div>
+                ) : (
+                  <div className="sess-fact">Факт: {s.actual_weight} кг × {s.actual_reps}{repUnit} × {s.actual_sets} подх.</div>
+                )
+              )}
+              {s.status==="skipped" && <div className="sess-fact" style={{color:"#888"}}>Пропущена</div>}
+            </div>
+            {s.status==="pending" && s.id===nextPending?.id && (
+              <div className="sess-actions">
+                <button className="mini-btn" onClick={()=>startLog(s)}>Записать</button>
+                <button className="mini-btn ghost" onClick={()=>doSkip(s)}>Пропустить</button>
+              </div>
+            )}
+          </div>
+          {logging===s.id && (
+            <div className="log-form">
+              {s.is_amrap && (
+                <div className="card-sub" style={{color:"#FF9800",marginBottom:10}}>
+                  Это AMRAP-тест — последний подход выполните в отказ и впишите реальное число повторов,
+                  а не плановое. По нему пересчитается рабочий вес.
+                </div>
+              )}
+              {logDetail ? (
+                <>
+                  {logDetail.map((d,di)=>(
+                    <div key={di} className="set-row">
+                      <span className="sess-idx" style={{paddingTop:8}}>{di+1}</span>
+                      {d.bilateral ? (
+                        <>
+                          <span style={{fontSize:11,color:"#888",width:14}}>Л</span>
+                          <input className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={d.weightL} onChange={e=>upLogDetail(di,"weightL",normalizeDecimal(e.target.value))}/>
+                          <span className="set-sep">×</span>
+                          <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={d.repsL} onChange={e=>upLogDetail(di,"repsL",e.target.value)}/>
+                          <span style={{fontSize:11,color:"#888",width:14,marginLeft:6}}>П</span>
+                          <input className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={d.weightR} onChange={e=>upLogDetail(di,"weightR",normalizeDecimal(e.target.value))}/>
+                          <span className="set-sep">×</span>
+                          <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={d.repsR} onChange={e=>upLogDetail(di,"repsR",e.target.value)}/>
+                        </>
+                      ) : (
+                        <>
+                          <input className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={d.weight} onChange={e=>upLogDetail(di,"weight",normalizeDecimal(e.target.value))}/>
+                          <span className="set-sep">×</span>
+                          <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={d.reps} onChange={e=>upLogDetail(di,"reps",e.target.value)}/>
+                        </>
+                      )}
+                      {logDetail.length>1&&<button className="del-btn" onClick={()=>remLogDetailRow(di)}><IconTrash/></button>}
+                    </div>
+                  ))}
+                  <button className="add-set" onClick={addLogDetailRow}><IconPlus/>Подход</button>
+                </>
+              ) : (
+                <div className="m-grid">
+                  <div className="field">
+                    <div className="lbl">Вес, кг</div>
+                    <input className="inp" type="text" inputMode="decimal" value={logForm.weight} onChange={e=>setLogForm(f=>({...f,weight:normalizeDecimal(e.target.value)}))}/>
+                  </div>
+                  <div className="field">
+                    <div className="lbl">Повторы</div>
+                    <input className="inp" type="number" inputMode="numeric" value={logForm.reps} onChange={e=>setLogForm(f=>({...f,reps:e.target.value}))}/>
+                  </div>
+                  <div className="field">
+                    <div className="lbl">Подходы</div>
+                    <input className="inp" type="number" inputMode="numeric" value={logForm.sets} onChange={e=>setLogForm(f=>({...f,sets:e.target.value}))}/>
+                  </div>
+                </div>
+              )}
+              <button className="btn" disabled={busy} onClick={submitLog}>{busy?"Сохранение...":"Сохранить"}</button>
+              <button className="btn ghost" onClick={()=>{setLogging(null);setLogDetail(null);}}>Отмена</button>
+            </div>
+          )}
+        </div>
+      ))}
+      {showEdit && (
+        <EditProgressionSheet
+          data={data}
+          onSaved={()=>{setShowEdit(false);load();onChanged();toast("Сохранено ✓");}}
+          onClose={()=>setShowEdit(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── ProgressionTab ──────────────────────────────────────────────────────
+function ProgressionTab({ isPremium, premiumChecked, progressions, reloadProgressions, workouts, toast, progressionDraft, setProgressionDraft, onBack }) {
+  const [detailId,setDetailId]=useState(null);
+  const [showChoice,setShowChoice]=useState(false);
+  const [addMode,setAddMode]=useState(null);
+  const [restoredDraft,setRestoredDraft]=useState(null);
+
+  // ProgressionDetail (рендерится ниже, когда detailId установлен) сама
+  // управляет своим свайпом-назад — здесь свайп работает для остальных
+  // веток этого компонента (premium-заглушки, главный список).
+  useSwipeBack(onBack, detailId==null);
+  useScrollTopOnChange(detailId);
+
+  // Восстановление черновика (клик по плавающей плашке или по карточке в
+  // списке) — открываем нужную шторку (произвольная/расчётная по draft.mode)
+  // и забираем данные локально, глобальный progressionDraft очищается.
+  // Хук должен стоять до любых условных return — иначе React потеряет счёт хуков,
+  // когда premiumChecked/isPremium меняются между рендерами.
+  useEffect(()=>{
+    if(progressionDraft?.restoring){
+      setRestoredDraft(progressionDraft);
+      setAddMode(progressionDraft.mode);
+      setShowChoice(false);
+      setProgressionDraft(null);
+    }
+  },[progressionDraft]);
+
+  if(!premiumChecked) return (
+    <div className="page">
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button><span className="det-title">Прогрессия</span></div>
+      <div className="loading"><div className="spinner"/><div>Загрузка...</div></div>
+    </div>
+  );
+
+  if(!isPremium) return (
+    <div className="page">
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button><span className="det-title">Прогрессия</span></div>
+      <div className="empty" style={{paddingTop:36}}>
+        <div className="empty-icon">🔒</div>
+        Раздел «Прогрессия» доступен премиум-пользователям по подписке.
+        <div className="prog-lock-detail">
+          Здесь можно вести автоматическую прогрессию весов и повторов по упражнениям —
+          с расчётом целей на каждую тренировку и подсказками прямо в дневнике.
+        </div>
+      </div>
+    </div>
+  );
+
+  const draft = restoredDraft;
+
+  const onSaved=()=>{ setShowChoice(false); setAddMode(null); setRestoredDraft(null); reloadProgressions(); };
+  const onSheetClose=()=>{ setShowChoice(false); setAddMode(null); setRestoredDraft(null); };
+  const onSheetMinimize=(draftData)=>{
+    setShowChoice(false); setAddMode(null); setRestoredDraft(null);
+    setProgressionDraft(draftData);
+  };
+
+  // Пока есть незавершённый черновик создания — не даём открыть новый мастер
+  // поверх, чтобы старый не потерять (как и с тренировкой/замером).
+  const guardOpen=(openFn)=>{
+    if(progressionDraft && !progressionDraft.restoring){
+      window.alert("Сначала заверши текущую прогрессию — она ещё не сохранена. Нажми на неё в списке, чтобы продолжить.");
+      return;
+    }
+    openFn();
+  };
+
+  // Черновик, свёрнутый именно здесь — показываем карточкой прямо в списке
+  // (аналогично тренировкам), а не только плавающим блоком снизу.
+  const listDraft = progressionDraft && !progressionDraft.restoring ? progressionDraft : null;
+
+  return (
+    <div className="page">
+      {detailId!=null ? (
+        <ProgressionDetail id={detailId} onBack={()=>setDetailId(null)} onChanged={reloadProgressions} toast={toast}/>
+      ) : (
+        <>
+          <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button><span className="det-title">Прогрессия</span></div>
+          <button className="btn" onClick={()=>guardOpen(()=>setShowChoice(true))}><IconPlus/>Добавить прогрессию</button>
+          {listDraft && (
+            <div className="card draft-card" onClick={()=>setProgressionDraft(p=>({...p,restoring:true}))}>
+              <div style={{minWidth:0}}>
+                <div className="card-title">{listDraft.name || "Новая прогрессия"}</div>
+                <div className="card-sub">Не сохранена · нажми чтобы продолжить</div>
+              </div>
+              <IconChevron/>
+            </div>
+          )}
+          {progressions.length===0 && !listDraft
+            ? <div className="empty"><div className="empty-icon">📈</div>Прогрессий пока нет.<br/>Добавь первую!</div>
+            : progressions.map(p=>(
+              <div key={p.id} className="card" onClick={()=>setDetailId(p.id)}>
+                <div style={{minWidth:0}}>
+                  <div className="card-title">{p.exercise_name}</div>
+                  <div className="card-sub">
+                    {p.mode==="manual"?"Произвольная":(EXERCISE_TYPE_LABELS[p.exercise_type]||"Расчётная")}
+                    {" · "}{p.sessions_done}/{p.sessions_total}
+                    {p.status==="completed"?" · завершена":""}
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+                  {p.next_session && (
+                    <span className="tag">
+                      {p.next_session.planned_detail
+                        ? `${p.next_session.planned_detail.length} подх.`
+                        : `${p.next_session.planned_weight}×${p.next_session.planned_reps}`}
+                    </span>
+                  )}
+                  <IconChevron/>
+                </div>
+              </div>
+            ))}
+        </>
+      )}
+      {showChoice && <ProgressionChoiceSheet onPick={(m)=>{setShowChoice(false);setAddMode(m);}} onClose={()=>setShowChoice(false)}/>}
+      {addMode==="manual" && <ManualProgressionSheet workouts={workouts} draft={draft} onSaved={onSaved} onClose={onSheetClose} onMinimize={onSheetMinimize}/>}
+      {addMode==="calculated" && <CalculatedProgressionWizard workouts={workouts} draft={draft} onSaved={onSaved} onClose={onSheetClose} onMinimize={onSheetMinimize}/>}
+    </div>
+  );
+}
+
+// ── EditProgressionSheet: правка параметров активной расчётной прогрессии ─
+function EditProgressionSheet({ data, onSaved, onClose }) {
+  const [goal,setGoal]=useState(data.goal);
+  const [repLow,setRepLow]=useState(String(data.rep_range_low));
+  const [repHigh,setRepHigh]=useState(String(data.rep_range_high));
+  const [frequency,setFrequency]=useState(data.frequency);
+  const [setsCount,setSetsCount]=useState(String(data.sets_count));
+  const [increment,setIncrement]=useState(String(data.increment));
+  const [deload,setDeload]=useState(!!data.deload_enabled);
+  const [saving,setSaving]=useState(false);
+  const isVarying = VARYING_EX_TYPES.includes(data.exercise_type);
+
+  const canSave = repLow!==""&&repHigh!==""&&Number(repHigh)>Number(repLow)
+    && setsCount!==""&&Number(setsCount)>=1 && increment!==""&&Number(increment)>0;
+
+  const save=async()=>{
+    setSaving(true);
+    try{
+      await api.editProgression(data.id, {
+        goal, rep_range_low:Number(repLow), rep_range_high:Number(repHigh),
+        frequency, sets_count:Number(setsCount), increment:Number(increment), deload_enabled:deload,
+      });
+      onSaved();
+    }catch(e){ window.alert("Не удалось сохранить: "+(e.message||"")); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="sheet">
+        <div className="handle"/>
+        <div className="sheet-top-actions"><button className="sheet-icon-btn" onClick={onClose}><IconClose/></button></div>
+        <div className="sheet-title-row"><span style={{fontSize:18,fontWeight:700}}>Редактировать прогрессию</span></div>
+        <div className="card-sub" style={{marginBottom:16}}>{data.exercise_name} · {EXERCISE_TYPE_LABELS[data.exercise_type]}</div>
+
+        <div className="field">
+          <div className="lbl">Цель</div>
+          <ChoiceGrid value={goal} onChange={setGoal} options={[
+            {value:"strength",label:"Сила"},
+            {value:"hypertrophy",label:"Гипертрофия"},
+            {value:"strength_hypertrophy",label:"Сила + гипертрофия"},
+          ]}/>
+        </div>
+        <div className="m-grid field">
+          <div>
+            <div className="lbl">Повторов от</div>
+            <input className="inp" type="number" inputMode="numeric" value={repLow} onChange={e=>setRepLow(e.target.value)}/>
+          </div>
+          <div>
+            <div className="lbl">Повторов до</div>
+            <input className="inp" type="number" inputMode="numeric" value={repHigh} onChange={e=>setRepHigh(e.target.value)}/>
+          </div>
+        </div>
+        {isVarying && (
+          <div className="field">
+            <div className="lbl">Частота в неделю</div>
+            <ChoiceGrid value={frequency} onChange={setFrequency} options={[1,2,3,4].map(n=>({value:n,label:`${n} раз${n===1?"":"а"}`}))}/>
+          </div>
+        )}
+        <div className="field">
+          <div className="lbl">Рабочих подходов</div>
+          <input className="inp" type="number" inputMode="numeric" value={setsCount} onChange={e=>setSetsCount(e.target.value)}/>
+        </div>
+        <div className="field">
+          <div className="lbl">Шаг прибавки веса, кг</div>
+          <ChoiceGrid value={Number(increment)} onChange={v=>setIncrement(String(v))} options={INCREMENT_PRESETS.map(v=>({value:v,label:String(v)}))}/>
+          <input className="inp" type="text" inputMode="decimal" placeholder="или своё значение" value={increment} onChange={e=>setIncrement(normalizeDecimal(e.target.value))}/>
+        </div>
+        <div className="toggle-row">
+          <div>
+            <div className="toggle-label">Делоад-недели</div>
+            <div className="toggle-sub">Автоматически снижать нагрузку по расписанию, не только после провала</div>
+          </div>
+          <button className={`switch${deload?" on":""}`} onClick={()=>setDeload(v=>!v)}><span className="switch-knob"/></button>
+        </div>
+        <div className="card-sub" style={{margin:"14px 0"}}>Изменения затронут только будущие, ещё не выполненные тренировки этого цикла — прошлые записи не тронутся.</div>
+        <button className="btn" disabled={!canSave||saving} onClick={save}>{saving?"Сохранение...":"Сохранить"}</button>
+        <button className="btn ghost" onClick={onClose}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+// ── MeasurementSheet ──────────────────────────────────────────────────────
+function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMinimize}) {
+  const isEdit=!!initial;
+  const defName=draft?.name ?? (isEdit?initial.name:`Замер ${(measurements?.length||0) + 1}`);
+  const [name,setName]=useState(defName);
+  const [date,setDate]=useState(draft?.date ?? (isEdit?initial.date:today()));
+  const [vals,setVals]=useState(()=>{
+    if(draft?.vals) return draft.vals;
+    if(!isEdit)return{};
+    const v={};
+    MEASUREMENT_FIELDS.forEach(f=>{if(initial[f.key]!=null&&initial[f.key]!=="")v[f.key]=initial[f.key];});
+    // Комментарий не входит в MEASUREMENT_FIELDS (это отдельное текстовое поле),
+    // поэтому его нужно перенести из initial явно — иначе при редактировании
+    // существующего замера он всегда стартует пустым и стирается при сохранении,
+    // даже если пользователь его не трогал.
+    if(initial.comment!=null&&initial.comment!=="")v.comment=initial.comment;
+    return v;
+  });
+  const [saving,setSaving]=useState(false);
+  const sheetRef=useRef(null);
+  useKeyboardScroll(sheetRef);
+  useLockBodyScroll();
+  const set=(k,v)=>setVals(p=>({...p,[k]:v}));
+
+  // Ищем предыдущий замер строго раньше текущей даты
+  const prevMeasurement = (() => {
+    const src = isEdit ? measurements.filter(m=>m.id!==initial.id) : measurements;
+    const earlier = src.filter(m=>m.date < date);
+    if(!earlier.length) return null;
+    return earlier.reduce((best,m)=>m.date>best.date?m:best);
+  })();
+
+  const hasRealData = () => Object.values(vals).some(v=>v!==""&&v!=null);
+  const buildDraft = () => ({ name, date, vals });
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      saveDraftToStorage("measurement", { editId: isEdit?initial.id:null, name, date, vals });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [name, date, vals]);
+
+  const handleSave=async()=>{
+    setSaving(true);
+    await onSave({id:isEdit?initial.id:-1,name:name.trim()||defName,date,...vals});
+    clearDraftFromStorage("measurement");
+    setSaving(false);
+  };
+
+  // Свернуть: всегда сохраняем черновик, даже пустую заготовку.
+  const handleMinimize=()=>{
+    const d = buildDraft();
+    saveDraftToStorage("measurement", { editId: isEdit?initial.id:null, ...d });
+    onMinimize(d);
+  };
+  const handleCloseClick=()=>{
+    if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+    clearDraftFromStorage("measurement");
+    onClose();
+  };
+
+  // Показываем дельту: +1.5 кг или -2 см
+  const delta=(key,cur)=>{
+    if(!prevMeasurement||prevMeasurement[key]==null||prevMeasurement[key]==="")return null;
+    if(cur==null||cur==="")return null;
+    const d=(parseFloat(cur)-parseFloat(prevMeasurement[key])).toFixed(1);
+    if(d==0)return null;
+    return d>0?`+${d}`:`${d}`;
+  };
+
+  return(
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&handleMinimize()}>
+      <div className="sheet" ref={sheetRef}>
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-minimize-btn" onClick={handleMinimize} title="Свернуть"><IconMinimize/>Свернуть</button>
+          <button className="sheet-icon-btn" onClick={handleCloseClick} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName}/>
+        </div>
+        <div className="field">
+          <div className="lbl">Дата</div>
+          <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)}/>
+        </div>
+        {prevMeasurement&&(
+          <div className="prev" style={{marginBottom:12,fontStyle:"normal"}}>
+            Прошлый замер: <span style={{color:"#666"}}>{formatDate(prevMeasurement.date)}</span>
+          </div>
+        )}
+        <div className="sec-lbl" style={{marginTop:16}}>Вес тела</div>
+        <div className="field" style={{marginTop:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <input className="inp" style={{flex:1}} type="text" inputMode="decimal" placeholder="кг, например 82.5" value={vals["weight"]||""} onChange={e=>set("weight",normalizeDecimal(e.target.value))}/>
+            {prevMeasurement&&prevMeasurement["weight"]&&(
+              <div className="m-prev-hint">
+                <span className="m-prev-val">{prevMeasurement["weight"]} кг</span>
+                {delta("weight",vals["weight"])&&<span className={`m-prev-delta ${parseFloat(delta("weight",vals["weight"]))>0?"pos":"neg"}`}>{delta("weight",vals["weight"])}</span>}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="sec-lbl" style={{marginTop:16}}>Замеры (см)</div>
+        <div className="m-grid" style={{marginTop:8}}>
+          {MEASUREMENT_FIELDS.slice(1).map(f=>(
+            <div key={f.key} className="field">
+              <div className="lbl">{f.label}</div>
+              <input className="inp" type="text" inputMode="decimal" placeholder="см" value={vals[f.key]||""} onChange={e=>set(f.key,normalizeDecimal(e.target.value))}/>
+              {prevMeasurement&&prevMeasurement[f.key]&&(
+                <div className="m-prev-hint" style={{marginTop:4}}>
+                  <span className="m-prev-val">{prevMeasurement[f.key]} см</span>
+                  {delta(f.key,vals[f.key])&&<span className={`m-prev-delta ${parseFloat(delta(f.key,vals[f.key]))>0?"pos":"neg"}`}>{delta(f.key,vals[f.key])}</span>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="sec-lbl" style={{marginTop:16}}>Комментарий</div>
+        <textarea
+          className="ex-note-inp"
+          style={{marginTop:8,marginBottom:0,minHeight:64}}
+          placeholder="Самочувствие, обстоятельства замера и т.п...."
+          value={vals.comment||""}
+          onChange={e=>set("comment",e.target.value)}
+        />
+        <div style={{height:20}}/>
+        <button className="btn" onClick={handleSave} disabled={saving}>{saving?"Сохранение...":(isEdit?"Сохранить изменения":"Сохранить замер")}</button>
+        <button className="btn ghost" onClick={handleCloseClick}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+// ── MeasurementsTab ───────────────────────────────────────────────────────
+function MeasurementsTab({measurements,setMeasurements,toast,measurementDraft,setMeasurementDraft}) {
+  const [showNew,setShowNew]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [detailId,setDetailId]=useState(null);
+  const [renamingId,setRenamingId]=useState(null);
+  const [renameVal,setRenameVal]=useState("");
+  const [restoredDraft,setRestoredDraft]=useState(null);
+
+  const detail=detailId!=null?measurements.find(m=>m.id===detailId):null;
+  const editTarget=editId!=null?measurements.find(m=>m.id===editId):null;
+  useSwipeBack(()=>setDetailId(null), !!detail);
+  useScrollTopOnChange(detailId);
+
+  useEffect(()=>{
+    if(measurementDraft?.restoring){
+      setRestoredDraft(measurementDraft);
+      if(measurementDraft.editId!=null){ setEditId(measurementDraft.editId); setDetailId(null); }
+      else { setShowNew(true); }
+      setMeasurementDraft(null);
+    }
+  },[measurementDraft]);
+
+  const draft = restoredDraft;
+
+  const handleCreate=async(m)=>{
+    const res=await api.saveMeasurement(m);
+    const saved={...m,id:res.id};
+    setMeasurements(p=>[...p,saved]);
+    setShowNew(false);
+    setRestoredDraft(null);
+    toast("Замер сохранён ✓");
+  };
+  const handleUpdate=async(m)=>{
+    await api.saveMeasurement(m);
+    setMeasurements(p=>p.map(x=>x.id===m.id?m:x));
+    setEditId(null); setDetailId(m.id);
+    setRestoredDraft(null);
+    toast("Изменения сохранены ✓");
+  };
+  const handleDelete=async(id)=>{
+    if(!window.confirm("Удалить замер?"))return;
+    await api.deleteMeasurement(id);
+    setMeasurements(p=>p.filter(m=>m.id!==id));
+    setDetailId(null);
+    toast("Удалено");
+  };
+  const startRename=(m)=>{setRenamingId(m.id);setRenameVal(m.name);};
+  const commitRename=async(id)=>{
+    if(!renameVal.trim()){setRenamingId(null);return;}
+    const m=measurements.find(x=>x.id===id);
+    const updated={...m,name:renameVal.trim()};
+    await api.saveMeasurement(updated);
+    setMeasurements(p=>p.map(x=>x.id===id?updated:x));
+    setRenamingId(null);
+  };
+
+  const handleMinimize=(draftData)=>{
+    setShowNew(false);
+    setEditId(null);
+    setRestoredDraft(null);
+    setMeasurementDraft({editId: editTarget?.id ?? null, ...draftData});
+  };
+  const handleSheetClose=()=>{
+    setShowNew(false);
+    setEditId(null);
+    setRestoredDraft(null);
+  };
+
+  // Пока есть незавершённый черновик (замер) — запрещаем открывать новый
+  // или другой замер на редактирование, чтобы старый не потерять.
+  const guardOpen=(openFn)=>{
+    if(measurementDraft && !measurementDraft.restoring){
+      window.alert("Сначала заверши текущий замер — он ещё не сохранён. Нажми на него в списке, чтобы продолжить.");
+      return;
+    }
+    openFn();
+  };
+
+  // Черновик, свёрнутый именно здесь (замер) — показываем прямо в списке на
+  // правильном месте, вместо плавающего блока внизу.
+  const listDraft = measurementDraft && !measurementDraft.restoring ? measurementDraft : null;
+
+  let listItems = [...measurements].sort((a,b)=>b.date.localeCompare(a.date)).map(m=>({isDraft:false,m}));
+  if(listDraft){
+    const foundIdx = listDraft.editId!=null ? listItems.findIndex(item=>item.m.id===listDraft.editId) : -1;
+    if(foundIdx!==-1){
+      listItems[foundIdx] = {isDraft:true,draft:listDraft};
+    }else{
+      listItems.push({isDraft:true,draft:listDraft});
+      listItems.sort((a,b)=>{
+        const da=a.isDraft?a.draft.date:a.m.date;
+        const db=b.isDraft?b.draft.date:b.m.date;
+        return db.localeCompare(da);
+      });
+    }
+  }
+
+  if(detail){
+    const filled=MEASUREMENT_FIELDS.filter(f=>detail[f.key]!==""&&detail[f.key]!=null);
+
+    // Ищем предыдущий замер строго раньше текущего по дате
+    const prevM = (() => {
+      const earlier = measurements.filter(m=>m.id!==detail.id && m.date < detail.date);
+      if(!earlier.length) return null;
+      return earlier.reduce((best,m)=>m.date>best.date?m:best);
+    })();
+    const delta=(key)=>{
+      if(!prevM||prevM[key]==null||prevM[key]==="")return null;
+      if(detail[key]==null||detail[key]==="")return null;
+      const d=(parseFloat(detail[key])-parseFloat(prevM[key])).toFixed(1);
+      if(d==0)return null;
+      return d>0?`+${d}`:`${d}`;
+    };
+
+    return(
+      <div className="page">
+        <div className="det-hd">
+          <button className="back-btn" onClick={()=>setDetailId(null)}><IconChevron dir="left"/>Назад</button>
+          {renamingId===detail.id
+            ?<input className="rename-inp" value={renameVal} onChange={e=>setRenameVal(e.target.value)} onBlur={()=>commitRename(detail.id)} onKeyDown={e=>e.key==="Enter"&&commitRename(detail.id)} autoFocus/>
+            :<span className="det-title">{detail.name}</span>}
+          <button className="del-btn" onClick={()=>startRename(detail)}><IconEdit/></button>
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:20}}>
+          <span style={{color:"#888",fontSize:13,flex:1,alignSelf:"center"}}>{formatDate(detail.date)}</span>
+          <button className="edit-badge" onClick={()=>guardOpen(()=>{setDetailId(null);setEditId(detail.id);})}>✎ Редактировать</button>
+        </div>
+        {prevM&&(
+          <div className="prev" style={{marginBottom:16,fontStyle:"normal"}}>
+            Сравнение с замером от <span style={{color:"#666"}}>{formatDate(prevM.date)}</span>
+          </div>
+        )}
+        <div className="sec-lbl">Показатели</div>
+        {filled.length===0
+          ?<p style={{color:"#555",fontSize:13}}>Ничего не заполнено</p>
+          :filled.map(f=>{
+            const d=delta(f.key);
+            const hasPrev=prevM&&prevM[f.key]!=null&&prevM[f.key]!=="";
+            return(
+              <div key={f.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #1A1A1A"}}>
+                <span style={{color:"#888",fontSize:13}}>{f.label}</span>
+                <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+                  {hasPrev&&(
+                    <span style={{fontSize:11,color:"#555",fontStyle:"italic"}}>{prevM[f.key]} {f.key==="weight"?"кг":"см"}</span>
+                  )}
+                  {hasPrev&&<span style={{color:"#444",fontSize:11}}>→</span>}
+                  <span style={{fontWeight:600,fontSize:15}}>{detail[f.key]} <span style={{color:"#555",fontWeight:400,fontSize:12}}>{f.key==="weight"?"кг":"см"}</span></span>
+                  {d&&<span className={`m-prev-delta ${parseFloat(d)>0?"pos":"neg"}`} style={{fontSize:12}}>{d}</span>}
+                </div>
+              </div>
+            );
+          })}
+        {detail.comment&&(
+          <>
+            <div className="sec-lbl" style={{marginTop:16}}>Комментарий</div>
+            <p style={{color:"#AAA",fontSize:13,lineHeight:1.5,whiteSpace:"pre-wrap"}}>{detail.comment}</p>
+          </>
+        )}
+        <hr className="divider"/>
+        <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить замер</button>
+        {editTarget&&<MeasurementSheet measurements={measurements} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+      </div>
+    );
+  }
+  return(
+    <div className="page">
+      <button className="btn" onClick={()=>guardOpen(()=>setShowNew(true))}><IconPlus/>Измерить тело</button>
+      {measurements.length===0 && !listDraft
+        ?<div className="empty"><div className="empty-icon">📏</div>Замеров пока нет.<br/>Добавь первый!</div>
+        :listItems.map((item,i,arr)=>{
+          if(item.isDraft) return(
+            <div key="draft-card" className="card draft-card" onClick={()=>setMeasurementDraft(prev=>({...prev,restoring:true}))}>
+              <div style={{minWidth:0}}>
+                <div className="card-title">{item.draft.name||"Замер"}</div>
+                <div className="card-sub">{formatDate(item.draft.date)} · не сохранено</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+                <span className="draft-pill">Черновик</span><IconChevron/>
+              </div>
+            </div>
+          );
+          const m=item.m;
+          const fc=MEASUREMENT_FIELDS.filter(f=>m[f.key]!==""&&m[f.key]!=null).length;
+          return(
+            <div key={m.id} className="card" onClick={()=>setDetailId(m.id)}>
+              <div style={{minWidth:0}}>
+                <div className="card-title">{m.name}</div>
+                <div className="card-sub">{formatDate(m.date)} · {fc} показателей</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+                <span className="tag">#{arr.length-i}</span><IconChevron/>
+              </div>
+            </div>
+          );
+        })}
+      {showNew&&<MeasurementSheet measurements={measurements} initial={null} draft={draft} onSave={handleCreate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+      {editTarget&&<MeasurementSheet measurements={measurements} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+    </div>
+  );
+}
+
+// ── ToggleRow ─────────────────────────────────────────────────────────────
+function ToggleRow({label, sub, checked, onChange}) {
+  return (
+    <div className="toggle-row">
+      <div style={{flex:1,minWidth:0}}>
+        <div className="toggle-label">{label}</div>
+        {sub&&<div className="toggle-sub">{sub}</div>}
+      </div>
+      <button className={`switch${checked?" on":""}`} onClick={()=>onChange(!checked)}>
+        <span className="switch-knob"/>
+      </button>
+    </div>
+  );
+}
+
+// ── ProfileCreateSheet ────────────────────────────────────────────────────
+function ProfileCreateSheet({onSave, onClose}) {
+  const [name,setName]=useState("");
+  const [saving,setSaving]=useState(false);
+  const sheetRef=useRef(null);
+  useKeyboardScroll(sheetRef);
+  useLockBodyScroll();
+  const handleSave=async()=>{
+    setSaving(true);
+    await onSave(name.trim()||"Новый профиль");
+    setSaving(false);
+  };
+  return(
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="sheet" ref={sheetRef}>
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-icon-btn" onClick={onClose} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder="Название профиля" autoFocus/>
+        </div>
+        <p style={{color:"#666",fontSize:13,marginBottom:20,lineHeight:1.5}}>
+          Новый профиль — это отдельный чистый дневник: тренировки, упражнения и замеры не будут пересекаться с другими профилями. Удобно, если ведёшь дневник за кого-то ещё.
+        </p>
+        <button className="btn" onClick={handleSave} disabled={saving}>{saving?"Создание...":"Создать профиль"}</button>
+        <button className="btn ghost" onClick={onClose}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+// ── FriendProfileView (только просмотр) ──────────────────────────────────
+function FriendProfileView({friendId, onBack, onRemove}) {
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [subTab,setSubTab]=useState(0);
+  const [selectedEx,setSelectedEx]=useState(null);
+
+  // Два уровня внутри этого экрана: список профиля друга -> история упражнения
+  // (selectedEx). Свайп-назад должен закрывать САМЫЙ глубокий открытый уровень.
+  useSwipeBack(selectedEx ? ()=>setSelectedEx(null) : onBack);
+  useScrollTopOnChange(selectedEx);
+
+  useEffect(()=>{
+    api.getFriendProfile(friendId).then(d=>{setData(d);setLoading(false);}).catch(()=>setLoading(false));
+  },[friendId]);
+
+  if(loading) return (
+    <div className="page">
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button></div>
+      <div className="loading"><div className="spinner"/><div>Загрузка...</div></div>
+    </div>
+  );
+  if(!data) return (
+    <div className="page">
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button></div>
+      <div className="empty">Не удалось загрузить профиль</div>
+    </div>
+  );
+
+  const workouts = data.workouts || [];
+  const friendMeasurements = data.measurements || [];
+  const hasNothing = !data.show_workouts && !data.show_exercises && !data.show_measurements;
+  const allNames = data.show_exercises
+    ? [...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))].sort((a,b)=>a.localeCompare(b,"ru"))
+    : [];
+
+  if(selectedEx){
+    const lc=selectedEx.toLowerCase();
+    const rows=[];
+    workouts.forEach(w=>w.exercises.forEach(e=>{if(e.name.trim().toLowerCase()===lc)rows.push({workout:w,exercise:e});}));
+    rows.sort((a,b)=>b.workout.date.localeCompare(a.workout.date));
+    return(
+      <div className="page">
+        <div className="det-hd">
+          <button className="back-btn" onClick={()=>setSelectedEx(null)}><IconChevron dir="left"/>Назад</button>
+          <span className="det-title">{selectedEx}</span>
+        </div>
+        <div className="sec-lbl">{rows.length} записей</div>
+        {rows.map(({workout,exercise},i)=>(
+          <div key={i} className="ex-hist-item">
+            <div className="ex-hist-date">{formatDate(workout.date)} · {workout.name}</div>
+            <div className="ex-sets-disp">
+              {exercise.sets.filter(s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps)).map((s,si)=>(
+                <div key={si}>
+                  <span style={{color:"#555"}}>{si+1}.</span>{" "}
+                  {s.bilateral?(
+                    <>
+                      <span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}
+                      {" · "}
+                      <span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}
+                    </>
+                  ):(
+                    <>{s.weight?`${s.weight} кг`:"—"} × {s.reps?`${s.reps} повт`:"—"}</>
+                  )}
+                </div>
+              ))}
+            </div>
+            {exercise.comment&&<div className="ex-hist-comment">{exercise.comment}</div>}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return(
+    <div className="page">
+      <div className="det-hd">
+        <button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button>
+        <span className="det-title">{data.name}</span>
+      </div>
+      {hasNothing
+        ?<div className="empty"><div className="empty-icon">🔒</div>Профиль скрыт<br/>Пользователь не открыл доступ к просмотру</div>
+        :(
+          <>
+            {(data.show_workouts||data.show_exercises)&&(
+              <StatsHero readOnly workouts={workouts} avatarRaw={data.avatar} pinsRaw={data.stats_pins}/>
+            )}
+            <div className="sub-tabs">
+              {data.show_workouts&&<button className={subTab===0?"active":""} onClick={()=>setSubTab(0)}>Тренировки</button>}
+              {data.show_exercises&&<button className={subTab===1?"active":""} onClick={()=>setSubTab(1)}>Упражнения</button>}
+              {data.show_measurements&&<button className={subTab===2?"active":""} onClick={()=>setSubTab(2)}>Замеры</button>}
+            </div>
+            {subTab===0&&data.show_workouts&&(
+              workouts.length===0
+                ?<div className="empty"><div className="empty-icon">🏋️</div>Тренировок пока нет</div>
+                :[...workouts].sort((a,b)=>b.date.localeCompare(a.date)).map(w=>(
+                  <div key={w.id} className="w-ex" style={{marginBottom:10}}>
+                    <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between"}}>
+                      <span>{w.name}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(w.date)}</span>
+                    </div>
+                    <div className="w-sets">
+                      {w.exercises.map((ex,ei)=>(
+                        <div key={ei} style={{marginBottom:12}}>
+                          <div style={{fontSize:13,color:"#AAA",marginBottom:4,fontWeight:600}}>{ex.name||`Упражнение ${ei+1}`}</div>
+                          {ex.sets.map((s,si)=>(
+                            <div key={si} className="w-set-row">
+                              <span className="w-set-n">{si+1}</span>
+                              {s.bilateral?(
+                                <span className="w-set-v w-set-bi">
+                                  <span className="w-set-bi-side"><span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}</span>
+                                  <span className="w-set-bi-sep">|</span>
+                                  <span className="w-set-bi-side"><span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}</span>
+                                </span>
+                              ):(
+                                <span className="w-set-v">{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
+                              )}
+                            </div>
+                          ))}
+                          {ex.comment&&<div className="w-ex-comment" style={{borderTop:"none",paddingLeft:0}}>{ex.comment}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+            )}
+            {subTab===1&&data.show_exercises&&(
+              allNames.length===0
+                ?<div className="empty"><div className="empty-icon">📝</div>Упражнений пока нет</div>
+                :allNames.map(name=>{
+                  const count=workouts.filter(w=>w.exercises.some(e=>e.name.trim().toLowerCase()===name.toLowerCase())).length;
+                  return(
+                    <div key={name} className="card" onClick={()=>setSelectedEx(name)}>
+                      <div style={{minWidth:0}}>
+                        <div className="card-title">{name}</div>
+                        <div className="card-sub">{count} {count===1?"запись":count<5?"записи":"записей"}</div>
+                      </div>
+                      <IconChevron/>
+                    </div>
+                  );
+                })
+            )}
+            {subTab===2&&data.show_measurements&&(
+              friendMeasurements.length===0
+                ?<div className="empty"><div className="empty-icon">📏</div>Замеров пока нет</div>
+                :[...friendMeasurements].sort((a,b)=>b.date.localeCompare(a.date)).map(m=>{
+                  const filled=MEASUREMENT_FIELDS.filter(f=>m[f.key]!==""&&m[f.key]!=null);
+                  return(
+                    <div key={m.id} className="w-ex" style={{marginBottom:10}}>
+                      <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between"}}>
+                        <span>{m.name}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(m.date)}</span>
+                      </div>
+                      {filled.length===0&&!m.comment
+                        ?<p style={{color:"#555",fontSize:12,marginTop:8}}>Ничего не заполнено</p>
+                        :filled.map(f=>(
+                          <div key={f.key} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"1px solid #1A1A1A"}}>
+                            <span style={{color:"#888",fontSize:12}}>{f.label}</span>
+                            <span style={{fontSize:13,fontWeight:600}}>{m[f.key]} <span style={{color:"#555",fontWeight:400,fontSize:11}}>{f.key==="weight"?"кг":"см"}</span></span>
+                          </div>
+                        ))}
+                      {m.comment&&<div className="ex-hist-comment">{m.comment}</div>}
+                    </div>
+                  );
+                })
+            )}
+          </>
+        )}
+      <hr className="divider"/>
+      <button className="btn danger" onClick={onRemove}>Удалить из друзей</button>
+    </div>
+  );
+}
+
+// ── CommunityTab: Новости и обновления + Друзья + лента ─────────────────────
+
+function NewsSection({onOpen, unread}) {
+  return (
+    <div className="comm-block" onClick={onOpen}>
+      <div className="comm-block-icon"><IconBell dot={unread}/></div>
+      <div className="comm-block-text">
+        <div className="comm-block-title">Новости и обновления</div>
+        <div className="comm-block-sub">{unread?"Есть новые посты":"Что изменилось в приложении"}</div>
+      </div>
+      <IconChevron/>
+    </div>
+  );
+}
+
+function NewsView({onBack}) {
+  const [posts,setPosts]=useState(null);
+  useSwipeBack(onBack);
+
+  useEffect(()=>{
+    api.getNews().then(setPosts).catch(()=>setPosts([]));
+  },[]);
+
+  return (
+    <div className="page">
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button><span className="det-title">Новости и обновления</span></div>
+      {posts===null
+        ? <div className="loading"><div className="spinner"/><div>Загрузка...</div></div>
+        : posts.length===0
+          ? <div className="empty"><div className="empty-icon">📰</div>Пока нет новостей</div>
+          : posts.map(p=>(
+            <div key={p.id} className="w-ex" style={{marginBottom:10}}>
+              <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between"}}>
+                <span>{p.title}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(p.created_at.slice(0,10))}</span>
+              </div>
+              <div className="news-body" dangerouslySetInnerHTML={{__html:p.body}}/>
+            </div>
+          ))}
+    </div>
+  );
+}
+
+function FriendsSection({onOpen, pendingCount}) {
+  return (
+    <div className="comm-block" onClick={onOpen}>
+      <div className="comm-block-icon"><IconPeople/></div>
+      <div className="comm-block-text">
+        <div className="comm-block-title">Друзья</div>
+        <div className="comm-block-sub">{pendingCount>0?`${pendingCount} новых заявок`:"Список, приглашения, заявки"}</div>
+      </div>
+      {pendingCount>0&&<span className="comm-badge-num">{pendingCount}</span>}
+      <IconChevron/>
+    </div>
+  );
+}
+
+function FriendsView({friends, setFriends, onBack, toast, onRequestsChanged}) {
+  const [friendQuery,setFriendQuery]=useState("");
+  const [friendResults,setFriendResults]=useState(null);
+  const [searching,setSearching]=useState(false);
+  const [openFriendId,setOpenFriendId]=useState(null);
+  const [inviteBusy,setInviteBusy]=useState(false);
+  // FriendProfileView (рендерится ниже, когда openFriendId установлен) сама
+  // управляет своим свайпом-назад — здесь его выключаем, чтобы не сработали оба сразу.
+  useSwipeBack(onBack, !openFriendId);
+  useScrollTopOnChange(openFriendId);
+  const [requests,setRequests]=useState(null);
+  const [busyReqId,setBusyReqId]=useState(null);
+
+  const loadRequests=()=>{ api.getFriendRequests().then(setRequests).catch(()=>setRequests([])); };
+  useEffect(()=>{ loadRequests(); },[]);
+
+  const handleInvite=async()=>{
+    if(!BOT_USERNAME){
+      window.alert("Юзернейм бота не настроен. Добавь VITE_BOT_USERNAME в переменные окружения фронтенда.");
+      return;
+    }
+    setInviteBusy(true);
+    try{
+      const {code}=await api.getInviteCode();
+      const link=`https://t.me/${BOT_USERNAME}?start=add_${code}`;
+      const shareUrl=`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Присоединяйся к моему дневнику тренировок 💪")}`;
+      if(window.Telegram?.WebApp?.openTelegramLink){
+        window.Telegram.WebApp.openTelegramLink(shareUrl);
+      }else{
+        window.open(shareUrl,"_blank");
+      }
+    }catch(e){
+      toast("Не удалось создать ссылку");
+    }
+    setInviteBusy(false);
+  };
+
+  const handleSearch=async()=>{
+    if(!friendQuery.trim())return;
+    setSearching(true);
+    try{
+      const res=await api.searchFriend(friendQuery.trim());
+      setFriendResults(res);
+    }catch(e){
+      setFriendResults([]);
+    }
+    setSearching(false);
+  };
+
+  const handleAddByUsername=async(result)=>{
+    try{
+      const res=await api.addFriendByUsername(result.username);
+      setFriendResults(null);
+      setFriendQuery("");
+      if(res.status==="accepted"){
+        // Он уже успел отправить нам заявку раньше — теперь мы сразу друзья.
+        setFriends(prev=>[...prev, {id:result.id, username:result.username, name:result.name}]);
+        toast("Вы теперь друзья ✓");
+      }else if(res.status==="already_friends"){
+        toast("Вы уже друзья");
+      }else if(res.status==="already_pending"){
+        toast("Заявка уже отправлена ранее");
+      }else{
+        toast("Заявка отправлена ✓");
+      }
+    }catch(e){
+      window.alert("Не удалось отправить заявку — возможно пользователь ещё не открывал приложение");
+    }
+  };
+
+  const handleRemoveFriend=async(id)=>{
+    if(!window.confirm("Удалить из друзей?"))return;
+    await api.removeFriend(id);
+    setFriends(prev=>prev.filter(f=>f.id!==id));
+  };
+
+  const handleAccept=async(req)=>{
+    setBusyReqId(req.request_id);
+    try{
+      await api.acceptFriendRequest(req.request_id);
+      setRequests(prev=>prev.filter(r=>r.request_id!==req.request_id));
+      setFriends(prev=>[...prev, {id:req.id, username:req.username, name:req.name}]);
+      toast("Заявка принята ✓");
+      onRequestsChanged?.();
+    }catch(e){
+      window.alert("Не удалось принять заявку");
+    }
+    setBusyReqId(null);
+  };
+
+  const handleDecline=async(req)=>{
+    setBusyReqId(req.request_id);
+    try{
+      await api.declineFriendRequest(req.request_id);
+      setRequests(prev=>prev.filter(r=>r.request_id!==req.request_id));
+      onRequestsChanged?.();
+    }catch(e){
+      window.alert("Не удалось отклонить заявку");
+    }
+    setBusyReqId(null);
+  };
+
+  if(openFriendId) return (
+    <FriendProfileView
+      friendId={openFriendId}
+      onBack={()=>setOpenFriendId(null)}
+      onRemove={async()=>{await handleRemoveFriend(openFriendId);setOpenFriendId(null);}}
+    />
+  );
+
+  return (
+    <div className="page">
+      <div className="det-hd"><button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button><span className="det-title">Друзья</span></div>
+
+      <button className="btn ghost" onClick={handleInvite} disabled={inviteBusy}>
+        <IconLink/>{inviteBusy?"Готовим ссылку...":"Пригласить друга"}
+      </button>
+      <div className="search-row">
+        <input className="inp" placeholder="Юзернейм друга" value={friendQuery} onChange={e=>setFriendQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSearch()}/>
+        <button className="search-btn" onClick={handleSearch} disabled={searching}>{searching?"...":"Найти"}</button>
+      </div>
+      {friendResults&&(
+        friendResults.length===0
+          ?<p style={{color:"#555",fontSize:13,marginBottom:14}}>Никого не нашли</p>
+          :friendResults.map(r=>(
+            <div key={r.id} className="search-result">
+              <span>{r.name}{r.username&&<span style={{color:"#555"}}> · @{r.username}</span>}</span>
+              <button className="edit-badge" onClick={()=>handleAddByUsername(r)}>Отправить заявку</button>
+            </div>
+          ))
+      )}
+
+      {requests&&requests.length>0&&(
+        <>
+          <div className="sec-lbl" style={{marginTop:24}}>Заявки в друзья — {requests.length}</div>
+          {requests.map(r=>(
+            <div key={r.request_id} className="card" style={{cursor:"default"}}>
+              <div className="friend-row" style={{minWidth:0}}>
+                <div className="avatar">{(r.name||"?")[0].toUpperCase()}</div>
+                <div style={{minWidth:0}}>
+                  <div className="card-title">{r.name}</div>
+                  {r.username&&<div className="card-sub">@{r.username}</div>}
+                </div>
+              </div>
+              <div style={{display:"flex",gap:6,flexShrink:0}}>
+                <button className="edit-badge" disabled={busyReqId===r.request_id} onClick={()=>handleAccept(r)}>Принять</button>
+                <button className="del-btn" disabled={busyReqId===r.request_id} onClick={()=>handleDecline(r)}><IconClose/></button>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      <div className="sec-lbl" style={{marginTop:24}}>Мои друзья</div>
+      {friends.length===0
+        ?<p style={{color:"#555",fontSize:13,marginTop:4}}>Пока нет друзей — пригласи через ссылку или найди по юзернейму</p>
+        :friends.map(f=>(
+          <div key={f.id} className="card" onClick={()=>setOpenFriendId(f.id)}>
+            <div className="friend-row" style={{minWidth:0}}>
+              <div className="avatar">{(f.name||"?")[0].toUpperCase()}</div>
+              <div style={{minWidth:0}}>
+                <div className="card-title">{f.name}</div>
+                {f.username&&<div className="card-sub">@{f.username}</div>}
+              </div>
+            </div>
+            <IconChevron/>
+          </div>
+        ))}
+    </div>
+  );
+}
+
+function FeedPost({post, onLikeToggle, onCommentAdd, onCommentDelete}) {
+  const [commentText,setCommentText]=useState("");
+  const [showComments,setShowComments]=useState(false);
+  const [busy,setBusy]=useState(false);
+
+  const submitComment=async()=>{
+    const text=commentText.trim();
+    if(!text)return;
+    setBusy(true);
+    try{
+      await onCommentAdd(post, text);
+      setCommentText("");
+    }finally{ setBusy(false); }
+  };
+
+  return (
+    <div className="feed-post">
+      <div className="feed-post-hd">
+        <div className="avatar">{(post.author.name||"?")[0].toUpperCase()}</div>
+        <div style={{minWidth:0,flex:1}}>
+          <div className="card-title">{post.author.name}</div>
+          <div className="card-sub">{formatDate(post.date)} · {post.post_type==="workout"?post.title:`Замер «${post.title}»`}</div>
+        </div>
+      </div>
+
+      {post.post_type==="workout"?(
+        <div className="w-sets" style={{marginTop:10}}>
+          {(post.exercises||[]).map((ex,ei)=>(
+            <div key={ei} style={{marginBottom:12}}>
+              <div style={{fontSize:13,color:"#AAA",marginBottom:4,fontWeight:600}}>{ex.name||`Упражнение ${ei+1}`}</div>
+              {ex.sets.map((s,si)=>(
+                <div key={si} className="w-set-row">
+                  <span className="w-set-n">{si+1}</span>
+                  {s.bilateral?(
+                    <span className="w-set-v w-set-bi">
+                      <span className="w-set-bi-side"><span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}</span>
+                      <span className="w-set-bi-sep">|</span>
+                      <span className="w-set-bi-side"><span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}</span>
+                    </span>
+                  ):(
+                    <span className="w-set-v">{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
+                  )}
+                </div>
+              ))}
+              {ex.comment&&<div className="w-ex-comment" style={{borderTop:"none",paddingLeft:0}}>{ex.comment}</div>}
+            </div>
+          ))}
+        </div>
+      ):(
+        <div style={{marginTop:10}}>
+          {MEASUREMENT_FIELDS.filter(f=>post[f.key]!==""&&post[f.key]!=null).map(f=>(
+            <div key={f.key} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"1px solid #1A1A1A"}}>
+              <span style={{color:"#888",fontSize:12}}>{f.label}</span>
+              <span style={{fontSize:13,fontWeight:600}}>{post[f.key]} <span style={{color:"#555",fontWeight:400,fontSize:11}}>{f.key==="weight"?"кг":"см"}</span></span>
+            </div>
+          ))}
+          {post.comment&&<div className="ex-hist-comment">{post.comment}</div>}
+        </div>
+      )}
+
+      <div className="feed-post-actions">
+        <button className={`feed-action${post.liked_by_me?" active":""}`} onClick={()=>onLikeToggle(post)}>
+          <IconHeart filled={post.liked_by_me}/>{post.like_count>0?post.like_count:""}
+        </button>
+        <button className="feed-action" onClick={()=>setShowComments(v=>!v)}>
+          <IconComment/>{post.comments.length>0?post.comments.length:""}
+        </button>
+      </div>
+
+      {showComments&&(
+        <div className="feed-comments">
+          {post.comments.map(c=>(
+            <div key={c.id} className="feed-comment">
+              <span className="feed-comment-author">{c.author.name}</span>
+              <span className="feed-comment-text">{c.text}</span>
+              {c.author.id===getMyUserId()&&(
+                <button className="feed-comment-del" onClick={()=>onCommentDelete(post, c.id)}><IconClose/></button>
+              )}
+            </div>
+          ))}
+          <div className="feed-comment-input-row">
+            <input className="inp" placeholder="Комментарий..." value={commentText} onChange={e=>setCommentText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submitComment()}/>
+            <button className="search-btn" disabled={busy||!commentText.trim()} onClick={submitComment}>➤</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeedSection() {
+  const [posts,setPosts]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [loadingMore,setLoadingMore]=useState(false);
+  const [nextBefore,setNextBefore]=useState(null);
+  const [error,setError]=useState(false);
+
+  const load=async(before)=>{
+    try{
+      const res=await api.getFeed(before);
+      setPosts(prev=> before ? [...prev, ...res.posts] : res.posts);
+      setNextBefore(res.next_before);
+      setError(false);
+    }catch(e){
+      setError(true);
+    }
+  };
+
+  useEffect(()=>{ load(null).finally(()=>setLoading(false)); },[]);
+
+  const handleLoadMore=async()=>{
+    setLoadingMore(true);
+    await load(nextBefore);
+    setLoadingMore(false);
+  };
+
+  const handleLikeToggle=async(post)=>{
+    // Оптимистичное обновление — лента может быть длинной, ждать ответ сервера
+    // на каждый тап по сердечку будет ощущаться медленно.
+    setPosts(prev=>prev.map(p=>p.post_type===post.post_type&&p.post_id===post.post_id
+      ? {...p, liked_by_me:!p.liked_by_me, like_count:p.like_count+(p.liked_by_me?-1:1)}
+      : p
+    ));
+    try{
+      const res=await api.toggleLike(post.post_type, post.post_id);
+      setPosts(prev=>prev.map(p=>p.post_type===post.post_type&&p.post_id===post.post_id
+        ? {...p, liked_by_me:res.liked_by_me, like_count:res.like_count}
+        : p
+      ));
+    }catch(e){ /* при сбое оставляем оптимистичное значение — не критично */ }
+  };
+
+  const handleCommentAdd=async(post, text)=>{
+    const comment=await api.addComment(post.post_type, post.post_id, text);
+    setPosts(prev=>prev.map(p=>p.post_type===post.post_type&&p.post_id===post.post_id
+      ? {...p, comments:[...p.comments, comment]}
+      : p
+    ));
+  };
+
+  const handleCommentDelete=async(post, commentId)=>{
+    await api.deleteComment(commentId);
+    setPosts(prev=>prev.map(p=>p.post_type===post.post_type&&p.post_id===post.post_id
+      ? {...p, comments:p.comments.filter(c=>c.id!==commentId)}
+      : p
+    ));
+  };
+
+  if(loading) return <div className="loading"><div className="spinner"/><div>Загрузка...</div></div>;
+  if(error) return <div className="empty" style={{paddingTop:24}}><div className="empty-icon">⚠️</div>Не удалось загрузить ленту</div>;
+
+  return (
+    <>
+      <div className="sec-lbl" style={{marginTop:28}}>Лента друзей</div>
+      {posts.length===0
+        ? <div className="empty" style={{paddingTop:12}}><div className="empty-icon">📭</div>Пока пусто.<br/>Как только друзья начнут записывать тренировки и замеры, они появятся здесь.</div>
+        : posts.map(p=>(
+          <FeedPost key={`${p.post_type}-${p.post_id}`} post={p} onLikeToggle={handleLikeToggle} onCommentAdd={handleCommentAdd} onCommentDelete={handleCommentDelete}/>
+        ))}
+      {nextBefore&&(
+        <button className="btn ghost" onClick={handleLoadMore} disabled={loadingMore} style={{marginTop:10}}>
+          {loadingMore?"Загрузка...":"Показать ещё"}
+        </button>
+      )}
+    </>
+  );
+}
+
+function CommunityTab({friends, setFriends, toast, badge, onBadgeChange, reloadBadge}) {
+  const [view,setView]=useState(null); // null | "news" | "friends"
+
+  if(view==="news") return <NewsView onBack={()=>{setView(null);reloadBadge();}}/>;
+  if(view==="friends") return (
+    <FriendsView
+      friends={friends} setFriends={setFriends} toast={toast}
+      onBack={()=>{setView(null);reloadBadge();}}
+      onRequestsChanged={reloadBadge}
+    />
+  );
+
+  return (
+    <div className="page">
+      <NewsSection onOpen={()=>setView("news")} unread={badge.unread_news}/>
+      <FriendsSection onOpen={()=>setView("friends")} pendingCount={badge.pending_requests}/>
+      <FeedSection/>
+    </div>
+  );
+}
+
+// ── ProfileTab ────────────────────────────────────────────────────────────
+// ── Статистика профиля ────────────────────────────────────────────────────
+// Считается на лету из уже загруженных тренировок активного профиля (отдельного
+// запроса к серверу нет). Даже несколько сотен тренировок — это тысячи
+// подходов, то есть мгновенно; пересчёт только при изменении списка.
+const parseNum = (v) => {
+  const n = parseFloat(String(v ?? "").replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+};
+// Свой разделитель тысяч (неразрывный пробел) вместо toLocaleString: в части
+// старых WebView Telegram нет полных локальных данных, и формат "ru-RU" тихо
+// превращался бы в американский "1,523".
+const fmtInt = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, "\u00A0");
+const fmtTonnage = (kg) => {
+  if (kg < 10000) return `${fmtInt(kg)} кг`;
+  const t = kg / 1000;
+  return t < 100 ? `${t.toFixed(1)} т` : `${fmtInt(t)} т`;
+};
+// Склонение по числу: 1 раз, 2 раза, 5 раз, 11 раз, 21 раз, 22 раза.
+const ruPlural = (n, one, few, many) => {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && !(m100 >= 12 && m100 <= 14)) return few;
+  return many;
+};
+const setHasData = (s) => s.bilateral ? (s.weightL||s.repsL||s.weightR||s.repsR) : (s.weight||s.reps);
+
+function computeProfileStats(workouts) {
+  let tonnage = 0, sets = 0, exercises = 0;
+  const names = new Set();
+  workouts.forEach(w => (w.exercises || []).forEach(e => {
+    const filled = (e.sets || []).filter(setHasData);
+    // "Сделанное" упражнение — с хотя бы одним заполненным подходом. Пустая
+    // заготовка (например, из шаблона, где подходы так и не вписали) не считается.
+    if (!filled.length) return;
+    exercises++;
+    const nm = (e.name || "").trim().toLowerCase();
+    if (nm) names.add(nm);
+    filled.forEach(s => {
+      sets++;
+      tonnage += s.bilateral
+        ? parseNum(s.weightL) * parseNum(s.repsL) + parseNum(s.weightR) * parseNum(s.repsR)
+        : parseNum(s.weight) * parseNum(s.reps);
+    });
+  }));
+  return { workouts: workouts.length, sets, exercises, distinct: names.size, tonnage };
+}
+
+// Рекорд упражнения: самый тяжёлый вес; при равном весе — больше повторов; при
+// полном равенстве — та дата, когда это было впервые. У унилатеральных подходов
+// левая и правая сторона — отдельные кандидаты. Если во всей истории упражнения
+// нет ни одного веса (подтягивания, отжимания) — рекорд по повторам.
+function computeRecord(workouts, name) {
+  const lc = (name || "").trim().toLowerCase();
+  if (!lc) return null;
+  let bestW = null, bestR = null;
+  workouts.forEach(w => (w.exercises || []).forEach(e => {
+    if ((e.name || "").trim().toLowerCase() !== lc) return;
+    (e.sets || []).forEach(s => {
+      const pairs = s.bilateral ? [[s.weightL, s.repsL], [s.weightR, s.repsR]] : [[s.weight, s.reps]];
+      pairs.forEach(([wt, rp]) => {
+        const weight = parseNum(wt), reps = parseNum(rp);
+        if (weight > 0 && (!bestW || weight > bestW.weight
+            || (weight === bestW.weight && (reps > bestW.reps || (reps === bestW.reps && w.date < bestW.date))))) {
+          bestW = { weight, reps, date: w.date };
+        }
+        if (reps > 0 && (!bestR || reps > bestR.reps || (reps === bestR.reps && w.date < bestR.date))) {
+          bestR = { reps, date: w.date };
+        }
+      });
+    });
+  }));
+  if (bestW) return { kind: "weight", ...bestW };
+  if (bestR) return { kind: "reps", ...bestR };
+  return null;
+}
+
+// Упражнения, у которых есть хотя бы один заполненный подход, по убыванию частоты
+// (для подсказки по умолчанию и для списка выбора).
+function listExerciseNames(workouts) {
+  const map = new Map();
+  workouts.forEach(w => (w.exercises || []).forEach(e => {
+    const nm = (e.name || "").trim();
+    if (!nm || !(e.sets || []).some(setHasData)) return;
+    const k = nm.toLowerCase();
+    const cur = map.get(k);
+    if (cur) { cur.count++; if ((w.date || "") > cur.last) cur.last = w.date || ""; }
+    else map.set(k, { name: nm, count: 1, last: w.date || "" });
+  }));
+  return [...map.values()];
+}
+
+// Выбор трёх упражнений для рекордов хранится на устройстве отдельно для каждого
+// профиля (тренировки — тоже у каждого профиля свои, а имена упражнений могут
+// не совпадать). Как и черновики — localStorage, без запросов к серверу.
+const statsPinsKey = (profileId) => `gym_diary_stats_pins_v1_${profileId ?? "x"}`;
+function loadStatsPins(profileId) {
+  try {
+    const raw = localStorage.getItem(statsPinsKey(profileId));
+    if (!raw) return null;
+    const a = JSON.parse(raw);
+    if (!Array.isArray(a)) return null;
+    return [0, 1, 2].map(i => (typeof a[i] === "string" && a[i].trim()) ? a[i] : null);
+  } catch (e) { return null; }
+}
+function saveStatsPins(profileId, pins) {
+  try { localStorage.setItem(statsPinsKey(profileId), JSON.stringify(pins)); } catch (e) {}
+}
+
+// ── AVATAR:BEGIN ────────────────────────────────────────────────────────────
+// Персонаж для блока статистики. Всё рисуется SVG-кодом и собирается из
+// независимых частей (поза, одежда, причёска, лицо, борода, аксессуар, цвета),
+// поэтому вариаций тысячи, а весит это несколько килобайт. В настройках
+// хранятся ТОЛЬКО идентификаторы из палитр ниже ("blue", "s2", "wink"), а не
+// готовые цвета/пути: во-первых, так можно безопасно показывать внешность
+// другим людям (незнакомый id просто заменяется на вид по умолчанию), во-вторых,
+// палитры можно расширять, не ломая уже сохранённых персонажей.
+const AV_POSES = [["double","Двойной бицепс"],["single","Один бицепс"],["hips","Руки в боки"],["victory","Победа"],["crossed","Руки скрещены"],["bar","Штанга"]];
+const AV_OUTFITS = [["vault","Комбинезон"],["tank","Майка"],["tee","Футболка"]];
+const AV_HAIRS = [["tuft","Вихор"],["short","Короткая"],["buzz","Ёжик"],["mohawk","Ирокез"],["long","Длинные"],["bun","Пучок"],["afro","Афро"],["bald","Лысый"]];
+const AV_FACES = [["wink","Подмигивает"],["grin","Улыбка"],["calm","Спокойный"],["angry","Злой"],["shout","Крик"]];
+const AV_BEARDS = [["none","Нет"],["stubble","Щетина"],["mustache","Усы"],["beard","Борода"]];
+const AV_ACCS = [["none","Нет"],["glasses","Очки"],["shades","Тёмные очки"],["band","Повязка"],["cap","Кепка"]];
+const AV_COLORS = [
+  ["blue","Синий","#2F6FD6"],["red","Красный","#D64545"],["green","Зелёный","#3DA35D"],["yellow","Жёлтый","#F2D04B"],
+  ["orange","Оранжевый","#F2994A"],["purple","Фиолетовый","#8E5BD6"],["pink","Розовый","#E86AA6"],["teal","Бирюзовый","#2FB5B0"],
+  ["white","Белый","#EDEDED"],["black","Чёрный","#2A2A2E"],["gray","Серый","#7B7F87"],
+];
+const AV_SKINS = [
+  ["s1","Светлая",{arm:"#F3CFA9",head:"#F8DCC0",line:"#C49A6C"}],
+  ["s2","Обычная",{arm:"#E9B98C",head:"#F0C9A0",line:"#B98858"}],
+  ["s3","Загорелая",{arm:"#D49A6A",head:"#DEA678",line:"#A2703F"}],
+  ["s4","Смуглая",{arm:"#A8683C",head:"#B5764A",line:"#7B4826"}],
+  ["s5","Тёмная",{arm:"#7A4A2B",head:"#87563A",line:"#55321C"}],
+  ["s6","Очень тёмная",{arm:"#5A3520",head:"#66402A",line:"#3B2213"}],
+  ["s7","Зелёная",{arm:"#8BC96A",head:"#98D278",line:"#5F9444"}],
+];
+const AV_HAIR_COLORS = [
+  ["blond","Блонд","#F2D04B"],["brown","Каштановый","#7A4A22"],["dark","Тёмно-коричневый","#3B2416"],["black","Чёрный","#1B1B1F"],
+  ["ginger","Рыжий","#C9541E"],["gray","Седой","#9A9A9A"],["white","Белый","#EDEDED"],["blue","Синий","#3E7BE0"],
+  ["pink","Розовый","#E86AA6"],["green","Зелёный","#4CB05A"],
+];
+const AV_BGS = [
+  ["dark","Тёмный","#0D0D0D"],["navy","Синий","linear-gradient(180deg,#1B3A6B,#0D0D0D)"],["forest","Зелёный","linear-gradient(180deg,#1C4A31,#0D0D0D)"],
+  ["wine","Бордовый","linear-gradient(180deg,#5A1B29,#0D0D0D)"],["violet","Фиолетовый","linear-gradient(180deg,#3F2A72,#0D0D0D)"],
+  ["sunset","Закат","linear-gradient(180deg,#F2994A,#8E2C6B 62%,#1A0D22)"],["sky","Небо","linear-gradient(180deg,#6DB3F5,#2A4F8A)"],["gold","Золото","#F2D04B"],
+];
+const DEFAULT_AVATAR = { pose:"double", outfit:"vault", suit:"blue", accent:"yellow", skin:"s2", hair:"tuft", hairColor:"blond", face:"wink", beard:"none", acc:"none", bg:"dark", anim:true };
+
+// Приводит что угодно (null, чужие данные с сервера, устаревшие id) к полному
+// набору допустимых значений: любое незнакомое поле заменяется значением по умолчанию.
+function normalizeAvatar(raw) {
+  const r = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const pick = (key, list) => list.some(o => o[0] === r[key]) ? r[key] : DEFAULT_AVATAR[key];
+  return {
+    pose: pick("pose", AV_POSES), outfit: pick("outfit", AV_OUTFITS), suit: pick("suit", AV_COLORS), accent: pick("accent", AV_COLORS),
+    skin: pick("skin", AV_SKINS), hair: pick("hair", AV_HAIRS), hairColor: pick("hairColor", AV_HAIR_COLORS), face: pick("face", AV_FACES),
+    beard: pick("beard", AV_BEARDS), acc: pick("acc", AV_ACCS), bg: pick("bg", AV_BGS), anim: r.anim !== false,
+  };
+}
+const avatarKey = (a) => JSON.stringify(normalizeAvatar(a));
+function randomAvatar(rnd = Math.random, keepAnim = true) {
+  const p = (list) => list[Math.floor(rnd() * list.length)][0];
+  return { pose:p(AV_POSES), outfit:p(AV_OUTFITS), suit:p(AV_COLORS), accent:p(AV_COLORS), skin:p(AV_SKINS), hair:p(AV_HAIRS), hairColor:p(AV_HAIR_COLORS),
+           face:p(AV_FACES), beard:p(AV_BEARDS), acc:p(AV_ACCS), bg:p(AV_BGS), anim:keepAnim };
+}
+const avHex = (list, id) => (list.find(o => o[0] === id) || list[0])[2];
+const avShade = (hex, amt) => {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (v) => Math.max(0, Math.min(255, Math.round(amt < 0 ? v * (1 + amt) : v + (255 - v) * amt)));
+  return "#" + ((1 << 24) | (f(n >> 16) << 16) | (f((n >> 8) & 255) << 8) | f(n & 255)).toString(16).slice(1);
+};
+
+// Руки. Сегмент = [x1,y1,x2,y2,толщина]. layer: "back" — рука за туловищем (поднятые руки),
+// "front" — поверх туловища (руки в боки, скрещённые). pivot — локоть, вокруг него рука «сжимается».
+const avMirror = (a) => {
+  const mx = (x) => 160 - x;
+  return { ...a, segs: a.segs.map(s => [mx(s[0]), s[1], mx(s[2]), s[3], s[4]]), fist: { x: mx(a.fist.x), y: a.fist.y },
+           bump: a.bump && { ...a.bump, cx: mx(a.bump.cx) }, pivot: [mx(a.pivot[0]), a.pivot[1]] };
+};
+const ARM_DOUBLE  = { layer:"back",  segs:[[50,98,24,102,25],[24,102,23,76,21],[23,76,23,62,14]], fist:{x:23,y:53}, bump:{cx:38,cy:86,rx:15,ry:14}, pivot:[24,102], flex:true };
+const ARM_HIPS    = { layer:"front", segs:[[50,98,21,118,25],[21,118,50,141,21]],                  fist:{x:53,y:145}, bump:{cx:33,cy:107,rx:12,ry:11}, pivot:[21,118], flex:true };
+const ARM_VICTORY = { layer:"back",  segs:[[50,98,27,76,25],[27,76,15,44,17]],                    fist:{x:14,y:34}, bump:{cx:38,cy:89,rx:14,ry:13}, pivot:[27,76], flex:true };
+const ARM_CROSS   = { layer:"front", segs:[[50,98,30,124,24],[30,124,89,118,20]],                  fist:{x:90,y:119}, bump:{cx:32,cy:108,rx:12,ry:11}, pivot:[30,124], flex:false };
+const ARM_BAR     = { layer:"back",  segs:[[50,98,27,78,25],[27,78,25,45,15]],                    fist:{x:25,y:36}, bump:{cx:39,cy:90,rx:14,ry:13}, pivot:[27,78], flex:false, lift:true };
+const AV_ARMS = {
+  double:  [ARM_DOUBLE,  avMirror(ARM_DOUBLE)],
+  single:  [ARM_DOUBLE,  avMirror(ARM_HIPS)],
+  hips:    [ARM_HIPS,    avMirror(ARM_HIPS)],
+  victory: [ARM_VICTORY, avMirror(ARM_VICTORY)],
+  crossed: [ARM_CROSS,   avMirror(ARM_CROSS)],
+  bar:     [ARM_BAR,     avMirror(ARM_BAR)],
+};
+
+function Avatar({ cfg, still = false }) {
+  const c = cfg;
+  const S = avHex(AV_COLORS, c.suit), A = avHex(AV_COLORS, c.accent), H = avHex(AV_HAIR_COLORS, c.hairColor);
+  const sk = AV_SKINS.find(s => s[0] === c.skin)[2];
+  const arms = AV_ARMS[c.pose];
+  const cap = c.acc === "cap";
+
+  const seg = (s, k, stroke, extra) => <path key={k} d={`M${s[0]} ${s[1]} L${s[2]} ${s[3]}`} stroke={stroke} strokeWidth={s[4] + extra} fill="none"/>;
+  const renderArm = (a, i) => (
+    <g key={i} className={a.flex ? `ff-arm ff-arm-${i === 0 ? "l" : "r"}` : "ff-arm"} style={{ transformOrigin: `${a.pivot[0]}px ${a.pivot[1]}px` }}>
+      {a.segs.map((s, k) => seg(s, "o" + k, "#000", 6))}
+      {a.segs.map((s, k) => seg(s, "s" + k, sk.arm, 0))}
+      <g transform={`translate(${a.fist.x} ${a.fist.y})`}>
+        <circle r="10.5" fill={sk.arm}/>
+        <path d="M-6 -3 L6 -3 M-6 1.5 L6 1.5 M-5 6 L5 6" stroke={sk.line} strokeWidth="1.7" fill="none"/>
+      </g>
+      {a.bump && <g className="ff-bicep"><ellipse cx={a.bump.cx} cy={a.bump.cy} rx={a.bump.rx} ry={a.bump.ry} fill={sk.arm}/><path d={`M${a.bump.cx - 10} ${a.bump.cy - 3} Q${a.bump.cx} ${a.bump.cy - 13} ${a.bump.cx + 10} ${a.bump.cy - 3}`} stroke={sk.line} strokeWidth="2.2" fill="none"/></g>}
+    </g>
+  );
+  const bar = (
+    <g>
+      <path d="M0 35 H160" stroke="#000" strokeWidth="8"/><path d="M0 35 H160" stroke="#B9BEC5" strokeWidth="4.5"/>
+      <rect x="3" y="9" width="9" height="52" rx="3" fill="#4A4F57"/><rect x="13" y="15" width="7" height="40" rx="2.5" fill="#6A707A"/>
+      <rect x="148" y="9" width="9" height="52" rx="3" fill="#4A4F57"/><rect x="140" y="15" width="7" height="40" rx="2.5" fill="#6A707A"/>
+    </g>
+  );
+
+  // ── одежда: body рисуется под «передними» руками, over — поверх них (рукава, воротник, шея)
+  const torso = "M46 92 Q80 82 114 92 L112 120 L108 180 L52 180 L48 120 Z";
+  const sleeveL = "M44 96 Q47 84 58 86 L60 112 L46 114 Q42 104 44 96 Z", sleeveR = "M116 96 Q113 84 102 86 L100 112 L114 114 Q118 104 116 96 Z";
+  const pec = (col) => <path d="M56 122 Q68 134 80 124 Q92 134 104 122" stroke={col} strokeWidth="2.4" fill="none"/>;
+  let body, over;
+  if (c.outfit === "tank") {
+    body = (<>
+      <path d={torso} fill={sk.arm}/>{pec(sk.line)}
+      <path d="M60 88 L68 88 Q80 116 92 88 L100 88 L106 122 L108 180 L52 180 L54 122 Z" fill={S}/>
+      <path d="M68 88 Q80 116 92 88" stroke={A} strokeWidth="3" fill="none"/>
+    </>);
+    over = (<>
+      <path d="M44 96 Q47 84 58 86 L60 108 L46 110 Q42 104 44 96 Z" fill={sk.arm}/><path d="M116 96 Q113 84 102 86 L100 108 L114 110 Q118 104 116 96 Z" fill={sk.arm}/>
+      <path d="M70 74 L70 96 L90 96 L90 74 Z" fill={sk.arm} stroke="none"/><path d="M70 74 L70 90 M90 74 L90 90" fill="none"/>
+    </>);
+  } else if (c.outfit === "tee") {
+    body = (<><path d={torso} fill={S}/>{pec(avShade(S, -0.35))}</>);
+    over = (<>
+      <path d="M44 96 Q47 84 58 86 L60 116 L44 118 Q40 106 44 96 Z" fill={S}/><path d="M116 96 Q113 84 102 86 L100 116 L116 118 Q120 106 116 96 Z" fill={S}/>
+      <path d="M44.5 112 L59.5 110.5 M100.5 110.5 L115.5 112" stroke={A} strokeWidth="3" fill="none"/>
+      <path d="M70 74 L70 86 Q80 96 90 86 L90 74 Z" fill={sk.arm}/>
+      <path d="M65 84 Q80 104 95 84" stroke="#000" strokeWidth="7.5" fill="none"/><path d="M65 84 Q80 104 95 84" stroke={A} strokeWidth="4.5" fill="none"/>
+    </>);
+  } else {
+    body = (<><path d={torso} fill={S}/>{pec(avShade(S, -0.35))}<path d="M80 130 L80 180" stroke={A} strokeWidth="4.5" fill="none"/></>);
+    over = (<>
+      <path d={sleeveL} fill={S}/><path d={sleeveR} fill={S}/>
+      <path d="M62 88 L80 114 L98 88 L92 83 L80 100 L68 83 Z" fill={A}/>
+      <path d="M70 74 L70 87 L80 100 L90 87 L90 74 Z" fill={sk.arm}/>
+    </>);
+    // шея должна быть ПОД воротником
+    over = (<>
+      <path d={sleeveL} fill={S}/><path d={sleeveR} fill={S}/>
+      <path d="M70 74 L70 87 L80 100 L90 87 L90 74 Z" fill={sk.arm}/>
+      <path d="M62 88 L80 114 L98 88 L92 83 L80 100 L68 83 Z" fill={A}/>
+    </>);
+  }
+
+  // ── причёска
+  const hairFront = {
+    tuft: (<><path d="M53 50 Q49 24 76 21 Q101 19 108 40 Q100 30 88 33 Q70 34 63 52 Z" fill={H}/><path d="M66 25 Q62 9 84 5 Q80 13 90 20 Q78 17 74 26 Z" fill={H}/></>),
+    short: <path d="M52 50 Q46 21 80 19 Q114 21 108 50 Q102 35 88 33 Q66 31 58 44 Q56 47 55 55 Z" fill={H}/>,
+    buzz: <path d="M55 46 Q56 24 80 23 Q104 24 105 46 Q94 33 80 33 Q66 33 55 46 Z" fill={H}/>,
+    mohawk: <path d="M72 33 L66 10 L75 19 L77 -1 L84 16 L88 0 L91 19 L99 9 L89 33 Z" fill={H}/>,
+    long: <path d="M52 52 Q46 21 80 19 Q114 21 108 52 Q100 34 82 33 Q64 33 58 46 Z" fill={H}/>,
+    bun: (<><circle cx="80" cy="9" r="9" fill={H}/><path d="M52 50 Q47 22 80 20 Q113 22 108 50 Q100 34 82 33 Q64 34 56 46 Z" fill={H}/></>),
+    afro: null,
+    bald: <path d="M63 35 Q70 27 79 26" stroke="#fff" strokeWidth="2.4" fill="none" opacity=".5"/>,
+  }[c.hair];
+  const hairBack = {
+    long: (<><path d="M53 40 Q38 72 46 104 Q58 108 62 98 L61 58 Z" fill={H}/><path d="M107 40 Q122 72 114 104 Q102 108 98 98 L99 58 Z" fill={H}/></>),
+    afro: <circle cx="80" cy="43" r="37" fill={H}/>,
+  }[c.hair] || null;
+
+  // ── лицо
+  const grin = (<><path d="M66 63 Q80 77 96 63 Q80 67 66 63 Z" fill="#fff" strokeWidth="2.2"/><path d="M73 66 L73 69 M80 67 L80 71 M87 66 L87 69" strokeWidth="1" fill="none"/></>);
+  const blush = (<><circle cx="62" cy="59" r="3.2" fill="#E58D7A" opacity=".55" stroke="none"/><circle cx="98" cy="59" r="3.2" fill="#E58D7A" opacity=".55" stroke="none"/></>);
+  const eyeL = (<><ellipse cx="70" cy="51" rx="4.6" ry="6" fill="#fff" strokeWidth="2"/><circle cx="71.2" cy="52" r="2.5" fill="#000" stroke="none"/></>);
+  const eyeR = (<><ellipse cx="91" cy="51" rx="4.6" ry="6" fill="#fff" strokeWidth="2"/><circle cx="89.8" cy="52" r="2.5" fill="#000" stroke="none"/></>);
+  const face = {
+    wink: { eyes: (<>{eyeL}<g className="ff-wink">{eyeR}</g><path d="M62 44 Q70 40 76 44" strokeWidth="2.6" fill="none"/><path d="M86 44 Q92 40 99 43" strokeWidth="2.6" fill="none"/>{blush}</>), mouth: grin },
+    grin: { eyes: (<>{eyeL}{eyeR}<path d="M62 44 Q70 40 76 44" strokeWidth="2.6" fill="none"/><path d="M86 44 Q92 40 98 44" strokeWidth="2.6" fill="none"/>{blush}</>), mouth: grin },
+    calm: { eyes: (<>{eyeL}{eyeR}<path d="M62 43 Q70 41 76 43" strokeWidth="2.4" fill="none"/><path d="M86 43 Q92 41 98 43" strokeWidth="2.4" fill="none"/></>),
+            mouth: <path d="M71 66 Q80 72 89 66" strokeWidth="2.6" fill="none"/> },
+    angry: { eyes: (<><ellipse cx="70" cy="52" rx="4.4" ry="5" fill="#fff" strokeWidth="2"/><circle cx="71" cy="53" r="2.4" fill="#000" stroke="none"/><ellipse cx="91" cy="52" rx="4.4" ry="5" fill="#fff" strokeWidth="2"/><circle cx="90" cy="53" r="2.4" fill="#000" stroke="none"/><path d="M60 40 L77 47" strokeWidth="3.2" fill="none"/><path d="M84 47 L101 40" strokeWidth="3.2" fill="none"/></>),
+             mouth: (<><path d="M67 65 Q80 61 93 65 L91 74 Q80 78 69 74 Z" fill="#fff" strokeWidth="2.2"/><path d="M69 69.5 Q80 67 91 69.5 M75 64 L75 76 M80 63 L80 77 M85 64 L85 76" strokeWidth="1.1" fill="none"/></>) },
+    shout: { eyes: (<><path d="M64 52 Q70 46 76 52" strokeWidth="2.8" fill="none"/><path d="M85 52 Q91 46 97 52" strokeWidth="2.8" fill="none"/><path d="M60 41 L76 45" strokeWidth="3" fill="none"/><path d="M84 45 L100 41" strokeWidth="3" fill="none"/></>),
+             mouth: (<><path d="M66 62 Q80 59 94 62 Q93 80 80 80 Q67 80 66 62 Z" fill="#7A1F1F" strokeWidth="2.4"/><path d="M71 74.5 Q80 69 89 74.5 Q86 79 80 79 Q74 79 71 74.5 Z" fill="#E86A7A" strokeWidth="0"/><path d="M69 63.5 Q80 61 91 63.5 L90 67 Q80 65 70 67 Z" fill="#fff" strokeWidth="0"/></>) },
+  }[c.face];
+  const stubble = c.beard === "stubble" && <path d="M54 55 Q54 79 80 80 Q106 79 106 55 Q98 67 80 67 Q62 67 54 55 Z" fill={H} opacity=".38" stroke="none"/>;
+  const beardBig = c.beard === "beard" && <path d="M53 52 Q50 88 80 91 Q110 88 107 52 Q100 60 92 58 Q80 62 68 58 Q60 60 53 52 Z" fill={H}/>;
+  const mustache = (c.beard === "mustache" || c.beard === "beard") && <path d="M65 61 Q73 55 80 60 Q87 55 95 61 Q88 66 80 63 Q72 66 65 61 Z" fill={H}/>;
+
+  // ── аксессуары
+  const acc = {
+    glasses: (<g fill="rgba(255,255,255,.16)" strokeWidth="2.4"><circle cx="70" cy="51" r="8.5"/><circle cx="91" cy="51" r="8.5"/><path d="M78.5 50 Q80.5 47 82.5 50" fill="none"/><path d="M61.5 50 L54 47 M99.5 50 L107 47" fill="none"/></g>),
+    shades: (<g strokeWidth="2.2"><path d="M57 44 H79 V54 Q79 63 71 63 H65 Q57 63 57 54 Z" fill="#141416"/><path d="M82 44 H104 V54 Q104 63 96 63 H90 Q82 63 82 54 Z" fill="#141416"/><path d="M79 47 H82" fill="none" strokeWidth="2.6"/><path d="M60.5 48 L66 47 M85.5 48 L91 47" stroke="#fff" strokeWidth="1.6" opacity=".55" fill="none"/></g>),
+    band: (<><path d="M53 38 Q80 26 107 38 L107 46 Q80 34 53 46 Z" fill={A}/><path d="M106 38 L117 33 L114 43 Z" fill={A}/><path d="M106 43 L118 46 L111 50 Z" fill={A}/></>),
+    cap: (<><path d="M52 38 Q50 12 80 11 Q110 12 108 38 Q80 32 52 38 Z" fill={S}/><path d="M49 39 Q80 50 111 39 L111 33 Q80 41 49 33 Z" fill={A}/><circle cx="80" cy="12" r="2.6" fill={A}/></>),
+  }[c.acc] || null;
+
+  const lift = arms[0].lift;
+  // Сторона руки (0 — левая, 1 — правая) берётся из исходного порядка, а не из порядка после
+  // фильтрации по слою: иначе в позе «Один бицепс» (одна рука за туловищем, другая поверх) правая
+  // рука получила бы класс левой и «сжималась» бы в обратную сторону.
+  const armsBack = arms.map((a, i) => a.layer === "back" ? renderArm(a, i) : null);
+  const armsFront = arms.map((a, i) => a.layer === "front" ? renderArm(a, i) : null);
+  return (
+    <svg className={`flex-fig${still || !c.anim ? " ff-still" : ""}`} data-cfg={JSON.stringify(c)} viewBox="0 -5 160 179" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Персонаж">
+      <g className="ff-body" stroke="#000" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round">
+        {lift ? <g className="ff-lift">{bar}{armsBack}</g> : armsBack}
+        {body}
+        {armsFront}
+        {over}
+        {hairBack}
+        <circle cx="80" cy="50" r="27" fill={sk.head}/>
+        {stubble}
+        {!cap && hairFront}
+        {beardBig}
+        <g>{face.eyes}</g>
+        <g>{face.mouth}</g>
+        {mustache}
+        {acc}
+      </g>
+      <g className="ff-shine" stroke="#FFF" strokeWidth="2.2" strokeLinecap="round">
+        <path d="M5 80 L10 84 M3 92 L9 92 M5 104 L10 100"/><path d="M155 80 L150 84 M157 92 L151 92 M155 104 L150 100"/>
+      </g>
+    </svg>
+  );
+}
+// ── AVATAR:END ──────────────────────────────────────────────────────────────
+
+// Копия внешности на устройстве. Основное хранилище — сервер (тогда её видят друзья);
+// копия нужна как запасной вариант, пока на Railway ещё не выложена новая версия
+// бэкенда (тогда поле avatar в ответе отсутствует) — читается ТОЛЬКО в этом случае.
+const avatarLocalKey = (pid) => `gym_diary_avatar_v1_${pid ?? "x"}`;
+function loadLocalAvatar(pid) {
+  try { const r = localStorage.getItem(avatarLocalKey(pid)); return r ? JSON.parse(r) : null; } catch (e) { return null; }
+}
+function saveLocalAvatar(pid, a) {
+  try { if (!a) localStorage.removeItem(avatarLocalKey(pid)); else localStorage.setItem(avatarLocalKey(pid), JSON.stringify(a)); } catch (e) {}
+}
+
+// ── Шторка выбора упражнения для рекорда ──────────────────────────────────
+function RecordPickerSheet({ options, current, taken, onPick, onClear, onClose }) {
+  const sheetRef = useRef(null);
+  const [q, setQ] = useState("");
+  useLockBodyScroll();
+  useKeyboardScroll(sheetRef);
+  useSwipeBack(onClose);
+  const list = options
+    .filter(o => !q.trim() || o.name.toLowerCase().includes(q.trim().toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  const curLc = current ? current.toLowerCase() : null;
+  return (
+    <div className="overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="sheet" ref={sheetRef}>
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-icon-btn" onClick={onClose} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <span className="det-title" style={{flex:1,minWidth:0,paddingRight:36}}>Упражнение для рекорда</span>
+        </div>
+        <div className="pick-search">
+          <input className="inp" type="text" placeholder="Поиск по названию..." value={q} onChange={e => setQ(e.target.value)}/>
+        </div>
+        {current && <button className="btn ghost" style={{marginTop:12,marginBottom:4}} onClick={onClear}>Убрать из рекордов</button>}
+        {list.length === 0
+          ? <div className="empty" style={{padding:"28px 0"}}>{options.length === 0 ? "Упражнения появятся после первой тренировки" : "Ничего не найдено"}</div>
+          : list.map(o => {
+              const lc = o.name.toLowerCase();
+              const isCur = lc === curLc;
+              const isTaken = !isCur && taken.includes(lc);
+              return (
+                <div key={lc} className={`pick-row${isCur ? " sel" : ""}${isTaken ? " off" : ""}`} onClick={() => !isTaken && onPick(o.name)}>
+                  <span className="pick-name">{isCur ? "✓ " : ""}{o.name}</span>
+                  <span className="pick-count">{isTaken ? "уже выбрано" : `${o.count} ${ruPlural(o.count, "раз", "раза", "раз")}`}</span>
+                </div>
+              );
+            })}
+      </div>
+    </div>
+  );
+}
+
+// ── Редактор персонажа ────────────────────────────────────────────────────
+// Шторка с живым предпросмотром сверху (он «прилипает», пока листаешь параметры).
+// «Готово» сохраняет, всё остальное (крестик, «Отмена»-жест назад) отменяет — но
+// если что-то успели поменять, сначала спрашивает. Тап по затемнению намеренно
+// ничего не закрывает: длинную настройку легко потерять случайным касанием.
+function AvatarEditorSheet({ initial, onSave, onClose }) {
+  const [cfg, setCfg] = useState(() => normalizeAvatar(initial));
+  useLockBodyScroll();
+  const dirty = avatarKey(cfg) !== avatarKey(initial);
+  const tryClose = () => { if (!dirty || window.confirm("Отменить изменения внешности?")) onClose(); };
+  useSwipeBack(tryClose);
+  const set = (k, v) => setCfg(c => ({ ...c, [k]: v }));
+  const chips = (key, list) => (
+    <div className="av-chips">
+      {list.map(([id, label]) => (
+        <button key={id} type="button" className={`av-chip${cfg[key] === id ? " on" : ""}`} aria-pressed={cfg[key] === id} onClick={() => set(key, id)}>{label}</button>
+      ))}
+    </div>
+  );
+  const swatches = (key, list) => (
+    <div className="av-sws">
+      {list.map(([id, label, val]) => (
+        <button key={id} type="button" title={label} aria-label={label} aria-pressed={cfg[key] === id}
+          className={`av-sw${cfg[key] === id ? " on" : ""}`} style={{ background: val }} onClick={() => set(key, id)}/>
+      ))}
+    </div>
+  );
+  const bgCss = avHex(AV_BGS, cfg.bg);
+  return (
+    <div className="overlay av-overlay">
+      <div className="sheet">
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-icon-btn" onClick={tryClose} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <span className="det-title" style={{flex:1,minWidth:0,paddingRight:36}}>Персонаж</span>
+        </div>
+        <div className="av-prev">
+          <div className="av-prev-fig" style={{ background: bgCss }}><Avatar cfg={cfg}/></div>
+          <div className="av-prev-btns">
+            <button className="btn" onClick={() => dirty ? onSave(cfg) : onClose()}>Готово</button>
+            <button className="btn ghost" onClick={() => setCfg(randomAvatar(Math.random, cfg.anim))}>Случайный</button>
+            <button className="btn ghost" onClick={() => setCfg({ ...DEFAULT_AVATAR, anim: cfg.anim })}>Сбросить</button>
+          </div>
+        </div>
+        <div className="av-sec">Поза</div>{chips("pose", AV_POSES)}
+        <div className="av-sec">Одежда</div>{chips("outfit", AV_OUTFITS)}
+        <div className="av-sec">Цвет одежды</div>{swatches("suit", AV_COLORS)}
+        <div className="av-sec">Цвет отделки</div>{swatches("accent", AV_COLORS)}
+        <div className="av-sec">Кожа</div>{swatches("skin", AV_SKINS.map(([id, l, s]) => [id, l, s.arm]))}
+        <div className="av-sec">Причёска</div>{chips("hair", AV_HAIRS)}
+        <div className="av-sec">Цвет волос</div>{swatches("hairColor", AV_HAIR_COLORS)}
+        <div className="av-sec">Лицо</div>{chips("face", AV_FACES)}
+        <div className="av-sec">Борода</div>{chips("beard", AV_BEARDS)}
+        <div className="av-sec">Аксессуар</div>{chips("acc", AV_ACCS)}
+        <div className="av-sec">Фон</div>{swatches("bg", AV_BGS)}
+        <div className="av-sec">Анимация</div>
+        <div className="av-chips">
+          <button type="button" className={`av-chip${cfg.anim ? " on" : ""}`} aria-pressed={cfg.anim} onClick={() => set("anim", true)}>Включена</button>
+          <button type="button" className={`av-chip${!cfg.anim ? " on" : ""}`} aria-pressed={!cfg.anim} onClick={() => set("anim", false)}>Выключена</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Блок статистики ───────────────────────────────────────────────────────
+// Два режима. Свой профиль: можно менять персонажа и рекорды, всё сохраняется
+// через onSave (на сервер — чтобы это видели друзья). readOnly — так блок
+// показывается в профиле друга: те же числа, его персонаж и его рекорды, но
+// без карандаша и без выбора; пустые слоты рекордов не показываются.
+// Что видит друг, определяется его настройками приватности (см. FriendProfileView).
+function StatsHero({ workouts, profileId, profileName, avatarRaw, pinsRaw, readOnly = false, onSave }) {
+  const stats = useMemo(() => computeProfileStats(workouts), [workouts]);
+  const options = useMemo(() => listExerciseNames(workouts), [workouts]);
+
+  // ── персонаж: сервер (avatarRaw) — основной источник; копия на устройстве — только если
+  // сервер поля не знает вовсе (avatarRaw === undefined, старая версия бэкенда).
+  const avatarSaved = readOnly ? avatarRaw : (avatarRaw !== undefined ? avatarRaw : loadLocalAvatar(profileId));
+  const cfg = normalizeAvatar(avatarSaved);
+  const [editing, setEditing] = useState(false);
+  const saveAvatar = (next) => {
+    const n = normalizeAvatar(next);
+    const isDefault = avatarKey(n) === avatarKey(DEFAULT_AVATAR);
+    saveLocalAvatar(profileId, isDefault ? null : n);
+    onSave && onSave({ avatar: isDefault ? {} : n });   // {} = «по умолчанию»
+    setEditing(false);
+  };
+
+  // ── рекорды. Пока человек ничего не выбирал — 3 самых частых упражнения (при равенстве —
+  // те, что делали позже: порядок не зависит от того, в каком порядке сервер вернул тренировки).
+  // Старая версия хранила выбор только на устройстве: если на сервере пусто (null), а на
+  // устройстве есть — один раз переносим на сервер, чтобы его увидели друзья.
+  const [localPins] = useState(() => readOnly ? null : loadStatsPins(profileId));
+  const [localAv] = useState(() => readOnly ? null : loadLocalAvatar(profileId));
+  const savedPins = Array.isArray(pinsRaw)
+    ? [0, 1, 2].map(i => (typeof pinsRaw[i] === "string" && pinsRaw[i].trim()) ? pinsRaw[i] : null)
+    : (readOnly ? null : localPins);
+  useEffect(() => {
+    if (readOnly || !onSave) return;
+    const patch = {};
+    if (pinsRaw === null && localPins) patch.stats_pins = localPins;
+    if (avatarRaw === null && localAv) patch.avatar = localAv;
+    if (Object.keys(patch).length) onSave(patch, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const pins = savedPins ?? [...options]
+    .sort((a, b) => (b.count - a.count) || b.last.localeCompare(a.last))
+    .slice(0, 3).map(o => o.name).concat([null, null, null]).slice(0, 3);
+  const [pickSlot, setPickSlot] = useState(null);
+  const records = useMemo(() => pins.map(n => n ? computeRecord(workouts, n) : null), [workouts, pins.join("\u0001")]);
+
+  const choose = (slot, name) => {
+    const next = pins.slice(); next[slot] = name;
+    saveStatsPins(profileId, next);
+    onSave && onSave({ stats_pins: next });
+    setPickSlot(null);
+  };
+
+  const cells = [
+    { val: fmtTonnage(stats.tonnage), lbl: "Тоннаж" },
+    { val: fmtInt(stats.workouts), lbl: "Тренировок" },
+    { val: fmtInt(stats.sets), lbl: "Подходов" },
+    { val: fmtInt(stats.exercises), lbl: "Упражнений", sub: stats.distinct ? `${fmtInt(stats.distinct)} разных` : null },
+  ];
+  const shownPins = readOnly ? pins.map((n, i) => ({ n, i })).filter(x => x.n) : pins.map((n, i) => ({ n, i }));
+
+  return (
+    <div className="stats-hero">
+      <div className="stats-hd"><span>Статистика</span>{profileName ? <span className="stats-who">{profileName}</span> : null}</div>
+      <div className="stats-main">
+        <div className="stats-fig" style={{ background: avHex(AV_BGS, cfg.bg) }}>
+          <Avatar cfg={cfg}/>
+          {!readOnly && <button className="fig-edit" onClick={() => setEditing(true)} title="Изменить персонажа" aria-label="Изменить персонажа"><IconEdit/></button>}
+        </div>
+        <div className="stats-list">
+          {cells.map(c => (
+            <div key={c.lbl} className="stat-cell">
+              <div className="stat-line"><span className="stat-val">{c.val}</span>{c.sub ? <span className="stat-sub">{c.sub}</span> : null}</div>
+              <div className="stat-lbl">{c.lbl}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {(!readOnly || (options.length > 0 && shownPins.length > 0)) && <div className="stats-hd" style={{marginTop:16}}><span>Рекорды</span></div>}
+      {options.length === 0
+        ? (readOnly ? null : <div className="rec-empty">Рекорды появятся после первой тренировки</div>)
+        : shownPins.map(({ n: name, i }) => {
+            const rec = records[i];
+            return (
+              <div key={i} className={`rec-row${name ? "" : " empty"}${readOnly ? " ro" : ""}`} onClick={readOnly ? undefined : () => setPickSlot(i)}>
+                {name ? (
+                  <>
+                    <div className="rec-left">
+                      <div className="rec-name">{name}</div>
+                      <div className="rec-date">{rec ? formatDate(rec.date) : "нет записей"}</div>
+                    </div>
+                    <div className="rec-val">
+                      {rec ? (rec.kind === "weight"
+                        ? <>{String(rec.weight)} кг{rec.reps ? <span className="rec-x"> × {String(rec.reps)}</span> : null}</>
+                        : <>{String(rec.reps)} повт</>) : "—"}
+                    </div>
+                  </>
+                ) : (
+                  <div className="rec-add"><IconPlus/>Выбрать упражнение</div>
+                )}
+              </div>
+            );
+          })}
+      {!readOnly && pickSlot !== null && (
+        <RecordPickerSheet
+          options={options}
+          current={pins[pickSlot]}
+          taken={pins.filter(Boolean).map(n => n.toLowerCase())}
+          onPick={n => choose(pickSlot, n)}
+          onClear={() => choose(pickSlot, null)}
+          onClose={() => setPickSlot(null)}
+        />
+      )}
+      {!readOnly && editing && <AvatarEditorSheet initial={cfg} onSave={saveAvatar} onClose={() => setEditing(false)}/>}
+    </div>
+  );
+}
+
+function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, hasUnsavedDrafts}) {
+  const [detailId,setDetailId]=useState(null);
+  const [renamingId,setRenamingId]=useState(null);
+  const [renameVal,setRenameVal]=useState("");
+  const [showCreate,setShowCreate]=useState(false);
+
+  const activeProfile=profiles.find(p=>p.is_active)||null;
+  const detail=detailId!=null?profiles.find(p=>p.id===detailId):null;
+  useSwipeBack(()=>setDetailId(null), !!detail);
+  useScrollTopOnChange(detailId);
+
+  const startRename=(p)=>{setRenamingId(p.id);setRenameVal(p.name);};
+  const commitRename=async(id)=>{
+    if(!renameVal.trim()){setRenamingId(null);return;}
+    await api.updateProfile(id,{name:renameVal.trim()});
+    setProfiles(prev=>prev.map(p=>p.id===id?{...p,name:renameVal.trim()}:p));
+    setRenamingId(null);
+  };
+
+  // Сохранение произвольных полей профиля (внешность персонажа, выбор рекордов): сразу
+  // показываем результат, а если сервер не ответил — откатываем и говорим об этом.
+  const saveProfilePatch=async(id,patch,silent=false)=>{
+    const before=profiles.find(p=>p.id===id)||{};
+    const prevVals={};
+    Object.keys(patch).forEach(k=>{prevVals[k]=before[k];});
+    setProfiles(prev=>prev.map(p=>p.id===id?{...p,...patch}:p));
+    try{
+      await api.updateProfile(id,patch);
+      return true;
+    }catch(e){
+      setProfiles(prev=>prev.map(p=>p.id===id?{...p,...prevVals}:p));
+      if(!silent) toast("Не удалось сохранить");
+      return false;
+    }
+  };
+
+  const handleToggle=async(id,field,value)=>{
+    await api.updateProfile(id,{[field]:value});
+    if(field==="is_main"&&value){
+      setProfiles(prev=>prev.map(p=>p.id===id?{...p,is_main:true}:{...p,is_main:false}));
+    }else{
+      setProfiles(prev=>prev.map(p=>p.id===id?{...p,[field]:value}:p));
+    }
+    toast("Сохранено ✓");
+  };
+
+  const [exportBusy,setExportBusy]=useState(false);
+  const handleExport=async(profile)=>{
+    setExportBusy(true);
+    try{
+      const tg=window.Telegram?.WebApp;
+      if(tg){
+        // Внутри Telegram (в том числе на iOS, где Blob-ссылки внутри веб-вью не
+        // скачиваются) — самый надёжный способ отдать файл: попросить бота
+        // прислать его документом прямо в чат. Сохранить/переслать документ из
+        // чата Telegram умеет всегда и везде, без всяких версионных нюансов.
+        await api.exportToChat(profile.id);
+        toast("Файл отправлен в чат с ботом ✓");
+      }else{
+        const fileName=`${(profile.name||"профиль").replace(/[\\/:*?"<>|]/g,"_")}.txt`;
+        const text=await api.exportProfile(profile.id);
+        const blob=new Blob([text],{type:"text/plain;charset=utf-8"});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url;
+        a.download=fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    }catch(e){
+      window.alert("Не удалось выгрузить данные");
+    }
+    setExportBusy(false);
+  };
+
+  const handleActivate=async(id)=>{
+    if(hasUnsavedDrafts && !window.confirm("У тебя есть несохранённая тренировка, замер или прогрессия — при переключении профиля они будут потеряны. Переключить профиль?")) return;
+    await api.activateProfile(id);
+    setProfiles(prev=>prev.map(p=>({...p,is_active:p.id===id})));
+    onProfileSwitch();
+    setDetailId(null);
+    toast("Профиль активен ✓");
+  };
+
+  const handleDelete=async(id)=>{
+    const wasActiveBefore=profiles.find(p=>p.id===id)?.is_active;
+    let msg="Удалить профиль? Все его тренировки, упражнения и замеры удалятся без возможности восстановления.";
+    if(wasActiveBefore && hasUnsavedDrafts) msg+="\n\nТакже у тебя есть несохранённая тренировка, замер или прогрессия — они будут потеряны.";
+    if(!window.confirm(msg))return;
+    try{
+      const wasActive=wasActiveBefore;
+      await api.deleteProfile(id);
+      setProfiles(prev=>prev.filter(p=>p.id!==id));
+      setDetailId(null);
+      if(wasActive) onProfileSwitch();
+      toast("Профиль удалён");
+    }catch(e){
+      window.alert("Нельзя удалить последний профиль");
+    }
+  };
+
+  const handleCreate=async(name)=>{
+    const res=await api.createProfile(name);
+    setProfiles(prev=>[...prev,{id:res.id,name,is_main:false,is_active:false,show_workouts:true,show_exercises:true,show_comments:true,show_measurements:true}]);
+    setShowCreate(false);
+    toast("Профиль создан ✓");
+  };
+
+  if(detail){
+    return(
+      <div className="page">
+        <div className="det-hd">
+          <button className="back-btn" onClick={()=>{setDetailId(null);setRenamingId(null);}}><IconChevron dir="left"/>Назад</button>
+          {renamingId===detail.id
+            ?<input className="rename-inp" value={renameVal} onChange={e=>setRenameVal(e.target.value)} onBlur={()=>commitRename(detail.id)} onKeyDown={e=>e.key==="Enter"&&commitRename(detail.id)} autoFocus/>
+            :<span className="det-title">{detail.name}</span>}
+          <button className="del-btn" onClick={()=>startRename(detail)}><IconEdit/></button>
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:20}}>
+          {detail.is_active&&<span className="badge-active">Активен</span>}
+          {detail.is_main&&<span className="badge-main">Основной</span>}
+        </div>
+        <div className="sec-lbl">Настройки видимости для друзей</div>
+        <ToggleRow label="Сделать профиль основным" sub="Именно этот профиль будут видеть друзья" checked={detail.is_main} onChange={v=>handleToggle(detail.id,"is_main",v)}/>
+        <ToggleRow label="Отображать тренировки" checked={detail.show_workouts} onChange={v=>handleToggle(detail.id,"show_workouts",v)}/>
+        <ToggleRow label="Отображать упражнения" checked={detail.show_exercises} onChange={v=>handleToggle(detail.id,"show_exercises",v)}/>
+        <ToggleRow label="Отображать замеры" checked={detail.show_measurements} onChange={v=>handleToggle(detail.id,"show_measurements",v)}/>
+        <ToggleRow label="Отображать комментарии к упражнениям" checked={detail.show_comments} onChange={v=>handleToggle(detail.id,"show_comments",v)}/>
+        <div style={{height:20}}/>
+        <button className="btn ghost" onClick={()=>handleExport(detail)} disabled={exportBusy}>
+          {exportBusy?"Готовим файл...":"Выгрузить тренировки и замеры (.txt)"}
+        </button>
+        {!detail.is_active&&<button className="btn" onClick={()=>handleActivate(detail.id)}>Сделать активным</button>}
+        {profiles.length>1&&<button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить профиль</button>}
+      </div>
+    );
+  }
+
+  return(
+    <div className="page">
+      <StatsHero key={activeProfile?.id ?? "x"} workouts={workouts||[]} profileId={activeProfile?.id} profileName={activeProfile?.name}
+        avatarRaw={activeProfile?.avatar} pinsRaw={activeProfile?.stats_pins}
+        onSave={(patch,silent)=>activeProfile?saveProfilePatch(activeProfile.id,patch,silent):Promise.resolve(false)}/>
+      <button className="btn" onClick={()=>setShowCreate(true)}><IconPlus/>Новый профиль</button>
+      {profiles.map(p=>(
+        <div key={p.id} className="card" onClick={()=>setDetailId(p.id)}>
+          <div style={{minWidth:0}}>
+            <div className="card-title">{p.name}</div>
+            <div className="card-sub" style={{display:"flex",gap:6,marginTop:5}}>
+              {p.is_active&&<span className="badge-active">Активен</span>}
+              {p.is_main&&<span className="badge-main">Основной</span>}
+            </div>
+          </div>
+          <IconChevron/>
+        </div>
+      ))}
+      {showCreate&&<ProfileCreateSheet onSave={handleCreate} onClose={()=>setShowCreate(false)}/>}
+    </div>
+  );
+}
+
+// ── Root App ──────────────────────────────────────────────────────────────
+export default function App() {
+  const [tab,setTab]=useState(0);
+  const [isPremium,setIsPremium]=useState(false);
+  const [premiumChecked,setPremiumChecked]=useState(false);
+  const [progressions,setProgressions]=useState([]);
+  const [workouts,setWorkouts]=useState([]);
+  const [measurements,setMeasurements]=useState([]);
+  const [templates,setTemplates]=useState([]);
+  const [profiles,setProfiles]=useState([]);
+  const [friends,setFriends]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState(null);
+  const [toastMsg,setToastMsg]=useState("");
+  const [workoutDraft,setWorkoutDraft]=useState(null); // {editId, name, date, exercises, restoring}
+  const [measurementDraft,setMeasurementDraft]=useState(null); // {editId, name, date, vals, restoring}
+  const [progressionDraft,setProgressionDraft]=useState(null); // {mode, ...поля мастера/формы, restoring}
+  const [templateDraft,setTemplateDraft]=useState(null); // {editId, name, exercises, restoring}
+  const [communityBadge,setCommunityBadge]=useState({unread_news:false, pending_requests:0});
+
+  useSwipeTabs(tab, setTab, 5);
+  useScrollTopOnChange(tab);
+
+  const showToast=(msg)=>{
+    setToastMsg(msg);
+    setTimeout(()=>setToastMsg(""),2200);
+  };
+
+  // Инициализация Telegram Mini App: сообщаем что приложение готово и
+  // разворачиваем на всю доступную высоту (обычный режим, без requestFullscreen —
+  // он давал непредсказуемые наезды на системные элементы на разных телефонах).
+  useEffect(()=>{
+    const tg = window.Telegram?.WebApp;
+    if(!tg) return;
+    tg.ready?.();
+    tg.expand?.();
+    // Отключаем системный свайп-вниз-для-сворачивания мини-приложения — иначе
+    // он перехватывает вертикальную часть жестов пользователя (включая случайный
+    // вертикальный дрейф во время горизонтального свайпа между вкладками) и
+    // сворачивает окно. Доступно с Bot API 7.7 — оборачиваем в try/catch на
+    // случай старого клиента без поддержки метода.
+    try{ tg.disableVerticalSwipes?.(); }catch{}
+    // Плашка с названием мини-приложения ("Дневник тренировок") по умолчанию
+    // подстраивается под тему самого Telegram — в светлой теме получается
+    // светлой, что не сочетается с тёмным дизайном приложения. Делаем её
+    // перманентно тёмной, под фон приложения, независимо от темы пользователя.
+    // Поддерживается не во всех клиентах Telegram — оборачиваем в try/catch,
+    // чтобы отсутствие метода в старой версии клиента не ломало запуск.
+    try{ tg.setHeaderColor?.("#0A0A0A"); }catch{}
+    try{ tg.setBackgroundColor?.("#0A0A0A"); }catch{}
+    try{ tg.setBottomBarColor?.("#0A0A0A"); }catch{}
+  },[]);
+
+  // Загружаем вообще всё один раз при старте: тренировки, замеры, профили, друзей.
+  // Вкладка "Профиль" больше не делает свой отдельный запрос при каждом открытии —
+  // она просто показывает то, что уже лежит в памяти приложения.
+
+  // Только дневник (тренировки/замеры) — используется при переключении активного
+  // профиля, когда список профилей и друзей не изменился, менять их незачем.
+  const reloadDiaryOnly=()=>{
+    setLoading(true);
+    Promise.all([api.getWorkouts(), api.getMeasurements(), api.getTemplates()])
+      .then(([w,m,tpl])=>{
+        setWorkouts([...w].reverse());
+        setMeasurements([...m].reverse());
+        setTemplates(tpl);
+        setLoading(false);
+      })
+      .catch(()=>{
+        setError("Не удалось подключиться к серверу.\nПроверь что бэкенд запущен.");
+        setLoading(false);
+      });
+  };
+
+  const initialLoad = async () => {
+    // Ссылка-приглашение всегда в формате t.me/бот?start=add_XXXX (обычный
+    // диплинк бота) — он гарантированно создаёт/открывает диалог с ботом и
+    // тот присылает сообщение с кнопкой запуска. Формат ?startapp= технически
+    // тоже поддерживается (Menu Button настроен), но открывает Mini App в
+    // обход чата с ботом — диалог не создаётся, поэтому для инвайтов не используется.
+    // Проверяем оба источника на случай если где-то всё же попадётся startapp-ссылка.
+    const params = new URLSearchParams(window.location.search);
+    const nativeParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+    const legacyParam = params.get("invite");
+    const rawInvite = legacyParam || nativeParam;
+    let justAddedFriend = false;
+    let friendRequestSent = false;
+
+    if(rawInvite && rawInvite.startsWith("add_")){
+      const code = rawInvite.slice(4);
+      if(legacyParam){
+        // Оставляет след в адресной строке — вычищаем, иначе при повторном
+        // открытии той же кнопки приглашение будет "срабатывать" заново.
+        params.delete("invite");
+        const cleanUrl = window.location.pathname + (params.toString()?`?${params.toString()}`:"") + window.location.hash;
+        window.history.replaceState({}, "", cleanUrl);
+      }
+
+      try{
+        // Добавление по персональной ссылке-приглашению — сразу в друзья, без
+        // заявки на подтверждение (в отличие от добавления через поиск по
+        // юзернейму) — сам факт перехода по такой ссылке уже подтверждает
+        // обе стороны. friendRequestSent тут не используется никогда — оставлен
+        // для единообразия с остальными местами, где статус "pending" возможен.
+        const res = await api.addFriendByCode(code);
+        justAddedFriend = res.status === "accepted";
+        friendRequestSent = res.status === "pending";
+      }catch(e){
+        // ссылка невалидна — молча игнорируем
+      }
+    }
+
+    setError(null);
+    setLoading(true);
+    try{
+      const [w,m,p,f,tpl] = await Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends(), api.getTemplates()]);
+      setWorkouts([...w].reverse()); // сервер даёт DESC, нам нужен ASC для логики
+      setMeasurements([...m].reverse());
+      setTemplates(tpl); // шаблоны сортировкой по дате не завязаны — оставляем как отдаёт сервер (новые сверху)
+      setProfiles(p);
+      setFriends(f);
+      setLoading(false);
+      if(justAddedFriend) showToast("Вы добавлены в друзья ✓");
+      else if(friendRequestSent) showToast("Заявка в друзья отправлена ✓");
+
+      // Если процесс приложения был убит в фоне до того, как незавершённая
+      // тренировка/замер была сохранена или явно закрыта — предлагаем её
+      // восстановить (тем же плавающим блоком, что и при обычном сворачивании).
+      // Тренировка и замер проверяются независимо — оба черновика могут
+      // существовать одновременно.
+      const storedWorkout = loadDraftFromStorage("workout");
+      if(storedWorkout) setWorkoutDraft({...storedWorkout, restoring:false});
+      const storedMeasurement = loadDraftFromStorage("measurement");
+      if(storedMeasurement) setMeasurementDraft({...storedMeasurement, restoring:false});
+      const storedProgression = loadDraftFromStorage("progression");
+      if(storedProgression) setProgressionDraft({...storedProgression, restoring:false});
+      const storedTemplate = loadDraftFromStorage("template");
+      if(storedTemplate) setTemplateDraft({...storedTemplate, restoring:false});
+    }catch(e){
+      // Бэкенд на Railway может "просыпаться" несколько секунд после простоя —
+      // api.js уже делает несколько попыток сам, это резервный случай на будущее.
+      setError("Не удалось подключиться к серверу.\nЭто может занять несколько секунд, если сервер долго не использовался — попробуй ещё раз.");
+      setLoading(false);
+    }
+  };
+
+  useEffect(()=>{ initialLoad(); },[]);
+
+  const reloadProgressions=()=>{
+    api.getProgressions().then(setProgressions).catch(()=>{});
+  };
+
+  const reloadCommunityBadge=()=>{
+    api.getCommunityBadge().then(setCommunityBadge).catch(()=>{});
+  };
+
+  // Бейдж «Сообщество» (непрочитанные новости + заявки в друзья) — грузим
+  // при старте и обновляем при каждом переключении на саму вкладку
+  // (например пользователь принял заявку и вернулся) — не требует опроса
+  // по таймеру, так как оба события инициированы либо этим же, либо другим
+  // пользователем и подтягиваются при следующем открытии вкладки.
+  useEffect(()=>{ reloadCommunityBadge(); },[]);
+  useEffect(()=>{ if(tab===2) reloadCommunityBadge(); },[tab]);
+
+  // Отдельный, ни на что не блокирующий эффект: у большинства пользователей
+  // премиума нет, это ожидаемый штатный ответ, а не ошибка — поэтому он не
+  // должен ни задерживать основную загрузку (workouts/measurements/profiles/
+  // friends), ни ронять её при сбое. Тренировки/Упражнения/Замеры/Профиль
+  // работают ровно как раньше независимо от результата этого запроса.
+  useEffect(()=>{
+    api.getMyPremium()
+      .then(r=>{
+        setIsPremium(!!r.is_premium);
+        if(r.is_premium) reloadProgressions();
+      })
+      .catch(()=>{})
+      .finally(()=>setPremiumChecked(true));
+  },[]);
+
+  // После переключения/удаления активного профиля дневник меняется — оба
+  // черновика относятся к старому профилю и больше не актуальны, сбрасываем их.
+  const handleProfileSwitch=()=>{
+    setWorkoutDraft(null);
+    setMeasurementDraft(null);
+    setTemplateDraft(null);
+    reloadDiaryOnly();
+  };
+
+  if(loading) return(
+    <>
+      <style>{css}</style>
+      <div className="app-frame">
+        <div className="loading"><div className="spinner"/><div>Загрузка...</div></div>
+      </div>
+    </>
+  );
+
+  if(error) return(
+    <>
+      <style>{css}</style>
+      <div className="app-frame">
+        <div className="empty" style={{paddingTop:80}}>
+          <div className="empty-icon">⚠️</div>
+          <div style={{whiteSpace:"pre-line",marginBottom:20}}>{error}</div>
+          <button className="btn" style={{maxWidth:200,margin:"0 auto"}} onClick={initialLoad}>Попробовать снова</button>
+        </div>
+      </div>
+    </>
+  );
+
+  // Показываем плавающий блок для черновика тренировки, только если мы НЕ на
+  // вкладке Тренировки (там он уже виден прямо в списке на своём месте).
+  const showWorkoutBar = workoutDraft && !workoutDraft.restoring && tab!==0;
+  // Аналогично для замера — прячем на вкладке Замеры.
+  const showMeasurementBar = measurementDraft && !measurementDraft.restoring && tab!==3;
+  // Прогрессия (как и шаблоны) больше не отдельная верхнеуровневая вкладка —
+  // вложена внутрь "Тренировки", поэтому плашка не прячется по вкладке (иначе
+  // на вкладке Тренировки, но не в разделе Прогрессия, её было бы не видно) —
+  // это единственный способ вернуться к незавершённой прогрессии откуда угодно.
+  // Премиум-условие сохранено: если премиум отключили, старый черновик не всплывает.
+  const showProgressionBar = isPremium && progressionDraft && !progressionDraft.restoring;
+  // У шаблонов нет отдельной верхнеуровневой вкладки (раздел вложен внутрь
+  // "Тренировки"), поэтому в отличие от остальных плашка не прячется по вкладке —
+  // это единственный способ вернуться к незавершённому шаблону откуда угодно.
+  const showTemplateBar = templateDraft && !templateDraft.restoring;
+  // Сколько плашек-черновиков сейчас реально показано внизу экрана — их высота
+  // (позиционированы position:fixed) резервируется отступом снизу в контенте
+  // вкладок (.page), чтобы плашки не перекрывали последние элементы списков.
+  // 80px — высота одной плашки с запасом (padding+контент+бордер, см. .draft-bar).
+  const draftBarsCount = (showWorkoutBar?1:0) + (showMeasurementBar?1:0) + (showProgressionBar?1:0) + (showTemplateBar?1:0);
+
+  // Есть ли несохранённые данные в черновиках — если да, при переключении
+  // профиля (или удалении активного) предупреждаем, что они будут потеряны.
+  const hasUnsavedDrafts =
+    (!!workoutDraft && workoutDraftHasData(workoutDraft.exercises, workoutDraft.name, workoutDraft.defaultName)) ||
+    (!!measurementDraft && measurementDraftHasData(measurementDraft.vals)) ||
+    (!!progressionDraft && progressionDraftHasData(progressionDraft)) ||
+    (!!templateDraft && templateDraftHasData(templateDraft));
+
+  return(
+    <>
+      <style>{css}</style>
+      <div className="app-frame" style={draftBarsCount?{"--draft-bars-h":`${draftBarsCount*80}px`}:undefined}>
+        <div className="tab-bar">
+          {["Тренировки","Упражнения","Сообщество","Замеры","Профиль"].map((t,i)=>(
+            <button key={i} className={`tab${tab===i?" active":""}`} onClick={()=>{ if(tab===i) window.scrollTo({top:0,behavior:"smooth"}); else setTab(i); }}>
+              <span className="tab-label">
+                {t}
+                {i===2&&(communityBadge.unread_news||communityBadge.pending_requests>0)&&<span className="tab-badge-dot"/>}
+              </span>
+            </button>
+          ))}
+        </div>
+        {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft} progressions={progressions} onProgressionsChange={setProgressions} templates={templates} setTemplates={setTemplates} templateDraft={templateDraft} setTemplateDraft={setTemplateDraft} isPremium={isPremium} premiumChecked={premiumChecked} reloadProgressions={reloadProgressions} progressionDraft={progressionDraft} setProgressionDraft={setProgressionDraft}/>}
+        {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
+        {tab===2&&<CommunityTab friends={friends} setFriends={setFriends} toast={showToast} badge={communityBadge} onBadgeChange={setCommunityBadge} reloadBadge={reloadCommunityBadge}/>}
+        {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
+        {tab===4&&<ProfileTab profiles={profiles} workouts={workouts} setProfiles={setProfiles} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
+        {(showWorkoutBar||showMeasurementBar||showProgressionBar||showTemplateBar)&&(
+          <div className="draft-bars-wrap">
+            {showWorkoutBar&&(
+              <div className="draft-bar" onClick={()=>{
+                setWorkoutDraft(p=>({...p,restoring:true}));
+                setTab(0);
+              }}>
+                <span className="draft-bar-dot"/>
+                <div className="draft-bar-text">
+                  <div className="draft-bar-title">{workoutDraft.name || "Тренировка"}</div>
+                  <div className="draft-bar-sub">Тренировка не сохранена · нажми чтобы продолжить</div>
+                </div>
+                <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage("workout");setWorkoutDraft(null);}}}><IconClose/></button>
+              </div>
+            )}
+            {showMeasurementBar&&(
+              <div className="draft-bar" onClick={()=>{
+                setMeasurementDraft(p=>({...p,restoring:true}));
+                setTab(3);
+              }}>
+                <span className="draft-bar-dot"/>
+                <div className="draft-bar-text">
+                  <div className="draft-bar-title">{measurementDraft.name || "Замер"}</div>
+                  <div className="draft-bar-sub">Замер не сохранён · нажми чтобы продолжить</div>
+                </div>
+                <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage("measurement");setMeasurementDraft(null);}}}><IconClose/></button>
+              </div>
+            )}
+            {showProgressionBar&&(
+              <div className="draft-bar" onClick={()=>{
+                setProgressionDraft(p=>({...p,restoring:true}));
+                setTab(0);
+              }}>
+                <span className="draft-bar-dot"/>
+                <div className="draft-bar-text">
+                  <div className="draft-bar-title">{progressionDraft.name || "Прогрессия"}</div>
+                  <div className="draft-bar-sub">Не сохранена · нажми чтобы продолжить</div>
+                </div>
+                <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage("progression");setProgressionDraft(null);}}}><IconClose/></button>
+              </div>
+            )}
+            {showTemplateBar&&(
+              <div className="draft-bar" onClick={()=>{
+                setTemplateDraft(p=>({...p,restoring:true}));
+                setTab(0);
+              }}>
+                <span className="draft-bar-dot"/>
+                <div className="draft-bar-text">
+                  <div className="draft-bar-title">{templateDraft.name || "Шаблон"}</div>
+                  <div className="draft-bar-sub">Шаблон не сохранён · нажми чтобы продолжить</div>
+                </div>
+                <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage("template");setTemplateDraft(null);}}}><IconClose/></button>
+              </div>
+            )}
+          </div>
+        )}
+        <Toast msg={toastMsg}/>
+        <KeyboardDismissButton/>
+      </div>
+    </>
+  );
+}
