@@ -208,7 +208,9 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .stats-hd{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#585858;font-weight:500;margin-bottom:10px}
 .stats-who{color:#8A8A8A;letter-spacing:.04em;text-transform:none;font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .stats-main{display:flex;align-items:stretch;gap:10px}
-.stats-fig{flex:0 0 46%;max-width:164px;background:#0D0D0D;border:1px solid #1E1E1E;display:flex;align-items:flex-end;overflow:hidden}
+.stats-fig{position:relative;flex:0 0 46%;max-width:164px;background:#0D0D0D;border:1px solid #1E1E1E;display:flex;align-items:flex-end;overflow:hidden}
+.fig-edit{position:absolute;bottom:6px;right:6px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);border:1px solid #444;color:#DDD;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent}
+.fig-edit:active{background:#222}
 .stats-fig svg{display:block;width:100%;height:auto}
 .stats-list{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:space-between}
 .stat-cell{padding:3px 0;border-bottom:1px solid #1E1E1E}
@@ -220,6 +222,8 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .stat-sub{font-size:11px;color:#555;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .rec-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid #1E1E1E;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .rec-row:active{background:#151515}
+.rec-row.ro{cursor:default}
+.rec-row.ro:active{background:none}
 .rec-row.empty{border:1px dashed #333;padding:13px 14px;margin-top:8px;justify-content:center}
 .rec-left{min-width:0;flex:1}
 .rec-name{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -228,6 +232,19 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .rec-x{color:#8A8A8A;font-weight:600}
 .rec-add{display:flex;align-items:center;gap:8px;color:#777;font-size:13px}
 .rec-empty{font-size:13px;color:#585858;padding:6px 0 2px}
+.av-prev{position:sticky;top:0;z-index:4;background:#0A0A0A;display:flex;gap:12px;padding:6px 0 12px;border-bottom:1px solid #1E1E1E;margin-bottom:2px}
+.av-prev-fig{flex:0 0 46%;max-width:172px;border:1px solid #1E1E1E;display:flex;align-items:flex-end;overflow:hidden}
+.av-prev-fig svg{display:block;width:100%;height:auto}
+.av-prev-btns{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;justify-content:center}
+.av-prev-btns .btn{margin:0;padding:11px 8px;font-size:13px}
+@media (max-height:700px){.av-prev-fig{flex-basis:36%;max-width:124px}.av-prev-btns .btn{padding:9px 6px}}
+.av-sec{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#585858;font-weight:500;margin:18px 0 9px}
+.av-chips{display:flex;flex-wrap:wrap;gap:6px}
+.av-chip{padding:8px 11px;border:1px solid #333;background:transparent;color:#999;font-size:12.5px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.av-chip.on{border-color:#FFF;color:#FFF;background:#161616}
+.av-sws{display:flex;flex-wrap:wrap;gap:9px}
+.av-sw{width:32px;height:32px;border-radius:50%;border:2px solid #2A2A2A;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent}
+.av-sw.on{border-color:#FFF;box-shadow:0 0 0 2px #0A0A0A inset}
 .pick-search{position:sticky;top:0;background:#0A0A0A;z-index:2;padding-bottom:4px}
 .pick-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 2px;border-bottom:1px solid #1E1E1E;cursor:pointer;font-size:15px;-webkit-tap-highlight-color:transparent}
 .pick-row:active{background:#151515}
@@ -236,8 +253,6 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .pick-row.off:active{background:none}
 .pick-name{min-width:0;overflow-wrap:break-word;word-break:break-word}
 .pick-count{font-size:11px;color:#585858;flex-shrink:0}
-.flex-fig .ff-arm-l{transform-origin:24px 102px}
-.flex-fig .ff-arm-r{transform-origin:136px 102px}
 .flex-fig .ff-bicep,.flex-fig .ff-wink{transform-box:fill-box;transform-origin:center}
 .flex-fig .ff-body{transform-origin:80px 174px;animation:ffBob 3.2s ease-in-out infinite}
 .flex-fig .ff-arm-l{animation:ffSqueezeL 3.2s ease-in-out infinite}
@@ -245,13 +260,17 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .flex-fig .ff-bicep{animation:ffPump 3.2s ease-in-out infinite}
 .flex-fig .ff-wink{animation:ffWink 3.2s ease-in-out infinite}
 .flex-fig .ff-shine{animation:ffShine 3.2s ease-in-out infinite}
+.flex-fig .ff-lift{animation:ffLift 3.2s ease-in-out infinite}
+.flex-fig.ff-still *{animation:none!important}
+.flex-fig.ff-still .ff-shine{opacity:0}
 @keyframes ffBob{0%,30%,72%,100%{transform:none}42%,60%{transform:translateY(-2px) scale(1.015)}}
 @keyframes ffSqueezeL{0%,30%,72%,100%{transform:none}42%,60%{transform:rotate(5deg)}}
 @keyframes ffSqueezeR{0%,30%,72%,100%{transform:none}42%,60%{transform:rotate(-5deg)}}
 @keyframes ffPump{0%,30%,72%,100%{transform:scale(1)}42%,60%{transform:scale(1.24)}}
 @keyframes ffWink{0%,38%,66%,100%{transform:scaleY(1)}44%,60%{transform:scaleY(.1)}}
+@keyframes ffLift{0%,30%,72%,100%{transform:none}42%,60%{transform:translateY(-3px)}}
 @keyframes ffShine{0%,32%,68%,100%{opacity:0}44%,58%{opacity:.95}}
-@media (prefers-reduced-motion:reduce){.flex-fig .ff-body,.flex-fig .ff-arm,.flex-fig .ff-bicep,.flex-fig .ff-wink,.flex-fig .ff-shine{animation:none!important}.flex-fig .ff-shine{opacity:0}}
+@media (prefers-reduced-motion:reduce){.flex-fig .ff-body,.flex-fig .ff-lift,.flex-fig .ff-arm-l,.flex-fig .ff-arm-r,.flex-fig .ff-arm,.flex-fig .ff-bicep,.flex-fig .ff-wink,.flex-fig .ff-shine{animation:none!important}.flex-fig .ff-shine{opacity:0}}
 .ex-note-hint{margin:0 14px 10px;padding:6px 0 6px 10px;font-size:12px;color:#8A8A8A;border-left:2px solid #333;line-height:1.5;font-style:italic;cursor:pointer;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ex-note-hint.expanded{-webkit-line-clamp:unset;display:block}
 .sets{padding:10px 14px;overflow:hidden;contain:layout}
@@ -3203,6 +3222,9 @@ function FriendProfileView({friendId, onBack, onRemove}) {
         ?<div className="empty"><div className="empty-icon">🔒</div>Профиль скрыт<br/>Пользователь не открыл доступ к просмотру</div>
         :(
           <>
+            {(data.show_workouts||data.show_exercises)&&(
+              <StatsHero readOnly workouts={workouts} avatarRaw={data.avatar} pinsRaw={data.stats_pins}/>
+            )}
             <div className="sub-tabs">
               {data.show_workouts&&<button className={subTab===0?"active":""} onClick={()=>setSubTab(0)}>Тренировки</button>}
               {data.show_exercises&&<button className={subTab===1?"active":""} onClick={()=>setSubTab(1)}>Упражнения</button>}
@@ -3814,69 +3836,239 @@ function saveStatsPins(profileId, pins) {
   try { localStorage.setItem(statsPinsKey(profileId), JSON.stringify(pins)); } catch (e) {}
 }
 
-// ── Персонаж ──────────────────────────────────────────────────────────────
-// Нарисован SVG-кодом (никаких картинок — ничего не грузится и остаётся
-// чётким на любом экране). Анимация — цикл ~3 сек: расслабился → напряг
-// бицепсы (бугры раздуваются, руки чуть сжимаются, тело подпрыгивает, летят
-// блики) → подмигнул → расслабился. Для тех, у кого в системе включено
-// "уменьшить движение", анимация отключается (см. CSS).
-function FlexFigure() {
-  const skin = "#E9B98C", skinLine = "#B98858", suit = "#2F6FD6", yellow = "#F2D04B";
-  const Fist = ({ x }) => (
-    <g transform={`translate(${x} 53)`}>
-      <circle r="10.5" fill={skin}/>
-      <path d="M-6 -3 L6 -3 M-6 1.5 L6 1.5 M-5 6 L5 6" stroke={skinLine} strokeWidth="1.7" fill="none"/>
+// ── AVATAR:BEGIN ────────────────────────────────────────────────────────────
+// Персонаж для блока статистики. Всё рисуется SVG-кодом и собирается из
+// независимых частей (поза, одежда, причёска, лицо, борода, аксессуар, цвета),
+// поэтому вариаций тысячи, а весит это несколько килобайт. В настройках
+// хранятся ТОЛЬКО идентификаторы из палитр ниже ("blue", "s2", "wink"), а не
+// готовые цвета/пути: во-первых, так можно безопасно показывать внешность
+// другим людям (незнакомый id просто заменяется на вид по умолчанию), во-вторых,
+// палитры можно расширять, не ломая уже сохранённых персонажей.
+const AV_POSES = [["double","Двойной бицепс"],["single","Один бицепс"],["hips","Руки в боки"],["victory","Победа"],["crossed","Руки скрещены"],["bar","Штанга"]];
+const AV_OUTFITS = [["vault","Комбинезон"],["tank","Майка"],["tee","Футболка"]];
+const AV_HAIRS = [["tuft","Вихор"],["short","Короткая"],["buzz","Ёжик"],["mohawk","Ирокез"],["long","Длинные"],["bun","Пучок"],["afro","Афро"],["bald","Лысый"]];
+const AV_FACES = [["wink","Подмигивает"],["grin","Улыбка"],["calm","Спокойный"],["angry","Злой"],["shout","Крик"]];
+const AV_BEARDS = [["none","Нет"],["stubble","Щетина"],["mustache","Усы"],["beard","Борода"]];
+const AV_ACCS = [["none","Нет"],["glasses","Очки"],["shades","Тёмные очки"],["band","Повязка"],["cap","Кепка"]];
+const AV_COLORS = [
+  ["blue","Синий","#2F6FD6"],["red","Красный","#D64545"],["green","Зелёный","#3DA35D"],["yellow","Жёлтый","#F2D04B"],
+  ["orange","Оранжевый","#F2994A"],["purple","Фиолетовый","#8E5BD6"],["pink","Розовый","#E86AA6"],["teal","Бирюзовый","#2FB5B0"],
+  ["white","Белый","#EDEDED"],["black","Чёрный","#2A2A2E"],["gray","Серый","#7B7F87"],
+];
+const AV_SKINS = [
+  ["s1","Светлая",{arm:"#F3CFA9",head:"#F8DCC0",line:"#C49A6C"}],
+  ["s2","Обычная",{arm:"#E9B98C",head:"#F0C9A0",line:"#B98858"}],
+  ["s3","Загорелая",{arm:"#D49A6A",head:"#DEA678",line:"#A2703F"}],
+  ["s4","Смуглая",{arm:"#A8683C",head:"#B5764A",line:"#7B4826"}],
+  ["s5","Тёмная",{arm:"#7A4A2B",head:"#87563A",line:"#55321C"}],
+  ["s6","Очень тёмная",{arm:"#5A3520",head:"#66402A",line:"#3B2213"}],
+  ["s7","Зелёная",{arm:"#8BC96A",head:"#98D278",line:"#5F9444"}],
+];
+const AV_HAIR_COLORS = [
+  ["blond","Блонд","#F2D04B"],["brown","Каштановый","#7A4A22"],["dark","Тёмно-коричневый","#3B2416"],["black","Чёрный","#1B1B1F"],
+  ["ginger","Рыжий","#C9541E"],["gray","Седой","#9A9A9A"],["white","Белый","#EDEDED"],["blue","Синий","#3E7BE0"],
+  ["pink","Розовый","#E86AA6"],["green","Зелёный","#4CB05A"],
+];
+const AV_BGS = [
+  ["dark","Тёмный","#0D0D0D"],["navy","Синий","linear-gradient(180deg,#1B3A6B,#0D0D0D)"],["forest","Зелёный","linear-gradient(180deg,#1C4A31,#0D0D0D)"],
+  ["wine","Бордовый","linear-gradient(180deg,#5A1B29,#0D0D0D)"],["violet","Фиолетовый","linear-gradient(180deg,#3F2A72,#0D0D0D)"],
+  ["sunset","Закат","linear-gradient(180deg,#F2994A,#8E2C6B 62%,#1A0D22)"],["sky","Небо","linear-gradient(180deg,#6DB3F5,#2A4F8A)"],["gold","Золото","#F2D04B"],
+];
+const DEFAULT_AVATAR = { pose:"double", outfit:"vault", suit:"blue", accent:"yellow", skin:"s2", hair:"tuft", hairColor:"blond", face:"wink", beard:"none", acc:"none", bg:"dark", anim:true };
+
+// Приводит что угодно (null, чужие данные с сервера, устаревшие id) к полному
+// набору допустимых значений: любое незнакомое поле заменяется значением по умолчанию.
+function normalizeAvatar(raw) {
+  const r = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const pick = (key, list) => list.some(o => o[0] === r[key]) ? r[key] : DEFAULT_AVATAR[key];
+  return {
+    pose: pick("pose", AV_POSES), outfit: pick("outfit", AV_OUTFITS), suit: pick("suit", AV_COLORS), accent: pick("accent", AV_COLORS),
+    skin: pick("skin", AV_SKINS), hair: pick("hair", AV_HAIRS), hairColor: pick("hairColor", AV_HAIR_COLORS), face: pick("face", AV_FACES),
+    beard: pick("beard", AV_BEARDS), acc: pick("acc", AV_ACCS), bg: pick("bg", AV_BGS), anim: r.anim !== false,
+  };
+}
+const avatarKey = (a) => JSON.stringify(normalizeAvatar(a));
+function randomAvatar(rnd = Math.random, keepAnim = true) {
+  const p = (list) => list[Math.floor(rnd() * list.length)][0];
+  return { pose:p(AV_POSES), outfit:p(AV_OUTFITS), suit:p(AV_COLORS), accent:p(AV_COLORS), skin:p(AV_SKINS), hair:p(AV_HAIRS), hairColor:p(AV_HAIR_COLORS),
+           face:p(AV_FACES), beard:p(AV_BEARDS), acc:p(AV_ACCS), bg:p(AV_BGS), anim:keepAnim };
+}
+const avHex = (list, id) => (list.find(o => o[0] === id) || list[0])[2];
+const avShade = (hex, amt) => {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (v) => Math.max(0, Math.min(255, Math.round(amt < 0 ? v * (1 + amt) : v + (255 - v) * amt)));
+  return "#" + ((1 << 24) | (f(n >> 16) << 16) | (f((n >> 8) & 255) << 8) | f(n & 255)).toString(16).slice(1);
+};
+
+// Руки. Сегмент = [x1,y1,x2,y2,толщина]. layer: "back" — рука за туловищем (поднятые руки),
+// "front" — поверх туловища (руки в боки, скрещённые). pivot — локоть, вокруг него рука «сжимается».
+const avMirror = (a) => {
+  const mx = (x) => 160 - x;
+  return { ...a, segs: a.segs.map(s => [mx(s[0]), s[1], mx(s[2]), s[3], s[4]]), fist: { x: mx(a.fist.x), y: a.fist.y },
+           bump: a.bump && { ...a.bump, cx: mx(a.bump.cx) }, pivot: [mx(a.pivot[0]), a.pivot[1]] };
+};
+const ARM_DOUBLE  = { layer:"back",  segs:[[50,98,24,102,25],[24,102,23,76,21],[23,76,23,62,14]], fist:{x:23,y:53}, bump:{cx:38,cy:86,rx:15,ry:14}, pivot:[24,102], flex:true };
+const ARM_HIPS    = { layer:"front", segs:[[50,98,21,118,25],[21,118,50,141,21]],                  fist:{x:53,y:145}, bump:{cx:33,cy:107,rx:12,ry:11}, pivot:[21,118], flex:true };
+const ARM_VICTORY = { layer:"back",  segs:[[50,98,27,76,25],[27,76,15,44,17]],                    fist:{x:14,y:34}, bump:{cx:38,cy:89,rx:14,ry:13}, pivot:[27,76], flex:true };
+const ARM_CROSS   = { layer:"front", segs:[[50,98,30,124,24],[30,124,89,118,20]],                  fist:{x:90,y:119}, bump:{cx:32,cy:108,rx:12,ry:11}, pivot:[30,124], flex:false };
+const ARM_BAR     = { layer:"back",  segs:[[50,98,27,78,25],[27,78,25,45,15]],                    fist:{x:25,y:36}, bump:{cx:39,cy:90,rx:14,ry:13}, pivot:[27,78], flex:false, lift:true };
+const AV_ARMS = {
+  double:  [ARM_DOUBLE,  avMirror(ARM_DOUBLE)],
+  single:  [ARM_DOUBLE,  avMirror(ARM_HIPS)],
+  hips:    [ARM_HIPS,    avMirror(ARM_HIPS)],
+  victory: [ARM_VICTORY, avMirror(ARM_VICTORY)],
+  crossed: [ARM_CROSS,   avMirror(ARM_CROSS)],
+  bar:     [ARM_BAR,     avMirror(ARM_BAR)],
+};
+
+function Avatar({ cfg, still = false }) {
+  const c = cfg;
+  const S = avHex(AV_COLORS, c.suit), A = avHex(AV_COLORS, c.accent), H = avHex(AV_HAIR_COLORS, c.hairColor);
+  const sk = AV_SKINS.find(s => s[0] === c.skin)[2];
+  const arms = AV_ARMS[c.pose];
+  const cap = c.acc === "cap";
+
+  const seg = (s, k, stroke, extra) => <path key={k} d={`M${s[0]} ${s[1]} L${s[2]} ${s[3]}`} stroke={stroke} strokeWidth={s[4] + extra} fill="none"/>;
+  const renderArm = (a, i) => (
+    <g key={i} className={a.flex ? `ff-arm ff-arm-${i === 0 ? "l" : "r"}` : "ff-arm"} style={{ transformOrigin: `${a.pivot[0]}px ${a.pivot[1]}px` }}>
+      {a.segs.map((s, k) => seg(s, "o" + k, "#000", 6))}
+      {a.segs.map((s, k) => seg(s, "s" + k, sk.arm, 0))}
+      <g transform={`translate(${a.fist.x} ${a.fist.y})`}>
+        <circle r="10.5" fill={sk.arm}/>
+        <path d="M-6 -3 L6 -3 M-6 1.5 L6 1.5 M-5 6 L5 6" stroke={sk.line} strokeWidth="1.7" fill="none"/>
+      </g>
+      {a.bump && <g className="ff-bicep"><ellipse cx={a.bump.cx} cy={a.bump.cy} rx={a.bump.rx} ry={a.bump.ry} fill={sk.arm}/><path d={`M${a.bump.cx - 10} ${a.bump.cy - 3} Q${a.bump.cx} ${a.bump.cy - 13} ${a.bump.cx + 10} ${a.bump.cy - 3}`} stroke={sk.line} strokeWidth="2.2" fill="none"/></g>}
     </g>
   );
+  const bar = (
+    <g>
+      <path d="M0 35 H160" stroke="#000" strokeWidth="8"/><path d="M0 35 H160" stroke="#B9BEC5" strokeWidth="4.5"/>
+      <rect x="3" y="9" width="9" height="52" rx="3" fill="#4A4F57"/><rect x="13" y="15" width="7" height="40" rx="2.5" fill="#6A707A"/>
+      <rect x="148" y="9" width="9" height="52" rx="3" fill="#4A4F57"/><rect x="140" y="15" width="7" height="40" rx="2.5" fill="#6A707A"/>
+    </g>
+  );
+
+  // ── одежда: body рисуется под «передними» руками, over — поверх них (рукава, воротник, шея)
+  const torso = "M46 92 Q80 82 114 92 L112 120 L108 180 L52 180 L48 120 Z";
+  const sleeveL = "M44 96 Q47 84 58 86 L60 112 L46 114 Q42 104 44 96 Z", sleeveR = "M116 96 Q113 84 102 86 L100 112 L114 114 Q118 104 116 96 Z";
+  const pec = (col) => <path d="M56 122 Q68 134 80 124 Q92 134 104 122" stroke={col} strokeWidth="2.4" fill="none"/>;
+  let body, over;
+  if (c.outfit === "tank") {
+    body = (<>
+      <path d={torso} fill={sk.arm}/>{pec(sk.line)}
+      <path d="M60 88 L68 88 Q80 116 92 88 L100 88 L106 122 L108 180 L52 180 L54 122 Z" fill={S}/>
+      <path d="M68 88 Q80 116 92 88" stroke={A} strokeWidth="3" fill="none"/>
+    </>);
+    over = (<>
+      <path d="M44 96 Q47 84 58 86 L60 108 L46 110 Q42 104 44 96 Z" fill={sk.arm}/><path d="M116 96 Q113 84 102 86 L100 108 L114 110 Q118 104 116 96 Z" fill={sk.arm}/>
+      <path d="M70 74 L70 96 L90 96 L90 74 Z" fill={sk.arm} stroke="none"/><path d="M70 74 L70 90 M90 74 L90 90" fill="none"/>
+    </>);
+  } else if (c.outfit === "tee") {
+    body = (<><path d={torso} fill={S}/>{pec(avShade(S, -0.35))}</>);
+    over = (<>
+      <path d="M44 96 Q47 84 58 86 L60 116 L44 118 Q40 106 44 96 Z" fill={S}/><path d="M116 96 Q113 84 102 86 L100 116 L116 118 Q120 106 116 96 Z" fill={S}/>
+      <path d="M44.5 112 L59.5 110.5 M100.5 110.5 L115.5 112" stroke={A} strokeWidth="3" fill="none"/>
+      <path d="M70 74 L70 86 Q80 96 90 86 L90 74 Z" fill={sk.arm}/>
+      <path d="M65 84 Q80 104 95 84" stroke="#000" strokeWidth="7.5" fill="none"/><path d="M65 84 Q80 104 95 84" stroke={A} strokeWidth="4.5" fill="none"/>
+    </>);
+  } else {
+    body = (<><path d={torso} fill={S}/>{pec(avShade(S, -0.35))}<path d="M80 130 L80 180" stroke={A} strokeWidth="4.5" fill="none"/></>);
+    over = (<>
+      <path d={sleeveL} fill={S}/><path d={sleeveR} fill={S}/>
+      <path d="M62 88 L80 114 L98 88 L92 83 L80 100 L68 83 Z" fill={A}/>
+      <path d="M70 74 L70 87 L80 100 L90 87 L90 74 Z" fill={sk.arm}/>
+    </>);
+    // шея должна быть ПОД воротником
+    over = (<>
+      <path d={sleeveL} fill={S}/><path d={sleeveR} fill={S}/>
+      <path d="M70 74 L70 87 L80 100 L90 87 L90 74 Z" fill={sk.arm}/>
+      <path d="M62 88 L80 114 L98 88 L92 83 L80 100 L68 83 Z" fill={A}/>
+    </>);
+  }
+
+  // ── причёска
+  const hairFront = {
+    tuft: (<><path d="M53 50 Q49 24 76 21 Q101 19 108 40 Q100 30 88 33 Q70 34 63 52 Z" fill={H}/><path d="M66 25 Q62 9 84 5 Q80 13 90 20 Q78 17 74 26 Z" fill={H}/></>),
+    short: <path d="M52 50 Q46 21 80 19 Q114 21 108 50 Q102 35 88 33 Q66 31 58 44 Q56 47 55 55 Z" fill={H}/>,
+    buzz: <path d="M55 46 Q56 24 80 23 Q104 24 105 46 Q94 33 80 33 Q66 33 55 46 Z" fill={H}/>,
+    mohawk: <path d="M72 33 L66 10 L75 19 L77 -1 L84 16 L88 0 L91 19 L99 9 L89 33 Z" fill={H}/>,
+    long: <path d="M52 52 Q46 21 80 19 Q114 21 108 52 Q100 34 82 33 Q64 33 58 46 Z" fill={H}/>,
+    bun: (<><circle cx="80" cy="9" r="9" fill={H}/><path d="M52 50 Q47 22 80 20 Q113 22 108 50 Q100 34 82 33 Q64 34 56 46 Z" fill={H}/></>),
+    afro: null,
+    bald: <path d="M63 35 Q70 27 79 26" stroke="#fff" strokeWidth="2.4" fill="none" opacity=".5"/>,
+  }[c.hair];
+  const hairBack = {
+    long: (<><path d="M53 40 Q38 72 46 104 Q58 108 62 98 L61 58 Z" fill={H}/><path d="M107 40 Q122 72 114 104 Q102 108 98 98 L99 58 Z" fill={H}/></>),
+    afro: <circle cx="80" cy="43" r="37" fill={H}/>,
+  }[c.hair] || null;
+
+  // ── лицо
+  const grin = (<><path d="M66 63 Q80 77 96 63 Q80 67 66 63 Z" fill="#fff" strokeWidth="2.2"/><path d="M73 66 L73 69 M80 67 L80 71 M87 66 L87 69" strokeWidth="1" fill="none"/></>);
+  const blush = (<><circle cx="62" cy="59" r="3.2" fill="#E58D7A" opacity=".55" stroke="none"/><circle cx="98" cy="59" r="3.2" fill="#E58D7A" opacity=".55" stroke="none"/></>);
+  const eyeL = (<><ellipse cx="70" cy="51" rx="4.6" ry="6" fill="#fff" strokeWidth="2"/><circle cx="71.2" cy="52" r="2.5" fill="#000" stroke="none"/></>);
+  const eyeR = (<><ellipse cx="91" cy="51" rx="4.6" ry="6" fill="#fff" strokeWidth="2"/><circle cx="89.8" cy="52" r="2.5" fill="#000" stroke="none"/></>);
+  const face = {
+    wink: { eyes: (<>{eyeL}<g className="ff-wink">{eyeR}</g><path d="M62 44 Q70 40 76 44" strokeWidth="2.6" fill="none"/><path d="M86 44 Q92 40 99 43" strokeWidth="2.6" fill="none"/>{blush}</>), mouth: grin },
+    grin: { eyes: (<>{eyeL}{eyeR}<path d="M62 44 Q70 40 76 44" strokeWidth="2.6" fill="none"/><path d="M86 44 Q92 40 98 44" strokeWidth="2.6" fill="none"/>{blush}</>), mouth: grin },
+    calm: { eyes: (<>{eyeL}{eyeR}<path d="M62 43 Q70 41 76 43" strokeWidth="2.4" fill="none"/><path d="M86 43 Q92 41 98 43" strokeWidth="2.4" fill="none"/></>),
+            mouth: <path d="M71 66 Q80 72 89 66" strokeWidth="2.6" fill="none"/> },
+    angry: { eyes: (<><ellipse cx="70" cy="52" rx="4.4" ry="5" fill="#fff" strokeWidth="2"/><circle cx="71" cy="53" r="2.4" fill="#000" stroke="none"/><ellipse cx="91" cy="52" rx="4.4" ry="5" fill="#fff" strokeWidth="2"/><circle cx="90" cy="53" r="2.4" fill="#000" stroke="none"/><path d="M60 40 L77 47" strokeWidth="3.2" fill="none"/><path d="M84 47 L101 40" strokeWidth="3.2" fill="none"/></>),
+             mouth: (<><path d="M67 65 Q80 61 93 65 L91 74 Q80 78 69 74 Z" fill="#fff" strokeWidth="2.2"/><path d="M69 69.5 Q80 67 91 69.5 M75 64 L75 76 M80 63 L80 77 M85 64 L85 76" strokeWidth="1.1" fill="none"/></>) },
+    shout: { eyes: (<><path d="M64 52 Q70 46 76 52" strokeWidth="2.8" fill="none"/><path d="M85 52 Q91 46 97 52" strokeWidth="2.8" fill="none"/><path d="M60 41 L76 45" strokeWidth="3" fill="none"/><path d="M84 45 L100 41" strokeWidth="3" fill="none"/></>),
+             mouth: (<><path d="M66 62 Q80 59 94 62 Q93 80 80 80 Q67 80 66 62 Z" fill="#7A1F1F" strokeWidth="2.4"/><path d="M71 74.5 Q80 69 89 74.5 Q86 79 80 79 Q74 79 71 74.5 Z" fill="#E86A7A" strokeWidth="0"/><path d="M69 63.5 Q80 61 91 63.5 L90 67 Q80 65 70 67 Z" fill="#fff" strokeWidth="0"/></>) },
+  }[c.face];
+  const stubble = c.beard === "stubble" && <path d="M54 55 Q54 79 80 80 Q106 79 106 55 Q98 67 80 67 Q62 67 54 55 Z" fill={H} opacity=".38" stroke="none"/>;
+  const beardBig = c.beard === "beard" && <path d="M53 52 Q50 88 80 91 Q110 88 107 52 Q100 60 92 58 Q80 62 68 58 Q60 60 53 52 Z" fill={H}/>;
+  const mustache = (c.beard === "mustache" || c.beard === "beard") && <path d="M65 61 Q73 55 80 60 Q87 55 95 61 Q88 66 80 63 Q72 66 65 61 Z" fill={H}/>;
+
+  // ── аксессуары
+  const acc = {
+    glasses: (<g fill="rgba(255,255,255,.16)" strokeWidth="2.4"><circle cx="70" cy="51" r="8.5"/><circle cx="91" cy="51" r="8.5"/><path d="M78.5 50 Q80.5 47 82.5 50" fill="none"/><path d="M61.5 50 L54 47 M99.5 50 L107 47" fill="none"/></g>),
+    shades: (<g strokeWidth="2.2"><path d="M57 44 H79 V54 Q79 63 71 63 H65 Q57 63 57 54 Z" fill="#141416"/><path d="M82 44 H104 V54 Q104 63 96 63 H90 Q82 63 82 54 Z" fill="#141416"/><path d="M79 47 H82" fill="none" strokeWidth="2.6"/><path d="M60.5 48 L66 47 M85.5 48 L91 47" stroke="#fff" strokeWidth="1.6" opacity=".55" fill="none"/></g>),
+    band: (<><path d="M53 38 Q80 26 107 38 L107 46 Q80 34 53 46 Z" fill={A}/><path d="M106 38 L117 33 L114 43 Z" fill={A}/><path d="M106 43 L118 46 L111 50 Z" fill={A}/></>),
+    cap: (<><path d="M52 38 Q50 12 80 11 Q110 12 108 38 Q80 32 52 38 Z" fill={S}/><path d="M49 39 Q80 50 111 39 L111 33 Q80 41 49 33 Z" fill={A}/><circle cx="80" cy="12" r="2.6" fill={A}/></>),
+  }[c.acc] || null;
+
+  const lift = arms[0].lift;
+  // Сторона руки (0 — левая, 1 — правая) берётся из исходного порядка, а не из порядка после
+  // фильтрации по слою: иначе в позе «Один бицепс» (одна рука за туловищем, другая поверх) правая
+  // рука получила бы класс левой и «сжималась» бы в обратную сторону.
+  const armsBack = arms.map((a, i) => a.layer === "back" ? renderArm(a, i) : null);
+  const armsFront = arms.map((a, i) => a.layer === "front" ? renderArm(a, i) : null);
   return (
-    <svg className="flex-fig" viewBox="0 -5 160 179" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Качок напрягает бицепсы">
+    <svg className={`flex-fig${still || !c.anim ? " ff-still" : ""}`} data-cfg={JSON.stringify(c)} viewBox="0 -5 160 179" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Персонаж">
       <g className="ff-body" stroke="#000" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round">
-        <g className="ff-arm ff-arm-l">
-          <path d="M50 98 L24 102" strokeWidth="31" fill="none"/>
-          <path d="M24 102 L23 76" strokeWidth="27" fill="none"/>
-          <path d="M23 76 L23 62" strokeWidth="20" fill="none"/>
-          <path d="M50 98 L24 102" stroke={skin} strokeWidth="25" fill="none"/>
-          <path d="M24 102 L23 76" stroke={skin} strokeWidth="21" fill="none"/>
-          <path d="M23 76 L23 62" stroke={skin} strokeWidth="14" fill="none"/>
-          <Fist x={23}/>
-          <g className="ff-bicep"><ellipse cx="38" cy="86" rx="15" ry="14" fill={skin}/><path d="M28 83 Q38 73 48 83" stroke={skinLine} strokeWidth="2.2" fill="none"/></g>
-        </g>
-        <g className="ff-arm ff-arm-r">
-          <path d="M110 98 L136 102" strokeWidth="31" fill="none"/>
-          <path d="M136 102 L137 76" strokeWidth="27" fill="none"/>
-          <path d="M137 76 L137 62" strokeWidth="20" fill="none"/>
-          <path d="M110 98 L136 102" stroke={skin} strokeWidth="25" fill="none"/>
-          <path d="M136 102 L137 76" stroke={skin} strokeWidth="21" fill="none"/>
-          <path d="M137 76 L137 62" stroke={skin} strokeWidth="14" fill="none"/>
-          <Fist x={137}/>
-          <g className="ff-bicep"><ellipse cx="122" cy="86" rx="15" ry="14" fill={skin}/><path d="M112 83 Q122 73 132 83" stroke={skinLine} strokeWidth="2.2" fill="none"/></g>
-        </g>
-        <path d="M46 92 Q80 82 114 92 L112 120 L108 180 L52 180 L48 120 Z" fill={suit}/>
-        <path d="M44 96 Q47 84 58 86 L60 112 L46 114 Q42 104 44 96 Z" fill={suit}/>
-        <path d="M116 96 Q113 84 102 86 L100 112 L114 114 Q118 104 116 96 Z" fill={suit}/>
-        <path d="M56 122 Q68 134 80 124 Q92 134 104 122" stroke="#1B4A9E" strokeWidth="2.4" fill="none"/>
-        <path d="M80 130 L80 180" stroke={yellow} strokeWidth="4.5" fill="none"/>
-        <path d="M62 88 L80 114 L98 88 L92 83 L80 100 L68 83 Z" fill={yellow}/>
-        <path d="M70 74 L70 87 L80 100 L90 87 L90 74 Z" fill={skin}/>
-        <circle cx="80" cy="50" r="27" fill="#F0C9A0"/>
-        <path d="M53 50 Q49 24 76 21 Q101 19 108 40 Q100 30 88 33 Q70 34 63 52 Z" fill={yellow}/>
-        <path d="M66 25 Q62 9 84 5 Q80 13 90 20 Q78 17 74 26 Z" fill={yellow}/>
-        <g className="ff-face" strokeLinecap="round">
-          <g><ellipse cx="70" cy="51" rx="4.6" ry="6" fill="#fff" strokeWidth="2"/><circle cx="71.2" cy="52" r="2.5" fill="#000" stroke="none"/></g>
-          <g className="ff-wink"><ellipse cx="91" cy="51" rx="4.6" ry="6" fill="#fff" strokeWidth="2"/><circle cx="89.8" cy="52" r="2.5" fill="#000" stroke="none"/></g>
-          <path d="M62 44 Q70 40 76 44" strokeWidth="2.6" fill="none"/>
-          <path d="M86 44 Q92 40 99 43" strokeWidth="2.6" fill="none"/>
-          <path d="M66 63 Q80 77 96 63 Q80 67 66 63 Z" fill="#fff" strokeWidth="2.2"/>
-          <path d="M73 66 L73 69 M80 67 L80 71 M87 66 L87 69" strokeWidth="1" fill="none"/>
-          <circle cx="62" cy="59" r="3.2" fill="#E58D7A" opacity=".55" stroke="none"/><circle cx="98" cy="59" r="3.2" fill="#E58D7A" opacity=".55" stroke="none"/>
-        </g>
+        {lift ? <g className="ff-lift">{bar}{armsBack}</g> : armsBack}
+        {body}
+        {armsFront}
+        {over}
+        {hairBack}
+        <circle cx="80" cy="50" r="27" fill={sk.head}/>
+        {stubble}
+        {!cap && hairFront}
+        {beardBig}
+        <g>{face.eyes}</g>
+        <g>{face.mouth}</g>
+        {mustache}
+        {acc}
       </g>
       <g className="ff-shine" stroke="#FFF" strokeWidth="2.2" strokeLinecap="round">
-        <path d="M5 80 L10 84 M3 92 L9 92 M5 104 L10 100"/>
-        <path d="M155 80 L150 84 M157 92 L151 92 M155 104 L150 100"/>
+        <path d="M5 80 L10 84 M3 92 L9 92 M5 104 L10 100"/><path d="M155 80 L150 84 M157 92 L151 92 M155 104 L150 100"/>
       </g>
     </svg>
   );
+}
+// ── AVATAR:END ──────────────────────────────────────────────────────────────
+
+// Копия внешности на устройстве. Основное хранилище — сервер (тогда её видят друзья);
+// копия нужна как запасной вариант, пока на Railway ещё не выложена новая версия
+// бэкенда (тогда поле avatar в ответе отсутствует) — читается ТОЛЬКО в этом случае.
+const avatarLocalKey = (pid) => `gym_diary_avatar_v1_${pid ?? "x"}`;
+function loadLocalAvatar(pid) {
+  try { const r = localStorage.getItem(avatarLocalKey(pid)); return r ? JSON.parse(r) : null; } catch (e) { return null; }
+}
+function saveLocalAvatar(pid, a) {
+  try { if (!a) localStorage.removeItem(avatarLocalKey(pid)); else localStorage.setItem(avatarLocalKey(pid), JSON.stringify(a)); } catch (e) {}
 }
 
 // ── Шторка выбора упражнения для рекорда ──────────────────────────────────
@@ -3922,17 +4114,114 @@ function RecordPickerSheet({ options, current, taken, onPick, onClear, onClose }
   );
 }
 
-// ── Блок статистики над списком профилей ──────────────────────────────────
-function StatsHero({ workouts, profileId, profileName }) {
+// ── Редактор персонажа ────────────────────────────────────────────────────
+// Шторка с живым предпросмотром сверху (он «прилипает», пока листаешь параметры).
+// «Готово» сохраняет, всё остальное (крестик, «Отмена»-жест назад) отменяет — но
+// если что-то успели поменять, сначала спрашивает. Тап по затемнению намеренно
+// ничего не закрывает: длинную настройку легко потерять случайным касанием.
+function AvatarEditorSheet({ initial, onSave, onClose }) {
+  const [cfg, setCfg] = useState(() => normalizeAvatar(initial));
+  useLockBodyScroll();
+  const dirty = avatarKey(cfg) !== avatarKey(initial);
+  const tryClose = () => { if (!dirty || window.confirm("Отменить изменения внешности?")) onClose(); };
+  useSwipeBack(tryClose);
+  const set = (k, v) => setCfg(c => ({ ...c, [k]: v }));
+  const chips = (key, list) => (
+    <div className="av-chips">
+      {list.map(([id, label]) => (
+        <button key={id} type="button" className={`av-chip${cfg[key] === id ? " on" : ""}`} aria-pressed={cfg[key] === id} onClick={() => set(key, id)}>{label}</button>
+      ))}
+    </div>
+  );
+  const swatches = (key, list) => (
+    <div className="av-sws">
+      {list.map(([id, label, val]) => (
+        <button key={id} type="button" title={label} aria-label={label} aria-pressed={cfg[key] === id}
+          className={`av-sw${cfg[key] === id ? " on" : ""}`} style={{ background: val }} onClick={() => set(key, id)}/>
+      ))}
+    </div>
+  );
+  const bgCss = avHex(AV_BGS, cfg.bg);
+  return (
+    <div className="overlay av-overlay">
+      <div className="sheet">
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-icon-btn" onClick={tryClose} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <span className="det-title" style={{flex:1,minWidth:0,paddingRight:36}}>Персонаж</span>
+        </div>
+        <div className="av-prev">
+          <div className="av-prev-fig" style={{ background: bgCss }}><Avatar cfg={cfg}/></div>
+          <div className="av-prev-btns">
+            <button className="btn" onClick={() => dirty ? onSave(cfg) : onClose()}>Готово</button>
+            <button className="btn ghost" onClick={() => setCfg(randomAvatar(Math.random, cfg.anim))}>Случайный</button>
+            <button className="btn ghost" onClick={() => setCfg({ ...DEFAULT_AVATAR, anim: cfg.anim })}>Сбросить</button>
+          </div>
+        </div>
+        <div className="av-sec">Поза</div>{chips("pose", AV_POSES)}
+        <div className="av-sec">Одежда</div>{chips("outfit", AV_OUTFITS)}
+        <div className="av-sec">Цвет одежды</div>{swatches("suit", AV_COLORS)}
+        <div className="av-sec">Цвет отделки</div>{swatches("accent", AV_COLORS)}
+        <div className="av-sec">Кожа</div>{swatches("skin", AV_SKINS.map(([id, l, s]) => [id, l, s.arm]))}
+        <div className="av-sec">Причёска</div>{chips("hair", AV_HAIRS)}
+        <div className="av-sec">Цвет волос</div>{swatches("hairColor", AV_HAIR_COLORS)}
+        <div className="av-sec">Лицо</div>{chips("face", AV_FACES)}
+        <div className="av-sec">Борода</div>{chips("beard", AV_BEARDS)}
+        <div className="av-sec">Аксессуар</div>{chips("acc", AV_ACCS)}
+        <div className="av-sec">Фон</div>{swatches("bg", AV_BGS)}
+        <div className="av-sec">Анимация</div>
+        <div className="av-chips">
+          <button type="button" className={`av-chip${cfg.anim ? " on" : ""}`} aria-pressed={cfg.anim} onClick={() => set("anim", true)}>Включена</button>
+          <button type="button" className={`av-chip${!cfg.anim ? " on" : ""}`} aria-pressed={!cfg.anim} onClick={() => set("anim", false)}>Выключена</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Блок статистики ───────────────────────────────────────────────────────
+// Два режима. Свой профиль: можно менять персонажа и рекорды, всё сохраняется
+// через onSave (на сервер — чтобы это видели друзья). readOnly — так блок
+// показывается в профиле друга: те же числа, его персонаж и его рекорды, но
+// без карандаша и без выбора; пустые слоты рекордов не показываются.
+// Что видит друг, определяется его настройками приватности (см. FriendProfileView).
+function StatsHero({ workouts, profileId, profileName, avatarRaw, pinsRaw, readOnly = false, onSave }) {
   const stats = useMemo(() => computeProfileStats(workouts), [workouts]);
   const options = useMemo(() => listExerciseNames(workouts), [workouts]);
-  // Пока человек ничего не выбирал сам — подставляем 3 самых частых упражнения,
-  // чтобы блок не был пустым. Как только он выберет/уберёт хоть одно — берётся
-  // его собственный выбор (и он сохраняется).
-  const [saved, setSaved] = useState(() => loadStatsPins(profileId));
-  // Самые частые; при равенстве — те, что делали позже (порядок не зависит от
-  // того, в каком порядке сервер вернул тренировки).
-  const pins = saved ?? [...options]
+
+  // ── персонаж: сервер (avatarRaw) — основной источник; копия на устройстве — только если
+  // сервер поля не знает вовсе (avatarRaw === undefined, старая версия бэкенда).
+  const avatarSaved = readOnly ? avatarRaw : (avatarRaw !== undefined ? avatarRaw : loadLocalAvatar(profileId));
+  const cfg = normalizeAvatar(avatarSaved);
+  const [editing, setEditing] = useState(false);
+  const saveAvatar = (next) => {
+    const n = normalizeAvatar(next);
+    const isDefault = avatarKey(n) === avatarKey(DEFAULT_AVATAR);
+    saveLocalAvatar(profileId, isDefault ? null : n);
+    onSave && onSave({ avatar: isDefault ? {} : n });   // {} = «по умолчанию»
+    setEditing(false);
+  };
+
+  // ── рекорды. Пока человек ничего не выбирал — 3 самых частых упражнения (при равенстве —
+  // те, что делали позже: порядок не зависит от того, в каком порядке сервер вернул тренировки).
+  // Старая версия хранила выбор только на устройстве: если на сервере пусто (null), а на
+  // устройстве есть — один раз переносим на сервер, чтобы его увидели друзья.
+  const [localPins] = useState(() => readOnly ? null : loadStatsPins(profileId));
+  const [localAv] = useState(() => readOnly ? null : loadLocalAvatar(profileId));
+  const savedPins = Array.isArray(pinsRaw)
+    ? [0, 1, 2].map(i => (typeof pinsRaw[i] === "string" && pinsRaw[i].trim()) ? pinsRaw[i] : null)
+    : (readOnly ? null : localPins);
+  useEffect(() => {
+    if (readOnly || !onSave) return;
+    const patch = {};
+    if (pinsRaw === null && localPins) patch.stats_pins = localPins;
+    if (avatarRaw === null && localAv) patch.avatar = localAv;
+    if (Object.keys(patch).length) onSave(patch, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const pins = savedPins ?? [...options]
     .sort((a, b) => (b.count - a.count) || b.last.localeCompare(a.last))
     .slice(0, 3).map(o => o.name).concat([null, null, null]).slice(0, 3);
   const [pickSlot, setPickSlot] = useState(null);
@@ -3940,7 +4229,9 @@ function StatsHero({ workouts, profileId, profileName }) {
 
   const choose = (slot, name) => {
     const next = pins.slice(); next[slot] = name;
-    setSaved(next); saveStatsPins(profileId, next); setPickSlot(null);
+    saveStatsPins(profileId, next);
+    onSave && onSave({ stats_pins: next });
+    setPickSlot(null);
   };
 
   const cells = [
@@ -3949,12 +4240,16 @@ function StatsHero({ workouts, profileId, profileName }) {
     { val: fmtInt(stats.sets), lbl: "Подходов" },
     { val: fmtInt(stats.exercises), lbl: "Упражнений", sub: stats.distinct ? `${fmtInt(stats.distinct)} разных` : null },
   ];
+  const shownPins = readOnly ? pins.map((n, i) => ({ n, i })).filter(x => x.n) : pins.map((n, i) => ({ n, i }));
 
   return (
     <div className="stats-hero">
       <div className="stats-hd"><span>Статистика</span>{profileName ? <span className="stats-who">{profileName}</span> : null}</div>
       <div className="stats-main">
-        <div className="stats-fig"><FlexFigure/></div>
+        <div className="stats-fig" style={{ background: avHex(AV_BGS, cfg.bg) }}>
+          <Avatar cfg={cfg}/>
+          {!readOnly && <button className="fig-edit" onClick={() => setEditing(true)} title="Изменить персонажа" aria-label="Изменить персонажа"><IconEdit/></button>}
+        </div>
         <div className="stats-list">
           {cells.map(c => (
             <div key={c.lbl} className="stat-cell">
@@ -3964,13 +4259,13 @@ function StatsHero({ workouts, profileId, profileName }) {
           ))}
         </div>
       </div>
-      <div className="stats-hd" style={{marginTop:16}}><span>Рекорды</span></div>
+      {(!readOnly || (options.length > 0 && shownPins.length > 0)) && <div className="stats-hd" style={{marginTop:16}}><span>Рекорды</span></div>}
       {options.length === 0
-        ? <div className="rec-empty">Рекорды появятся после первой тренировки</div>
-        : pins.map((name, i) => {
+        ? (readOnly ? null : <div className="rec-empty">Рекорды появятся после первой тренировки</div>)
+        : shownPins.map(({ n: name, i }) => {
             const rec = records[i];
             return (
-              <div key={i} className={`rec-row${name ? "" : " empty"}`} onClick={() => setPickSlot(i)}>
+              <div key={i} className={`rec-row${name ? "" : " empty"}${readOnly ? " ro" : ""}`} onClick={readOnly ? undefined : () => setPickSlot(i)}>
                 {name ? (
                   <>
                     <div className="rec-left">
@@ -3989,7 +4284,7 @@ function StatsHero({ workouts, profileId, profileName }) {
               </div>
             );
           })}
-      {pickSlot !== null && (
+      {!readOnly && pickSlot !== null && (
         <RecordPickerSheet
           options={options}
           current={pins[pickSlot]}
@@ -3999,6 +4294,7 @@ function StatsHero({ workouts, profileId, profileName }) {
           onClose={() => setPickSlot(null)}
         />
       )}
+      {!readOnly && editing && <AvatarEditorSheet initial={cfg} onSave={saveAvatar} onClose={() => setEditing(false)}/>}
     </div>
   );
 }
@@ -4020,6 +4316,23 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ha
     await api.updateProfile(id,{name:renameVal.trim()});
     setProfiles(prev=>prev.map(p=>p.id===id?{...p,name:renameVal.trim()}:p));
     setRenamingId(null);
+  };
+
+  // Сохранение произвольных полей профиля (внешность персонажа, выбор рекордов): сразу
+  // показываем результат, а если сервер не ответил — откатываем и говорим об этом.
+  const saveProfilePatch=async(id,patch,silent=false)=>{
+    const before=profiles.find(p=>p.id===id)||{};
+    const prevVals={};
+    Object.keys(patch).forEach(k=>{prevVals[k]=before[k];});
+    setProfiles(prev=>prev.map(p=>p.id===id?{...p,...patch}:p));
+    try{
+      await api.updateProfile(id,patch);
+      return true;
+    }catch(e){
+      setProfiles(prev=>prev.map(p=>p.id===id?{...p,...prevVals}:p));
+      if(!silent) toast("Не удалось сохранить");
+      return false;
+    }
   };
 
   const handleToggle=async(id,field,value)=>{
@@ -4128,7 +4441,9 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ha
 
   return(
     <div className="page">
-      <StatsHero key={activeProfile?.id ?? "x"} workouts={workouts||[]} profileId={activeProfile?.id} profileName={activeProfile?.name}/>
+      <StatsHero key={activeProfile?.id ?? "x"} workouts={workouts||[]} profileId={activeProfile?.id} profileName={activeProfile?.name}
+        avatarRaw={activeProfile?.avatar} pinsRaw={activeProfile?.stats_pins}
+        onSave={(patch,silent)=>activeProfile?saveProfilePatch(activeProfile.id,patch,silent):Promise.resolve(false)}/>
       <button className="btn" onClick={()=>setShowCreate(true)}><IconPlus/>Новый профиль</button>
       {profiles.map(p=>(
         <div key={p.id} className="card" onClick={()=>setDetailId(p.id)}>
