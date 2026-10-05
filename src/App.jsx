@@ -273,6 +273,15 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 @media (prefers-reduced-motion:reduce){.flex-fig .ff-body,.flex-fig .ff-lift,.flex-fig .ff-arm-l,.flex-fig .ff-arm-r,.flex-fig .ff-arm,.flex-fig .ff-bicep,.flex-fig .ff-wink,.flex-fig .ff-shine{animation:none!important}.flex-fig .ff-shine{opacity:0}}
 .ex-note-hint{margin:0 14px 10px;padding:6px 0 6px 10px;font-size:12px;color:#8A8A8A;border-left:2px solid #333;line-height:1.5;font-style:italic;cursor:pointer;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ex-note-hint.expanded{-webkit-line-clamp:unset;display:block}
+.ex-note-row{display:flex;align-items:flex-start;gap:4px;margin:0 6px 10px 0}
+.ex-note-row .ex-note-hint{margin:0 0 0 14px;flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word}
+.ex-note-row .del-btn{padding:8px;flex-shrink:0}
+.ex-note-add{display:block;margin:0 14px 10px;padding:4px 0;background:none;border:none;color:#666;font-size:12px;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ex-note-add:active{color:#FFF}
+.ex-note-add:disabled{opacity:.4;cursor:default}
+.ex-note-edit{display:block;width:calc(100% - 28px);margin:0 14px 6px;min-height:64px}
+.ex-note-done{display:block;margin:0 14px 10px auto;padding:6px 12px;background:none;border:1px solid #3A3A3A;color:#CCC;font-size:12px;font-family:inherit;cursor:pointer}
+.ex-note-done:active{background:#222}
 .sets{padding:10px 14px;overflow:hidden;contain:layout}
 .set-row{display:flex;align-items:center;gap:5px;margin-bottom:8px;width:100%;min-width:0}
 .set-n{font-size:11px;color:#5C5C5C;font-weight:600;text-align:center;flex-shrink:0;width:18px}
@@ -413,6 +422,11 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .comm-badge-num{background:#F6485B;color:#FFF;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 5px;flex-shrink:0}
 .feed-post{border:1px solid #3A3A3A;background:#111;padding:14px 16px;margin-bottom:12px}
 .feed-post-hd{display:flex;align-items:center;gap:12px}
+.feed-post-hd.tappable{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.feed-post-hd.tappable:active{opacity:.7}
+.feed-post-hd .feed-chev{color:#555;flex-shrink:0;display:flex}
+.feed-av{width:44px;height:44px;flex-shrink:0;border:1px solid #3A3A3A;overflow:hidden;display:flex}
+.feed-av svg{display:block;width:100%;height:100%}
 .feed-post-actions{display:flex;gap:16px;margin-top:12px;padding-top:10px;border-top:1px solid #242424}
 .feed-action{display:flex;align-items:center;gap:5px;background:none;border:none;color:#888;font-size:12px;cursor:pointer;padding:4px 0}
 .feed-action.active{color:#F6485B}
@@ -867,10 +881,36 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   // из тренировки и искать упражнение отдельно. По умолчанию свёрнуты в 2
   // строки (минимально), разворачиваются по тапу, если текст длиннее.
   const [exNotes, setExNotes] = useState({});
-  useEffect(() => { api.getExerciseNotes().then(d=>setExNotes(d||{})).catch(()=>{}); }, []);
+  // Править описание можно только после успешной загрузки существующих: иначе при сбое
+  // сети поле открылось бы пустым, и сохранение затёрло бы настоящее описание.
+  const [exNotesLoaded, setExNotesLoaded] = useState(false);
+  useEffect(() => { api.getExerciseNotes().then(d=>{setExNotes(d||{});setExNotesLoaded(true);}).catch(()=>{}); }, []);
   const [expandedNotes, setExpandedNotes] = useState({});
   const getExNote = (name) => { const k=(name||"").trim().toLowerCase(); return k ? (exNotes[k] || "") : ""; };
   const toggleNoteExpand = (id) => setExpandedNotes(p=>({...p,[id]:!p[id]}));
+
+  // Редактирование описания прямо во время тренировки (то же общее описание по имени
+  // упражнения, что и во вкладке «Упражнения»). Автосохранение с задержкой; незаписанное
+  // досохраняется при закрытии/сворачивании формы, чтобы ничего не терялось.
+  const [noteEditId, setNoteEditId] = useState(null);
+  const noteTimers = useRef({});
+  const notePending = useRef({});
+  const flushNote = (k) => {
+    clearTimeout(noteTimers.current[k]);
+    const pend = notePending.current[k];
+    if (pend) { delete notePending.current[k]; api.saveExerciseNote(pend.name, pend.text).catch(()=>{}); }
+  };
+  const setExNoteText = (name, text) => {
+    const nm = (name||"").trim(), k = nm.toLowerCase();
+    if (!k) return;
+    setExNotes(p=>({...p,[k]:text}));
+    notePending.current[k] = { name: nm, text };
+    clearTimeout(noteTimers.current[k]);
+    noteTimers.current[k] = setTimeout(()=>flushNote(k), 600);
+  };
+  useEffect(() => () => { Object.keys(notePending.current).forEach(flushNote); },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []);
 
   const allExNames = [...new Set(
     workouts.filter(w=>!isEdit||w.id!==initial?.id).flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean))
@@ -1070,11 +1110,27 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
                 <button className="del-btn" disabled={ei===exercises.length-1} onClick={()=>moveEx(ex.id,1)} title="Переместить ниже"><IconArrowDown/></button>
                 {exercises.length>1&&<button className="del-btn" onClick={()=>remEx(ex.id)}><IconTrash/></button>}
               </div>
-              {exNote&&(
-                <div className={`ex-note-hint${expandedNotes[ex.id]?" expanded":""}`} onClick={()=>toggleNoteExpand(ex.id)}>
-                  {exNote}
+              {noteEditId===ex.id&&ex.name.trim()?(
+                <>
+                  <textarea
+                    className="ex-note-inp ex-note-edit"
+                    placeholder="Сетап, техника выполнения, на что обратить внимание..."
+                    value={exNote}
+                    onChange={e=>setExNoteText(ex.name,e.target.value)}
+                    autoFocus
+                  />
+                  <button className="ex-note-done" onClick={()=>{flushNote(ex.name.trim().toLowerCase());setNoteEditId(null);}}>Готово</button>
+                </>
+              ):exNote?(
+                <div className="ex-note-row">
+                  <div className={`ex-note-hint${expandedNotes[ex.id]?" expanded":""}`} onClick={()=>toggleNoteExpand(ex.id)}>
+                    {exNote}
+                  </div>
+                  <button className="del-btn" disabled={!exNotesLoaded} onClick={()=>setNoteEditId(ex.id)} title="Изменить описание"><IconEdit/></button>
                 </div>
-              )}
+              ):ex.name.trim()?(
+                <button className="ex-note-add" disabled={!exNotesLoaded} onClick={()=>setNoteEditId(ex.id)}>+ описание</button>
+              ):null}
               {prog&&(
                 <div className="prog-hint" onClick={()=>fillFromProgression(ex.id,prog.next_session)}>
                   {prog.next_session.role&&<span className={`role-tag role-${prog.next_session.role}`} style={{marginRight:6}}>{ROLE_LABELS[prog.next_session.role]}</span>}
@@ -3538,10 +3594,14 @@ function FriendsView({friends, setFriends, onBack, toast, onRequestsChanged}) {
   );
 }
 
-function FeedPost({post, onLikeToggle, onCommentAdd, onCommentDelete}) {
+function FeedPost({post, onLikeToggle, onCommentAdd, onCommentDelete, onOpenAuthor}) {
   const [commentText,setCommentText]=useState("");
   const [showComments,setShowComments]=useState(false);
   const [busy,setBusy]=useState(false);
+  // Профиль можно открыть только у друзей (у себя — нет: «профиль друга» для себя не существует).
+  const canOpen=!!onOpenAuthor && post.author.id!==getMyUserId();
+  // undefined — старый бэкенд ещё не отдаёт внешность: остаётся буква. null/{} — персонаж по умолчанию.
+  const avCfg=post.author.avatar!==undefined ? normalizeAvatar(post.author.avatar) : null;
 
   const submitComment=async()=>{
     const text=commentText.trim();
@@ -3555,12 +3615,17 @@ function FeedPost({post, onLikeToggle, onCommentAdd, onCommentDelete}) {
 
   return (
     <div className="feed-post">
-      <div className="feed-post-hd">
-        <div className="avatar">{(post.author.name||"?")[0].toUpperCase()}</div>
+      <div className={`feed-post-hd${canOpen?" tappable":""}`} onClick={canOpen?()=>onOpenAuthor(post.author.id):undefined}>
+        {avCfg?(
+          <div className="feed-av" style={{background:avHex(AV_BGS,avCfg.bg)}}><Avatar cfg={avCfg} still bust/></div>
+        ):(
+          <div className="avatar">{(post.author.name||"?")[0].toUpperCase()}</div>
+        )}
         <div style={{minWidth:0,flex:1}}>
           <div className="card-title">{post.author.name}</div>
           <div className="card-sub">{formatDate(post.date)} · {post.post_type==="workout"?post.title:`Замер «${post.title}»`}</div>
         </div>
+        {canOpen&&<span className="feed-chev"><IconChevron/></span>}
       </div>
 
       {post.post_type==="workout"?(
@@ -3628,7 +3693,7 @@ function FeedPost({post, onLikeToggle, onCommentAdd, onCommentDelete}) {
   );
 }
 
-function FeedSection() {
+function FeedSection({onOpenAuthor}) {
   const [posts,setPosts]=useState([]);
   const [loading,setLoading]=useState(true);
   const [loadingMore,setLoadingMore]=useState(false);
@@ -3695,7 +3760,7 @@ function FeedSection() {
       {posts.length===0
         ? <div className="empty" style={{paddingTop:12}}><div className="empty-icon">📭</div>Пока пусто.<br/>Как только друзья начнут записывать тренировки и замеры, они появятся здесь.</div>
         : posts.map(p=>(
-          <FeedPost key={`${p.post_type}-${p.post_id}`} post={p} onLikeToggle={handleLikeToggle} onCommentAdd={handleCommentAdd} onCommentDelete={handleCommentDelete}/>
+          <FeedPost key={`${p.post_type}-${p.post_id}`} post={p} onLikeToggle={handleLikeToggle} onCommentAdd={handleCommentAdd} onCommentDelete={handleCommentDelete} onOpenAuthor={onOpenAuthor}/>
         ))}
       {nextBefore&&(
         <button className="btn ghost" onClick={handleLoadMore} disabled={loadingMore} style={{marginTop:10}}>
@@ -3708,6 +3773,19 @@ function FeedSection() {
 
 function CommunityTab({friends, setFriends, toast, badge, onBadgeChange, reloadBadge}) {
   const [view,setView]=useState(null); // null | "news" | "friends"
+  // Профиль друга, открытый тапом по посту в ленте. Лента при этом остаётся в дереве
+  // (просто скрыта), чтобы по «Назад» не перезагружаться с нуля и не терять подгруженные посты.
+  const [openFriendId,setOpenFriendId]=useState(null);
+  const [feedKey,setFeedKey]=useState(0);
+  useScrollTopOnChange(openFriendId);
+  const handleRemoveOpenFriend=async()=>{
+    if(!window.confirm("Удалить из друзей?"))return;
+    const id=openFriendId;
+    await api.removeFriend(id);
+    setFriends(prev=>prev.filter(f=>f.id!==id));
+    setOpenFriendId(null);
+    setFeedKey(k=>k+1); // посты бывшего друга должны уйти из ленты
+  };
 
   if(view==="news") return <NewsView onBack={()=>{setView(null);reloadBadge();}}/>;
   if(view==="friends") return (
@@ -3719,11 +3797,16 @@ function CommunityTab({friends, setFriends, toast, badge, onBadgeChange, reloadB
   );
 
   return (
-    <div className="page">
-      <NewsSection onOpen={()=>setView("news")} unread={badge.unread_news}/>
-      <FriendsSection onOpen={()=>setView("friends")} pendingCount={badge.pending_requests}/>
-      <FeedSection/>
-    </div>
+    <>
+      {openFriendId&&(
+        <FriendProfileView friendId={openFriendId} onBack={()=>setOpenFriendId(null)} onRemove={handleRemoveOpenFriend}/>
+      )}
+      <div className="page" style={openFriendId?{display:"none"}:undefined}>
+        <NewsSection onOpen={()=>setView("news")} unread={badge.unread_news}/>
+        <FriendsSection onOpen={()=>setView("friends")} pendingCount={badge.pending_requests}/>
+        <FeedSection key={feedKey} onOpenAuthor={setOpenFriendId}/>
+      </div>
+    </>
   );
 }
 
@@ -3921,7 +4004,7 @@ const AV_ARMS = {
   bar:     [ARM_BAR,     avMirror(ARM_BAR)],
 };
 
-function Avatar({ cfg, still = false }) {
+function Avatar({ cfg, still = false, bust = false }) {
   const c = cfg;
   const S = avHex(AV_COLORS, c.suit), A = avHex(AV_COLORS, c.accent), H = avHex(AV_HAIR_COLORS, c.hairColor);
   const sk = AV_SKINS.find(s => s[0] === c.skin)[2];
@@ -4036,9 +4119,9 @@ function Avatar({ cfg, still = false }) {
   const armsBack = arms.map((a, i) => a.layer === "back" ? renderArm(a, i) : null);
   const armsFront = arms.map((a, i) => a.layer === "front" ? renderArm(a, i) : null);
   return (
-    <svg className={`flex-fig${still || !c.anim ? " ff-still" : ""}`} data-cfg={JSON.stringify(c)} viewBox="0 -5 160 179" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Персонаж">
+    <svg className={`flex-fig${still || !c.anim ? " ff-still" : ""}`} data-cfg={JSON.stringify(c)} viewBox={bust ? "31 -4 98 98" : "0 -5 160 179"} xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Персонаж">
       <g className="ff-body" stroke="#000" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round">
-        {lift ? <g className="ff-lift">{bar}{armsBack}</g> : armsBack}
+        {lift ? <g className="ff-lift">{!bust && bar}{armsBack}</g> : armsBack}
         {body}
         {armsFront}
         {over}
