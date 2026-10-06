@@ -276,8 +276,8 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .ex-note-row{display:flex;align-items:flex-start;gap:4px;margin:0 6px 10px 0}
 .ex-note-row .ex-note-hint{margin:0 0 0 14px;flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word}
 .ex-note-row .del-btn{padding:8px;flex-shrink:0}
-.ex-note-add{display:block;margin:0 14px 10px;padding:4px 0;background:none;border:none;color:#666;font-size:12px;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.ex-note-add:active{color:#FFF}
+.ex-note-add{display:block;margin:10px 14px 10px;padding:7px 12px;background:none;border:1px dashed #555;color:#A0A0A0;font-size:12px;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ex-note-add:active{color:#FFF;border-color:#FFF}
 .ex-note-add:disabled{opacity:.4;cursor:default}
 .ex-note-edit{display:block;width:calc(100% - 28px);margin:0 14px 6px;min-height:64px}
 .ex-note-done{display:block;margin:0 14px 10px auto;padding:6px 12px;background:none;border:1px solid #3A3A3A;color:#CCC;font-size:12px;font-family:inherit;cursor:pointer}
@@ -337,6 +337,53 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .empty-icon{font-size:32px;margin-bottom:12px;opacity:.4}
 .m-prev-hint{display:flex;align-items:center;gap:6px;margin-top:4px}
 .m-prev-val{font-size:11px;color:#6E6E6E;font-style:italic}
+.w-hero{border:1px solid #3A3A3A;background:#111;padding:18px 16px 16px;margin-bottom:10px;position:relative;cursor:pointer;text-align:center;-webkit-tap-highlight-color:transparent}
+.w-hero:active:not(.editing){border-color:#777}
+.w-hero.editing{cursor:default;border-color:#FFF}
+.w-hero-lbl{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#777;font-weight:500}
+.w-hero-ic{position:absolute;top:14px;right:14px;color:#777;display:flex}
+.w-hero-val{font-size:44px;font-weight:700;letter-spacing:-.03em;line-height:1.1;margin:8px 0 4px;font-variant-numeric:tabular-nums}
+.w-hero-val small{font-size:16px;font-weight:500;color:#777;margin-left:6px;letter-spacing:0}
+.w-hero-val.none{color:#444}
+.w-hero-sub{font-size:12px;color:#777;min-height:16px}
+.w-hero-hint{margin-top:10px;font-size:11px;color:#6A6A6A;letter-spacing:.04em}
+.w-step-row{display:flex;align-items:stretch;gap:10px;margin:14px 0}
+.w-step{width:56px;flex-shrink:0;background:#0A0A0A;border:1px solid #444;color:#FFF;font-size:26px;font-family:inherit;line-height:1;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:manipulation;-webkit-touch-callout:none;display:flex;align-items:center;justify-content:center;padding:0}
+.w-step:active{background:#222;border-color:#FFF}
+.w-inp-wrap{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;background:#0A0A0A;border:1px solid #3A3A3A;padding:10px 8px}
+.w-inp-wrap:focus-within{border-color:#888}
+.w-inp{width:100%;min-width:0;background:none;border:none;outline:none;color:#FFF;font-size:34px;font-weight:700;text-align:center;font-family:inherit;letter-spacing:-.02em;font-variant-numeric:tabular-nums;padding:0}
+.w-inp::placeholder{color:#444}
+.w-inp-unit{color:#777;font-size:14px;flex-shrink:0}
+.w-actions{display:flex;gap:10px}
+.w-actions button{flex:1;padding:12px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;border:1px solid #FFF;background:transparent;color:#FFF}
+.w-actions button:active{background:#FFF;color:#000}
+.w-actions button.ghost{border-color:#444;color:#999;font-weight:500}
+.w-actions button.ghost:active{background:#1A1A1A;color:#FFF}
+.w-actions button.danger{border-color:#5A2A2A;color:#EF5350}
+.w-actions button:disabled{opacity:.5}
+.w-chart-card{border:1px solid #3A3A3A;background:#111;padding:12px 14px 8px;margin-bottom:10px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.w-chart-card:active{border-color:#777}
+.w-chart-hd{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.w-chart-title{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#777;font-weight:500;flex:1}
+.w-chart-sum{font-size:12px;color:#888}
+.w-svg{display:block;width:100%;height:auto}
+.w-chart-empty{padding:26px 8px 22px;text-align:center;color:#555;font-size:13px;line-height:1.5}
+.w-chart-det{border:1px solid #3A3A3A;background:#111;padding:10px 10px 6px;margin-bottom:12px;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.w-chips{display:flex;gap:6px;margin-bottom:12px}
+.w-chips button{flex:1;padding:7px 0;font-size:11px;font-weight:600;letter-spacing:.04em;font-family:inherit;color:#777;background:none;border:1px solid #3A3A3A;cursor:pointer}
+.w-chips button.active{color:#000;background:#FFF;border-color:#FFF}
+.w-readout{min-height:22px;font-size:13px;color:#777;margin-bottom:6px}
+.w-readout b{color:#FFF;font-size:15px;margin-left:6px}
+.w-stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid #3A3A3A;margin-bottom:6px}
+.w-stats>div{padding:10px 4px;text-align:center;border-right:1px solid #282828}
+.w-stats>div:last-child{border-right:none}
+.w-stat-v{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+.w-stat-l{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:#666;margin-top:3px}
+.w-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid #1A1A1A;cursor:pointer}
+.w-row-val{font-size:16px;font-weight:600;display:flex;align-items:center;gap:8px}
+.w-row-sub{font-size:12px;color:#777;margin-top:2px}
+.w-row-sub i{color:#555}
 .m-prev-delta{font-size:11px;font-weight:600}
 .m-prev-delta.pos{color:#4CAF50}
 .m-prev-delta.neg{color:#EF5350}
@@ -1129,7 +1176,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
                   <button className="del-btn" disabled={!exNotesLoaded} onClick={()=>setNoteEditId(ex.id)} title="Изменить описание"><IconEdit/></button>
                 </div>
               ):ex.name.trim()?(
-                <button className="ex-note-add" disabled={!exNotesLoaded} onClick={()=>setNoteEditId(ex.id)}>+ описание</button>
+                <button className="ex-note-add" disabled={!exNotesLoaded} onClick={()=>setNoteEditId(ex.id)}>+ Добавить описание</button>
               ):null}
               {prog&&(
                 <div className="prog-hint" onClick={()=>fillFromProgression(ex.id,prog.next_session)}>
@@ -2945,19 +2992,323 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
   );
 }
 
+// ── Вес: объединение взвешиваний и замеров, график, блок «Текущий вес» ─────────
+const WEIGHT_MIN = 20, WEIGHT_MAX = 400, WEIGHT_SEED = 70;
+const fmtKg = (n) => { const t = String(Number(Number(n).toFixed(2))); return t.includes(".") ? t : t + ".0"; };
+const dayNum = (iso) => Date.parse(iso + "T00:00:00Z") / 86400000;
+const shortDate = (iso) => `${iso.slice(8,10)}.${iso.slice(5,7)}.${iso.slice(2,4)}`;
+const addDaysISO = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+const dayLabel = (iso) => iso === today() ? "сегодня" : iso === addDaysISO(today(), -1) ? "вчера" : formatDate(iso);
+const fmtDelta = (d) => (d > 0 ? "+" : "") + d.toFixed(1);
+
+// Все записи веса: быстрые взвешивания + вес, вписанный внутрь замеров. Замеры не
+// копируются — вес читается прямо из них, поэтому удалил/поправил замер — и график
+// сразу согласован. points — по одному значению на дату (для графика и «текущего»
+// веса): взвешивание приоритетнее веса из замера, из двух однотипных — более поздняя.
+function buildWeightData(weighIns, measurements) {
+  const entries = [];
+  weighIns.forEach(w => {
+    const v = Number(w.weight);
+    if (Number.isFinite(v)) entries.push({ key: `w${w.id}`, kind: "weighin", id: w.id, date: w.date, weight: v });
+  });
+  measurements.forEach(m => {
+    const v = parseFloat(m.weight);
+    if (Number.isFinite(v) && v >= WEIGHT_MIN && v <= WEIGHT_MAX)
+      entries.push({ key: `m${m.id}`, kind: "measurement", id: m.id, name: m.name, date: m.date, weight: v });
+  });
+  const byDate = new Map();
+  entries.forEach(e => {
+    const cur = byDate.get(e.date);
+    if (!cur || (e.kind === "weighin" && cur.kind !== "weighin") || (e.kind === cur.kind && e.id > cur.id)) byDate.set(e.date, e);
+  });
+  const points = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const usedKeys = new Set(points.map(p => p.key));
+  entries.sort((a, b) => a.date.localeCompare(b.date) || (a.kind === b.kind ? a.id - b.id : (a.kind === "measurement" ? -1 : 1)));
+  return { entries, points, usedKeys };
+}
+
+// Точки за последние `days` дней (0 = все)
+const windowPoints = (points, days) => {
+  if (!days) return points;
+  const from = addDaysISO(today(), -days);
+  return points.filter(p => p.date >= from);
+};
+
+function WeightChart({ points, height = 130, selected = null, onSelect = null }) {
+  const W = 340, H = height, L = 34, R = 12, T = 12, B = 22;
+  const n = points.length;
+  if (n === 0) return null;
+  const ws = points.map(p => p.weight);
+  let lo = Math.min(...ws), hi = Math.max(...ws);
+  if (hi - lo < 1) { const mid = (hi + lo) / 2; lo = mid - 0.5; hi = mid + 0.5; }
+  const pad = (hi - lo) * 0.18; lo -= pad; hi += pad;
+  const t0 = dayNum(points[0].date), t1 = dayNum(points[n - 1].date);
+  const xs = (p) => t1 === t0 ? L + (W - L - R) / 2 : L + (dayNum(p.date) - t0) / (t1 - t0) * (W - L - R);
+  const ys = (w) => T + (hi - w) / (hi - lo) * (H - T - B);
+  const coords = points.map(p => [xs(p), ys(p.weight)]);
+  const path = coords.map((c, i) => `${i ? "L" : "M"}${c[0].toFixed(1)} ${c[1].toFixed(1)}`).join(" ");
+  const ticks = [hi, (hi + lo) / 2, lo];
+  const pick = (e) => {
+    if (!onSelect) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width * W;
+    let best = 0, bd = Infinity;
+    coords.forEach((c, i) => { const d = Math.abs(c[0] - x); if (d < bd) { bd = d; best = i; } });
+    onSelect(best);
+  };
+  return (
+    <svg className="w-svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="График веса" data-testid="weight-chart"
+         onPointerDown={pick} onPointerMove={(e) => { if (e.buttons > 0) pick(e); }}>
+      {ticks.map((v, i) => (
+        <g key={i}>
+          <line x1={L} x2={W - R} y1={ys(v)} y2={ys(v)} stroke="#222" strokeWidth="1"/>
+          <text x={L - 6} y={ys(v) + 3} textAnchor="end" fontSize="10" fill="#666">{v.toFixed(1)}</text>
+        </g>
+      ))}
+      {n > 1 && <path d={path} fill="none" stroke="#FFF" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"/>}
+      {n <= 60 && coords.map((c, i) => i < n - 1 && (
+        <circle key={i} cx={c[0]} cy={c[1]} r="2.6" fill="#0A0A0A" stroke="#FFF" strokeWidth="1.4"/>
+      ))}
+      <circle cx={coords[n - 1][0]} cy={coords[n - 1][1]} r="4.2" fill="#FFF"/>
+      {selected != null && coords[selected] && (
+        <g>
+          <line x1={coords[selected][0]} x2={coords[selected][0]} y1={T} y2={H - B} stroke="#777" strokeWidth="1" strokeDasharray="3 3"/>
+          <circle cx={coords[selected][0]} cy={coords[selected][1]} r="5.5" fill="#FFF" stroke="#0A0A0A" strokeWidth="2"/>
+        </g>
+      )}
+      {n === 1
+        ? <text x={L + (W - L - R) / 2} y={H - 6} textAnchor="middle" fontSize="10" fill="#666">{shortDate(points[0].date)}</text>
+        : <>
+            <text x={L} y={H - 6} textAnchor="start" fontSize="10" fill="#666">{shortDate(points[0].date)}</text>
+            <text x={W - R} y={H - 6} textAnchor="end" fontSize="10" fill="#666">{shortDate(points[n - 1].date)}</text>
+          </>}
+    </svg>
+  );
+}
+
+// Поле веса с кнопками − / + (шаг 0.1 кг, при удержании — повтор). val — строка.
+function WeightStepper({ val, setVal, autoFocus = false, onEnter = null }) {
+  const hold = useRef({ t: null, iv: null });
+  const stop = () => { clearTimeout(hold.current.t); clearInterval(hold.current.iv); hold.current = { t: null, iv: null }; };
+  useEffect(() => stop, []);
+  const step = (dir) => setVal(prev => {
+    const n = parseFloat(prev);
+    const base = Number.isFinite(n) ? n : WEIGHT_SEED;
+    return Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN, Math.round((base + dir * 0.1) * 10) / 10)).toFixed(1);
+  });
+  const start = (dir) => (e) => {
+    e.preventDefault();
+    stop();
+    step(dir);
+    hold.current.t = setTimeout(() => { hold.current.iv = setInterval(() => step(dir), 70); }, 450);
+  };
+  const btn = (dir, label, sign) => (
+    <button type="button" className="w-step" aria-label={label}
+      onPointerDown={start(dir)} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop}
+      onContextMenu={(e) => e.preventDefault()}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); step(dir); } }}>{sign}</button>
+  );
+  return (
+    <div className="w-step-row">
+      {btn(-1, "Меньше на 0.1 кг", "−")}
+      <div className="w-inp-wrap">
+        <input className="w-inp" type="text" inputMode="decimal" placeholder="0.0" value={val} autoFocus={autoFocus}
+          onChange={(e) => setVal(normalizeDecimal(e.target.value))}
+          onKeyDown={(e) => { if (e.key === "Enter" && onEnter) onEnter(); }}/>
+        <span className="w-inp-unit">кг</span>
+      </div>
+      {btn(1, "Больше на 0.1 кг", "+")}
+    </div>
+  );
+}
+
+// Титульный блок вкладки «Замеры»: текущий вес. Тап — режим правки (− / +, либо
+// вписать цифрами), сохранение пишет взвешивание на сегодня.
+function WeightHero({ current, prev, onSave, toast }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState("");
+  const [saving, setSaving] = useState(false);
+  const start = () => { setVal(current ? fmtKg(current.weight) : ""); setEditing(true); };
+  const submit = async () => {
+    const n = parseFloat(val);
+    if (!Number.isFinite(n) || n < WEIGHT_MIN || n > WEIGHT_MAX) { toast(`Вес — от ${WEIGHT_MIN} до ${WEIGHT_MAX} кг`); return; }
+    setSaving(true);
+    try { await onSave(n); setEditing(false); }
+    catch (e) { toast("Не удалось сохранить — проверь соединение"); }
+    setSaving(false);
+  };
+  if (editing) return (
+    <div className="w-hero editing">
+      <div className="w-hero-lbl">Вес на сегодня</div>
+      <WeightStepper val={val} setVal={setVal} autoFocus onEnter={submit}/>
+      <div className="w-actions">
+        <button className="ghost" onClick={() => setEditing(false)} disabled={saving}>Отмена</button>
+        <button onClick={submit} disabled={saving}>{saving ? "Сохранение..." : "Сохранить"}</button>
+      </div>
+    </div>
+  );
+  const d = current && prev ? current.weight - prev.weight : null;
+  return (
+    <div className="w-hero" onClick={start} role="button" aria-label="Изменить текущий вес">
+      <span className="w-hero-ic"><IconEdit/></span>
+      <div className="w-hero-lbl">Текущий вес</div>
+      {current
+        ? <div className="w-hero-val">{fmtKg(current.weight)}<small>кг</small></div>
+        : <div className="w-hero-val none">— <small>кг</small></div>}
+      <div className="w-hero-sub">
+        {current && <>{dayLabel(current.date)}{d != null && Math.abs(d) >= 0.05 && <> · <span className={`m-prev-delta ${d > 0 ? "pos" : "neg"}`}>{fmtDelta(d)} кг</span> к прошлой записи</>}</>}
+      </div>
+      <div className="w-hero-hint">{current ? "Нажми, чтобы изменить вес" : "Нажми, чтобы записать вес"}</div>
+    </div>
+  );
+}
+
+// Лист добавления/правки взвешивания (с датой — можно внести забытое задним числом)
+function WeighInSheet({ initial, onSave, onDelete, onClose }) {
+  const isEdit = !!initial;
+  const [date, setDate] = useState(initial?.date ?? today());
+  const [val, setVal] = useState(initial ? fmtKg(initial.weight) : "");
+  const [busy, setBusy] = useState(false);
+  const sheetRef = useRef(null);
+  useKeyboardScroll(sheetRef);
+  useLockBodyScroll();
+  const submit = async () => {
+    const n = parseFloat(val);
+    if (!date) { window.alert("Укажи дату"); return; }
+    if (!Number.isFinite(n) || n < WEIGHT_MIN || n > WEIGHT_MAX) { window.alert(`Вес — от ${WEIGHT_MIN} до ${WEIGHT_MAX} кг`); return; }
+    setBusy(true);
+    try { await onSave(date, n, initial?.id ?? null); }
+    catch (e) { window.alert("Не удалось сохранить — проверь соединение"); setBusy(false); }
+  };
+  const remove = async () => {
+    if (!window.confirm("Удалить это взвешивание?")) return;
+    setBusy(true);
+    try { await onDelete(initial.id); }
+    catch (e) { window.alert("Не удалось удалить — проверь соединение"); setBusy(false); }
+  };
+  return (
+    <div className="overlay" onClick={(e) => e.target === e.currentTarget && !busy && onClose()}>
+      <div className="sheet" ref={sheetRef}>
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-icon-btn" onClick={onClose} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <span style={{fontSize:18,fontWeight:700,letterSpacing:"-.02em"}}>{isEdit ? "Взвешивание" : "Новое взвешивание"}</span>
+        </div>
+        <div className="field">
+          <div className="lbl">Дата</div>
+          <input type="date" className="inp" value={date} max={today()} onChange={(e) => setDate(e.target.value)}/>
+        </div>
+        <div className="lbl" style={{marginTop:16}}>Вес</div>
+        <WeightStepper val={val} setVal={setVal} onEnter={submit}/>
+        <div className="w-actions" style={{marginTop:6}}>
+          {isEdit && <button className="danger" onClick={remove} disabled={busy}>Удалить</button>}
+          <button onClick={submit} disabled={busy}>{busy ? "Сохранение..." : "Сохранить"}</button>
+        </div>
+        <button className="btn ghost" style={{marginTop:10,marginBottom:0}} onClick={onClose} disabled={busy}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+const WEIGHT_RANGES = [[30, "1М"], [90, "3М"], [180, "6М"], [365, "1Г"], [0, "Всё"]];
+
+// Экран «Вес»: график за выбранный период + сводка + полный список взвешиваний
+// (и вес из замеров — с пометкой; тап по такой записи открывает сам замер).
+function WeightDetailView({ data, onBack, onAdd, onEdit, onOpenMeasurement }) {
+  const { entries, points, usedKeys } = data;
+  const [range, setRange] = useState(() => windowPoints(points, 90).length >= 2 ? 90 : 0);
+  const [selected, setSelected] = useState(null);
+  const win = windowPoints(points, range);
+  const sel = selected != null ? win[selected] : null;
+  const first = win[0], last = win[win.length - 1];
+  const change = win.length >= 2 ? last.weight - first.weight : null;
+  const ws = win.map(p => p.weight);
+  const stat = (label, v) => <div><div className="w-stat-v">{v}</div><div className="w-stat-l">{label}</div></div>;
+  // дельта каждой записи — к предыдущей по времени
+  const deltas = new Map();
+  entries.forEach((e, i) => { if (i > 0) deltas.set(e.key, e.weight - entries[i - 1].weight); });
+  const rows = [...entries].reverse();
+  return (
+    <div className="page">
+      <div className="det-hd">
+        <button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button>
+        <span className="det-title">Вес</span>
+        <button className="edit-badge" onClick={onAdd}>+ Взвешивание</button>
+      </div>
+      <div className="w-chips">
+        {WEIGHT_RANGES.map(([d, label]) => (
+          <button key={d} className={range === d ? "active" : ""} onClick={() => { setRange(d); setSelected(null); }}>{label}</button>
+        ))}
+      </div>
+      <div className="w-readout">
+        {sel ? <>{formatDate(sel.date)}<b>{fmtKg(sel.weight)} кг</b></> : (win.length > 1 ? "Коснись графика — увидишь значение" : "")}
+      </div>
+      <div className="w-chart-det">
+        {win.length === 0
+          ? <div className="w-chart-empty">{points.length === 0 ? "Пока нет ни одной записи веса" : "За этот период записей нет"}</div>
+          : <WeightChart points={win} height={190} selected={selected} onSelect={setSelected}/>}
+      </div>
+      {win.length > 0 && (
+        <div className="w-stats">
+          {stat("Сейчас", fmtKg(last.weight))}
+          {stat("Изменение", change == null ? "—" : fmtDelta(change))}
+          {stat("Мин", fmtKg(Math.min(...ws)))}
+          {stat("Макс", fmtKg(Math.max(...ws)))}
+        </div>
+      )}
+      <div className="sec-lbl">Все записи ({entries.length})</div>
+      {rows.length === 0
+        ? <p style={{color:"#555",fontSize:13}}>Взвешиваний пока нет. Запиши вес в блоке на вкладке «Замеры» или добавь запись кнопкой сверху.</p>
+        : rows.map(e => {
+            const d = deltas.get(e.key);
+            const shadowed = !usedKeys.has(e.key);
+            return (
+              <div key={e.key} className="w-row" onClick={() => e.kind === "weighin" ? onEdit(e) : onOpenMeasurement(e.id)}>
+                <div style={{minWidth:0}}>
+                  <div className="w-row-val">{fmtKg(e.weight)} <span style={{color:"#555",fontWeight:400,fontSize:12}}>кг</span>
+                    {e.kind === "measurement" && <span className="tag">Замер</span>}
+                    {d != null && Math.abs(d) >= 0.05 && <span className={`m-prev-delta ${d > 0 ? "pos" : "neg"}`}>{fmtDelta(d)}</span>}
+                  </div>
+                  <div className="w-row-sub">{formatDate(e.date)}{e.kind === "measurement" && <> · {e.name}</>}{shadowed && <> · <i>на графике — взвешивание за этот день</i></>}</div>
+                </div>
+                <IconChevron/>
+              </div>
+            );
+          })}
+    </div>
+  );
+}
+
 // ── MeasurementsTab ───────────────────────────────────────────────────────
-function MeasurementsTab({measurements,setMeasurements,toast,measurementDraft,setMeasurementDraft}) {
+function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,toast,measurementDraft,setMeasurementDraft}) {
   const [showNew,setShowNew]=useState(false);
   const [editId,setEditId]=useState(null);
   const [detailId,setDetailId]=useState(null);
   const [renamingId,setRenamingId]=useState(null);
   const [renameVal,setRenameVal]=useState("");
   const [restoredDraft,setRestoredDraft]=useState(null);
+  // Экран «Вес» (график + список). Остаётся открытым «под» деталью замера, если
+  // из списка веса открыть замер, — «Назад» из замера вернёт в список веса.
+  const [weightView,setWeightView]=useState(false);
+  const [weighInSheet,setWeighInSheet]=useState(null); // null | {initial: запись|null}
 
   const detail=detailId!=null?measurements.find(m=>m.id===detailId):null;
   const editTarget=editId!=null?measurements.find(m=>m.id===editId):null;
-  useSwipeBack(()=>setDetailId(null), !!detail);
-  useScrollTopOnChange(detailId);
+  const wData=useMemo(()=>buildWeightData(weighIns,measurements),[weighIns,measurements]);
+  useSwipeBack(detail?()=>setDetailId(null):()=>setWeightView(false), !!detail||weightView);
+  useScrollTopOnChange(detail?`m${detailId}`:weightView?"w":null);
+
+  const handleSaveWeighIn=async(date,weight,replaceId=null)=>{
+    const saved=await api.saveWeighIn(date,weight,replaceId);
+    setWeighIns(p=>[...p.filter(w=>w.id!==replaceId&&w.date!==saved.date),saved]);
+    return saved;
+  };
+  const handleDeleteWeighIn=async(id)=>{
+    await api.deleteWeighIn(id);
+    setWeighIns(p=>p.filter(w=>w.id!==id));
+  };
 
   useEffect(()=>{
     if(measurementDraft?.restoring){
@@ -2970,16 +3321,32 @@ function MeasurementsTab({measurements,setMeasurements,toast,measurementDraft,se
 
   const draft = restoredDraft;
 
+  // Вес, который вписали в замер, должен стать «значением дня» на графике. Если в этот
+  // день уже есть отдельное взвешивание (оно приоритетнее при совпадении дат), то новый
+  // вес из замера обновляет его — иначе свежеввёденный вес на графике не появился бы.
+  // Срабатывает только когда вес/дату замера реально меняли: правка, скажем, талии
+  // не должна затирать более позднее взвешивание того же дня.
+  const syncMeasurementWeight=async(m,before)=>{
+    const w=parseFloat(m.weight);
+    if(!Number.isFinite(w)||w<WEIGHT_MIN||w>WEIGHT_MAX) return;
+    if(before&&before.date===m.date&&parseFloat(before.weight)===w) return;
+    const ex=weighIns.find(x=>x.date===m.date);
+    if(!ex||ex.weight===w) return;
+    try{ await handleSaveWeighIn(m.date,w); }catch(e){ /* график всё равно покажет вес из замера в списке */ }
+  };
   const handleCreate=async(m)=>{
     const res=await api.saveMeasurement(m);
     const saved={...m,id:res.id};
+    await syncMeasurementWeight(saved,null);
     setMeasurements(p=>[...p,saved]);
     setShowNew(false);
     setRestoredDraft(null);
     toast("Замер сохранён ✓");
   };
   const handleUpdate=async(m)=>{
+    const before=measurements.find(x=>x.id===m.id);
     await api.saveMeasurement(m);
+    await syncMeasurementWeight(m,before);
     setMeasurements(p=>p.map(x=>x.id===m.id?m:x));
     setEditId(null); setDetailId(m.id);
     setRestoredDraft(null);
@@ -3110,8 +3477,51 @@ function MeasurementsTab({measurements,setMeasurements,toast,measurementDraft,se
       </div>
     );
   }
+  if(weightView){
+    return(
+      <>
+        <WeightDetailView
+          data={wData}
+          onBack={()=>setWeightView(false)}
+          onAdd={()=>setWeighInSheet({initial:null})}
+          onEdit={(e)=>setWeighInSheet({initial:{id:e.id,date:e.date,weight:e.weight}})}
+          onOpenMeasurement={(id)=>setDetailId(id)}
+        />
+        {weighInSheet&&(
+          <WeighInSheet
+            initial={weighInSheet.initial}
+            onSave={async(date,w,replaceId)=>{await handleSaveWeighIn(date,w,replaceId);setWeighInSheet(null);toast("Взвешивание сохранено ✓");}}
+            onDelete={async(id)=>{await handleDeleteWeighIn(id);setWeighInSheet(null);toast("Удалено");}}
+            onClose={()=>setWeighInSheet(null)}
+          />
+        )}
+      </>
+    );
+  }
+
+  // Блок «Текущий вес» и график. На главном экране график — окно за 3 месяца; если
+  // в нём меньше двух точек, а всего их больше — показываем всё, чтобы линия была.
+  const pts=wData.points;
+  const curPt=pts.length?pts[pts.length-1]:null;
+  const prevPt=pts.length>1?pts[pts.length-2]:null;
+  let chartPts=windowPoints(pts,90), chartWin="3 мес.";
+  if(chartPts.length<2&&pts.length>=2){chartPts=pts;chartWin="всё время";}
+  const chartChange=chartPts.length>=2?chartPts[chartPts.length-1].weight-chartPts[0].weight:null;
+
   return(
     <div className="page">
+      <WeightHero current={curPt} prev={prevPt} toast={toast}
+        onSave={async(w)=>{await handleSaveWeighIn(today(),w);toast("Вес сохранён ✓");}}/>
+      <div className="w-chart-card" onClick={()=>setWeightView(true)} role="button" aria-label="Открыть динамику веса">
+        <div className="w-chart-hd">
+          <span className="w-chart-title">Динамика веса</span>
+          {chartChange!=null&&<span className="w-chart-sum"><span className={`m-prev-delta ${chartChange>0?"pos":"neg"}`}>{Math.abs(chartChange)>=0.05?`${fmtDelta(chartChange)} кг`:"без изменений"}</span> · {chartWin}</span>}
+          <IconChevron/>
+        </div>
+        {chartPts.length===0
+          ?<div className="w-chart-empty">График появится, когда запишешь вес.<br/>Вес из замеров тела тоже попадёт сюда.</div>
+          :<WeightChart points={chartPts} height={120}/>}
+      </div>
       <button className="btn" onClick={()=>guardOpen(()=>setShowNew(true))}><IconPlus/>Измерить тело</button>
       {measurements.length===0 && !listDraft
         ?<div className="empty"><div className="empty-icon">📏</div>Замеров пока нет.<br/>Добавь первый!</div>
@@ -4553,6 +4963,7 @@ export default function App() {
   const [progressions,setProgressions]=useState([]);
   const [workouts,setWorkouts]=useState([]);
   const [measurements,setMeasurements]=useState([]);
+  const [weighIns,setWeighIns]=useState([]);
   const [templates,setTemplates]=useState([]);
   const [profiles,setProfiles]=useState([]);
   const [friends,setFriends]=useState([]);
@@ -4606,10 +5017,11 @@ export default function App() {
   // профиля, когда список профилей и друзей не изменился, менять их незачем.
   const reloadDiaryOnly=()=>{
     setLoading(true);
-    Promise.all([api.getWorkouts(), api.getMeasurements(), api.getTemplates()])
-      .then(([w,m,tpl])=>{
+    Promise.all([api.getWorkouts(), api.getMeasurements(), api.getTemplates(), api.getWeighIns().catch(()=>[])])
+      .then(([w,m,tpl,wi])=>{
         setWorkouts([...w].reverse());
         setMeasurements([...m].reverse());
+        setWeighIns(wi);
         setTemplates(tpl);
         setLoading(false);
       })
@@ -4660,9 +5072,12 @@ export default function App() {
     setError(null);
     setLoading(true);
     try{
-      const [w,m,p,f,tpl] = await Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends(), api.getTemplates()]);
+      // Взвешивания — второстепенные данные: если эндпоинта нет (бэкенд ещё не
+      // обновлён) или он не ответил, приложение всё равно должно открыться.
+      const [w,m,p,f,tpl,wi] = await Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends(), api.getTemplates(), api.getWeighIns().catch(()=>[])]);
       setWorkouts([...w].reverse()); // сервер даёт DESC, нам нужен ASC для логики
       setMeasurements([...m].reverse());
+      setWeighIns(wi);
       setTemplates(tpl); // шаблоны сортировкой по дате не завязаны — оставляем как отдаёт сервер (новые сверху)
       setProfiles(p);
       setFriends(f);
@@ -4801,7 +5216,7 @@ export default function App() {
         {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft} progressions={progressions} onProgressionsChange={setProgressions} templates={templates} setTemplates={setTemplates} templateDraft={templateDraft} setTemplateDraft={setTemplateDraft} isPremium={isPremium} premiumChecked={premiumChecked} reloadProgressions={reloadProgressions} progressionDraft={progressionDraft} setProgressionDraft={setProgressionDraft}/>}
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
         {tab===2&&<CommunityTab friends={friends} setFriends={setFriends} toast={showToast} badge={communityBadge} onBadgeChange={setCommunityBadge} reloadBadge={reloadCommunityBadge}/>}
-        {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
+        {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} weighIns={weighIns} setWeighIns={setWeighIns} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
         {tab===4&&<ProfileTab profiles={profiles} workouts={workouts} setProfiles={setProfiles} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
         {(showWorkoutBar||showMeasurementBar||showProgressionBar||showTemplateBar)&&(
           <div className="draft-bars-wrap">

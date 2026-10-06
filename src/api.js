@@ -81,6 +81,14 @@ export const api = {
   }),
   deleteMeasurement: (id)   => request("DELETE", `/measurements/${id}`),
 
+  // ── Взвешивания (блок «Текущий вес» на вкладке «Замеры») ───────────────────
+  // Одна запись на дату: повторное сохранение на ту же дату обновляет вес.
+  // replaceId — правка существующей записи (можно со сменой даты).
+  getWeighIns:      ()          => request("GET",    "/weigh-ins"),
+  saveWeighIn:      (date, weight, replaceId = null) =>
+    request("POST", "/weigh-ins", { date, weight, replace_id: replaceId }),
+  deleteWeighIn:    (id)        => request("DELETE", `/weigh-ins/${id}`),
+
   // ── Профили ─────────────────────────────────────────────────────────────
   getProfiles:      ()          => request("GET",    "/profiles"),
   createProfile:    (name)      => request("POST",   "/profiles", { name }),
