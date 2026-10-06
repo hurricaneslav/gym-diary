@@ -89,6 +89,10 @@ export const api = {
     request("POST", "/weigh-ins", { date, weight, replace_id: replaceId }),
   deleteWeighIn:    (id)        => request("DELETE", `/weigh-ins/${id}`),
 
+  // ── Раскладка показателей вкладки «Замеры» (плитки: параметр, форма, размер) ──
+  getMeasureLayout:  ()      => request("GET", "/measure-layout"),
+  saveMeasureLayout: (tiles) => request("PUT", "/measure-layout", { tiles }),
+
   // ── Профили ─────────────────────────────────────────────────────────────
   getProfiles:      ()          => request("GET",    "/profiles"),
   createProfile:    (name)      => request("POST",   "/profiles", { name }),

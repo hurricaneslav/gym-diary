@@ -384,6 +384,38 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .w-row-val{font-size:16px;font-weight:600;display:flex;align-items:center;gap:8px}
 .w-row-sub{font-size:12px;color:#777;margin-top:2px}
 .w-row-sub i{color:#555}
+.p-hd{display:flex;align-items:center;justify-content:space-between;margin:16px 0 8px}
+.p-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.p-tile{border:1px solid #3A3A3A;background:#111;padding:12px;min-width:0;-webkit-tap-highlight-color:transparent}
+.p-tile.full{grid-column:1/-1}
+.p-tile.tappable{cursor:pointer}
+.p-tile.tappable:active{border-color:#777}
+.p-tile-lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#777;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.p-tile-row{display:flex;align-items:baseline;gap:8px;margin-top:6px;flex-wrap:wrap}
+.p-tile-val{font-size:26px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+.p-tile-val small{font-size:12px;font-weight:500;color:#777;margin-left:4px;letter-spacing:0}
+.p-tile-val.none{color:#444}
+.p-tile-sub{font-size:11px;color:#666;margin-top:4px}
+.p-tile-chart{margin-top:8px}
+.p-tile-empty{font-size:11px;color:#555;margin-top:10px}
+.p-add{display:block;width:100%;margin-bottom:10px;padding:14px 12px;background:none;border:1px dashed #555;color:#B0B0B0;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;text-align:center;-webkit-tap-highlight-color:transparent}
+.p-add span{display:block;margin-top:4px;font-size:12px;font-weight:400;color:#777}
+.p-add:active{border-color:#FFF;color:#FFF}
+.lay-card{border:1px solid #3A3A3A;background:#111;padding:12px;margin-bottom:10px}
+.lay-top{display:flex;align-items:center;gap:6px;margin-bottom:10px}
+.lay-name{flex:1;font-weight:600;font-size:14px;min-width:0}
+.lay-ic{width:34px;height:34px;display:flex;align-items:center;justify-content:center;background:none;border:1px solid #333;color:#AAA;cursor:pointer;font-family:inherit;padding:0;flex-shrink:0}
+.lay-ic:disabled{opacity:.25;cursor:default}
+.lay-ic:active:not(:disabled){background:#222;color:#FFF}
+.lay-ic.danger{color:#EF5350;border-color:#4A2A2A}
+.lay-note{font-size:12px;color:#777;line-height:1.5;margin:0 0 14px}
+.seg{display:flex;border:1px solid #3A3A3A;margin-bottom:8px}
+.seg:last-child{margin-bottom:0}
+.seg button{flex:1;padding:9px 4px;font-size:12px;font-family:inherit;color:#888;background:none;border:none;border-right:1px solid #3A3A3A;cursor:pointer}
+.seg button:last-child{border-right:none}
+.seg button.active{background:#FFF;color:#000;font-weight:600}
+.pick-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 0;border-bottom:1px solid #1A1A1A;cursor:pointer}
+.pick-val{font-size:13px;color:#777;flex-shrink:0}
 .m-prev-delta{font-size:11px;font-weight:600}
 .m-prev-delta.pos{color:#4CAF50}
 .m-prev-delta.neg{color:#EF5350}
@@ -3034,8 +3066,162 @@ const windowPoints = (points, days) => {
   return points.filter(p => p.date >= from);
 };
 
-function WeightChart({ points, height = 130, selected = null, onSelect = null }) {
-  const W = 340, H = height, L = 34, R = 12, T = 12, B = 22;
+// Окно графика на главном экране: последние 3 месяца; если в нём меньше двух точек,
+// а всего их больше — показываем всё, чтобы линия вообще была.
+function autoWindow(points) {
+  let pts = windowPoints(points, 90), label = "3 мес.";
+  if (pts.length < 2 && points.length >= 2) { pts = points; label = "всё время"; }
+  return { pts, label };
+}
+
+const TILE_MAX = 6;
+const PARAM_FIELDS = MEASUREMENT_FIELDS.filter(f => f.key !== "weight"); // вес — отдельный главный блок
+const fmtNum = (n) => String(Number(Number(n).toFixed(2)));
+
+// Записи одного параметра замеров (талия, грудь, ...). Формат тот же, что у buildWeightData,
+// поэтому тот же экран деталей и тот же график работают для любого параметра.
+function buildParamData(measurements, key) {
+  const entries = [];
+  measurements.forEach(m => {
+    const v = parseFloat(m[key]);
+    if (Number.isFinite(v) && v > 0)
+      entries.push({ key: `m${m.id}`, kind: "measurement", id: m.id, name: m.name, date: m.date, weight: v });
+  });
+  const byDate = new Map();
+  entries.forEach(e => { const cur = byDate.get(e.date); if (!cur || e.id > cur.id) byDate.set(e.date, e); });
+  const points = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const usedKeys = new Set(points.map(pt => pt.key));
+  entries.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  return { entries, points, usedKeys };
+}
+
+function ParamTile({ field, data, form, size, onClick }) {
+  const pts = data.points;
+  const cur = pts.length ? pts[pts.length - 1] : null;
+  const prev = pts.length > 1 ? pts[pts.length - 2] : null;
+  const d = cur && prev ? cur.weight - prev.weight : null;
+  const win = autoWindow(pts).pts;
+  const full = size === "full";
+  return (
+    <div className={`p-tile ${size}${onClick ? " tappable" : ""}`} onClick={onClick} data-testid={`tile-${field.key}`}
+         role={onClick ? "button" : undefined} aria-label={onClick ? `${field.label}: подробнее` : undefined}>
+      <div className="p-tile-lbl">{field.label}</div>
+      <div className="p-tile-row">
+        {cur ? <div className="p-tile-val">{fmtNum(cur.weight)}<small>см</small></div> : <div className="p-tile-val none">—</div>}
+        {d != null && Math.abs(d) >= 0.05 && <span className={`m-prev-delta ${d > 0 ? "pos" : "neg"}`}>{fmtDelta(d)}</span>}
+      </div>
+      {form === "chart"
+        ? (win.length ? <div className="p-tile-chart"><WeightChart mini points={win} width={full ? 330 : 150} height={full ? 70 : 56}/></div>
+                      : <div className="p-tile-empty">нет данных</div>)
+        : <div className="p-tile-sub">{cur ? dayLabel(cur.date) : "нет данных"}</div>}
+    </div>
+  );
+}
+
+function TilesGrid({ tiles, measurements, onOpen = null }) {
+  return (
+    <div className="p-grid" data-testid="tiles-grid">
+      {tiles.map(t => {
+        const field = PARAM_FIELDS.find(f => f.key === t.key);
+        if (!field) return null; // параметр, которого больше нет, — тихо пропускаем
+        return <ParamTile key={t.key} field={field} data={buildParamData(measurements, t.key)} form={t.form} size={t.size}
+                          onClick={onOpen ? () => onOpen(t.key) : null}/>;
+      })}
+    </div>
+  );
+}
+
+function ParamPickerSheet({ fields, measurements, onPick, onClose }) {
+  const sheetRef = useRef(null);
+  useKeyboardScroll(sheetRef);
+  useLockBodyScroll();
+  return (
+    <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet" ref={sheetRef}>
+        <div className="handle"/>
+        <div className="sheet-top-actions">
+          <button className="sheet-icon-btn" onClick={onClose} title="Закрыть"><IconClose/></button>
+        </div>
+        <div className="sheet-title-row">
+          <span style={{fontSize:18,fontWeight:700,letterSpacing:"-.02em"}}>Добавить показатель</span>
+        </div>
+        {fields.length === 0
+          ? <p style={{color:"#777",fontSize:13}}>Все показатели уже добавлены.</p>
+          : fields.map(f => {
+              const pts = buildParamData(measurements, f.key).points;
+              const cur = pts.length ? pts[pts.length - 1] : null;
+              return (
+                <div key={f.key} className="pick-row" onClick={() => onPick(f.key)}>
+                  <span>{f.label}</span>
+                  <span className="pick-val">{cur ? `${fmtNum(cur.weight)} см` : "нет данных"}</span>
+                </div>
+              );
+            })}
+      </div>
+    </div>
+  );
+}
+
+// Экран настройки показателей (как настройка полей данных в часах): сверху живой
+// предпросмотр, ниже — каждая плитка: порядок, форма («число»/«график»), размер.
+function LayoutScreen({ tiles, setTiles, measurements, onBack }) {
+  const [picker, setPicker] = useState(false);
+  const used = new Set(tiles.map(t => t.key));
+  const free = PARAM_FIELDS.filter(f => !used.has(f.key));
+  const isFull = tiles.length >= TILE_MAX;
+  const patch = (i, ch) => setTiles(tiles.map((t, j) => j === i ? { ...t, ...ch } : t));
+  const move = (i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= tiles.length) return;
+    const n = [...tiles]; [n[i], n[j]] = [n[j], n[i]]; setTiles(n);
+  };
+  const seg = (opts, cur, onPick) => (
+    <div className="seg">
+      {opts.map(([v, label]) => <button key={v} className={cur === v ? "active" : ""} onClick={() => onPick(v)}>{label}</button>)}
+    </div>
+  );
+  return (
+    <div className="page">
+      <div className="det-hd">
+        <button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button>
+        <span className="det-title">Показатели</span>
+      </div>
+      <p className="lay-note">Вес всегда остаётся главным блоком сверху. Здесь — до {TILE_MAX} дополнительных показателей: выбери, какие вывести, в каком порядке и в какой форме.</p>
+      {tiles.length > 0
+        ? <TilesGrid tiles={tiles} measurements={measurements}/>
+        : <div className="w-chart-empty" style={{border:"1px dashed #333",marginBottom:10}}>Пока ничего не выбрано</div>}
+      {tiles.map((t, i) => {
+        const f = PARAM_FIELDS.find(x => x.key === t.key);
+        return (
+          <div className="lay-card" key={t.key} data-testid={`lay-${t.key}`}>
+            <div className="lay-top">
+              <span className="lay-name">{f ? f.label : t.key}</span>
+              <button className="lay-ic" aria-label="Выше" disabled={i === 0} onClick={() => move(i, -1)}><span style={{display:"flex",transform:"rotate(-90deg)"}}><IconChevron/></span></button>
+              <button className="lay-ic" aria-label="Ниже" disabled={i === tiles.length - 1} onClick={() => move(i, 1)}><span style={{display:"flex",transform:"rotate(90deg)"}}><IconChevron/></span></button>
+              <button className="lay-ic danger" aria-label="Убрать" onClick={() => setTiles(tiles.filter((_, j) => j !== i))}><IconClose/></button>
+            </div>
+            {seg([["value", "Число"], ["chart", "График"]], t.form, (v) => patch(i, { form: v }))}
+            {seg([["half", "Половина ширины"], ["full", "Во всю ширину"]], t.size, (v) => patch(i, { size: v }))}
+          </div>
+        );
+      })}
+      <button className="p-add" disabled={isFull} style={isFull ? {opacity:.5,cursor:"default"} : undefined} onClick={() => setPicker(true)}>
+        {isFull ? `Максимум ${TILE_MAX} показателей` : "+ Добавить показатель"}
+      </button>
+      {picker && (
+        <ParamPickerSheet fields={free} measurements={measurements}
+          onPick={(key) => { setTiles([...tiles, { key, form: "value", size: "half" }]); setPicker(false); }}
+          onClose={() => setPicker(false)}/>
+      )}
+    </div>
+  );
+}
+
+// mini — компактная линия без осей и подписей (для плиток показателей); width — ширина
+// viewBox (подбирается под ширину плитки, чтобы линии не становились тоньше).
+// В поле weight лежит значение любого параметра (вес, талия, ...): для графика это просто число.
+function WeightChart({ points, height = 130, selected = null, onSelect = null, mini = false, width = 340 }) {
+  const W = width, H = height, L = mini ? 6 : 34, R = mini ? 8 : 12, T = mini ? 8 : 12, B = mini ? 8 : 22;
   const n = points.length;
   if (n === 0) return null;
   const ws = points.map(p => p.weight);
@@ -3059,14 +3245,14 @@ function WeightChart({ points, height = 130, selected = null, onSelect = null })
   return (
     <svg className="w-svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="График веса" data-testid="weight-chart"
          onPointerDown={pick} onPointerMove={(e) => { if (e.buttons > 0) pick(e); }}>
-      {ticks.map((v, i) => (
+      {!mini && ticks.map((v, i) => (
         <g key={i}>
           <line x1={L} x2={W - R} y1={ys(v)} y2={ys(v)} stroke="#222" strokeWidth="1"/>
           <text x={L - 6} y={ys(v) + 3} textAnchor="end" fontSize="10" fill="#666">{v.toFixed(1)}</text>
         </g>
       ))}
       {n > 1 && <path d={path} fill="none" stroke="#FFF" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"/>}
-      {n <= 60 && coords.map((c, i) => i < n - 1 && (
+      {!mini && n <= 60 && coords.map((c, i) => i < n - 1 && (
         <circle key={i} cx={c[0]} cy={c[1]} r="2.6" fill="#0A0A0A" stroke="#FFF" strokeWidth="1.4"/>
       ))}
       <circle cx={coords[n - 1][0]} cy={coords[n - 1][1]} r="4.2" fill="#FFF"/>
@@ -3076,7 +3262,7 @@ function WeightChart({ points, height = 130, selected = null, onSelect = null })
           <circle cx={coords[selected][0]} cy={coords[selected][1]} r="5.5" fill="#FFF" stroke="#0A0A0A" strokeWidth="2"/>
         </g>
       )}
-      {n === 1
+      {mini ? null : n === 1
         ? <text x={L + (W - L - R) / 2} y={H - 6} textAnchor="middle" fontSize="10" fill="#666">{shortDate(points[0].date)}</text>
         : <>
             <text x={L} y={H - 6} textAnchor="start" fontSize="10" fill="#666">{shortDate(points[0].date)}</text>
@@ -3216,7 +3402,13 @@ const WEIGHT_RANGES = [[30, "1М"], [90, "3М"], [180, "6М"], [365, "1Г"], [0,
 
 // Экран «Вес»: график за выбранный период + сводка + полный список взвешиваний
 // (и вес из замеров — с пометкой; тап по такой записи открывает сам замер).
-function WeightDetailView({ data, onBack, onAdd, onEdit, onOpenMeasurement }) {
+// Для параметров замеров (талия, грудь...) тот же экран с другими подписями и без кнопки
+// добавления: значения вносятся только через замеры.
+function WeightDetailView({ data, onBack, onAdd = null, onEdit = null, onOpenMeasurement,
+  title = "Вес", unit = "кг", fmt = fmtKg, tagMeasurements = true,
+  shadowNote = "на графике — взвешивание за этот день",
+  emptyAll = "Пока нет ни одной записи веса",
+  emptyList = "Взвешиваний пока нет. Запиши вес в блоке на вкладке «Замеры» или добавь запись кнопкой сверху." }) {
   const { entries, points, usedKeys } = data;
   const [range, setRange] = useState(() => windowPoints(points, 90).length >= 2 ? 90 : 0);
   const [selected, setSelected] = useState(null);
@@ -3234,8 +3426,8 @@ function WeightDetailView({ data, onBack, onAdd, onEdit, onOpenMeasurement }) {
     <div className="page">
       <div className="det-hd">
         <button className="back-btn" onClick={onBack}><IconChevron dir="left"/>Назад</button>
-        <span className="det-title">Вес</span>
-        <button className="edit-badge" onClick={onAdd}>+ Взвешивание</button>
+        <span className="det-title">{title}</span>
+        {onAdd && <button className="edit-badge" onClick={onAdd}>+ Взвешивание</button>}
       </div>
       <div className="w-chips">
         {WEIGHT_RANGES.map(([d, label]) => (
@@ -3243,35 +3435,35 @@ function WeightDetailView({ data, onBack, onAdd, onEdit, onOpenMeasurement }) {
         ))}
       </div>
       <div className="w-readout">
-        {sel ? <>{formatDate(sel.date)}<b>{fmtKg(sel.weight)} кг</b></> : (win.length > 1 ? "Коснись графика — увидишь значение" : "")}
+        {sel ? <>{formatDate(sel.date)}<b>{fmt(sel.weight)} {unit}</b></> : (win.length > 1 ? "Коснись графика — увидишь значение" : "")}
       </div>
       <div className="w-chart-det">
         {win.length === 0
-          ? <div className="w-chart-empty">{points.length === 0 ? "Пока нет ни одной записи веса" : "За этот период записей нет"}</div>
+          ? <div className="w-chart-empty">{points.length === 0 ? emptyAll : "За этот период записей нет"}</div>
           : <WeightChart points={win} height={190} selected={selected} onSelect={setSelected}/>}
       </div>
       {win.length > 0 && (
         <div className="w-stats">
-          {stat("Сейчас", fmtKg(last.weight))}
+          {stat("Сейчас", fmt(last.weight))}
           {stat("Изменение", change == null ? "—" : fmtDelta(change))}
-          {stat("Мин", fmtKg(Math.min(...ws)))}
-          {stat("Макс", fmtKg(Math.max(...ws)))}
+          {stat("Мин", fmt(Math.min(...ws)))}
+          {stat("Макс", fmt(Math.max(...ws)))}
         </div>
       )}
       <div className="sec-lbl">Все записи ({entries.length})</div>
       {rows.length === 0
-        ? <p style={{color:"#555",fontSize:13}}>Взвешиваний пока нет. Запиши вес в блоке на вкладке «Замеры» или добавь запись кнопкой сверху.</p>
+        ? <p style={{color:"#555",fontSize:13}}>{emptyList}</p>
         : rows.map(e => {
             const d = deltas.get(e.key);
             const shadowed = !usedKeys.has(e.key);
             return (
               <div key={e.key} className="w-row" onClick={() => e.kind === "weighin" ? onEdit(e) : onOpenMeasurement(e.id)}>
                 <div style={{minWidth:0}}>
-                  <div className="w-row-val">{fmtKg(e.weight)} <span style={{color:"#555",fontWeight:400,fontSize:12}}>кг</span>
-                    {e.kind === "measurement" && <span className="tag">Замер</span>}
+                  <div className="w-row-val">{fmt(e.weight)} <span style={{color:"#555",fontWeight:400,fontSize:12}}>{unit}</span>
+                    {tagMeasurements && e.kind === "measurement" && <span className="tag">Замер</span>}
                     {d != null && Math.abs(d) >= 0.05 && <span className={`m-prev-delta ${d > 0 ? "pos" : "neg"}`}>{fmtDelta(d)}</span>}
                   </div>
-                  <div className="w-row-sub">{formatDate(e.date)}{e.kind === "measurement" && <> · {e.name}</>}{shadowed && <> · <i>на графике — взвешивание за этот день</i></>}</div>
+                  <div className="w-row-sub">{formatDate(e.date)}{e.kind === "measurement" && <> · {e.name}</>}{shadowed && <> · <i>{shadowNote}</i></>}</div>
                 </div>
                 <IconChevron/>
               </div>
@@ -3282,7 +3474,7 @@ function WeightDetailView({ data, onBack, onAdd, onEdit, onOpenMeasurement }) {
 }
 
 // ── MeasurementsTab ───────────────────────────────────────────────────────
-function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,toast,measurementDraft,setMeasurementDraft}) {
+function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layoutTiles,setLayoutTiles,toast,measurementDraft,setMeasurementDraft}) {
   const [showNew,setShowNew]=useState(false);
   const [editId,setEditId]=useState(null);
   const [detailId,setDetailId]=useState(null);
@@ -3293,12 +3485,42 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,toas
   // из списка веса открыть замер, — «Назад» из замера вернёт в список веса.
   const [weightView,setWeightView]=useState(false);
   const [weighInSheet,setWeighInSheet]=useState(null); // null | {initial: запись|null}
+  const [paramKey,setParamKey]=useState(null);   // деталь параметра (талия, грудь...) — открыта плиткой
+  const [layoutView,setLayoutView]=useState(false); // экран настройки показателей
 
   const detail=detailId!=null?measurements.find(m=>m.id===detailId):null;
   const editTarget=editId!=null?measurements.find(m=>m.id===editId):null;
   const wData=useMemo(()=>buildWeightData(weighIns,measurements),[weighIns,measurements]);
-  useSwipeBack(detail?()=>setDetailId(null):()=>setWeightView(false), !!detail||weightView);
-  useScrollTopOnChange(detail?`m${detailId}`:weightView?"w":null);
+  // Стек экранов: замер (сверху) → вес | параметр → настройка показателей → главный.
+  // «Назад» всегда снимает верхний.
+  const goBack=()=>{
+    if(detail) setDetailId(null);
+    else if(weightView) setWeightView(false);
+    else if(paramKey) setParamKey(null);
+    else { flushLayout(); setLayoutView(false); }
+  };
+  useSwipeBack(goBack, !!detail||weightView||!!paramKey||layoutView);
+  useScrollTopOnChange(detail?`m${detailId}`:weightView?"w":paramKey?`p${paramKey}`:layoutView?"l":null);
+
+  // Раскладка показателей: изменения сразу видны, на сервер уходят через полсекунды после
+  // последней правки (быстрые нажатия ↑↓ не плодят запросы и не обгоняют друг друга);
+  // недосохранённое досылается при выходе с экрана и при уходе с вкладки.
+  const layoutTimer=useRef(null);
+  const layoutPending=useRef(null);
+  const flushLayout=()=>{
+    clearTimeout(layoutTimer.current);
+    const t=layoutPending.current;
+    if(t){ layoutPending.current=null; api.saveMeasureLayout(t).catch(()=>toast("Не удалось сохранить настройки показателей")); }
+  };
+  const updateTiles=(next)=>{
+    setLayoutTiles(next);
+    layoutPending.current=next;
+    clearTimeout(layoutTimer.current);
+    layoutTimer.current=setTimeout(flushLayout,500);
+  };
+  useEffect(()=>()=>flushLayout(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []);
 
   const handleSaveWeighIn=async(date,weight,replaceId=null)=>{
     const saved=await api.saveWeighIn(date,weight,replaceId);
@@ -3499,13 +3721,30 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,toas
     );
   }
 
-  // Блок «Текущий вес» и график. На главном экране график — окно за 3 месяца; если
-  // в нём меньше двух точек, а всего их больше — показываем всё, чтобы линия была.
+  if(paramKey){
+    const f=PARAM_FIELDS.find(x=>x.key===paramKey);
+    return(
+      <WeightDetailView key={paramKey}
+        data={buildParamData(measurements,paramKey)}
+        title={f?f.label:paramKey} unit="см" fmt={fmtNum} tagMeasurements={false}
+        shadowNote="на графике — более поздний замер за этот день"
+        emptyAll="Пока нет ни одного замера с этим показателем"
+        emptyList="Замеров с этим показателем пока нет. Внеси его при следующем замере тела."
+        onBack={()=>setParamKey(null)}
+        onOpenMeasurement={(id)=>setDetailId(id)}
+      />
+    );
+  }
+  if(layoutView){
+    return <LayoutScreen tiles={layoutTiles} setTiles={updateTiles} measurements={measurements}
+             onBack={()=>{flushLayout();setLayoutView(false);}}/>;
+  }
+
+  // Блок «Текущий вес» и график (окно — см. autoWindow).
   const pts=wData.points;
   const curPt=pts.length?pts[pts.length-1]:null;
   const prevPt=pts.length>1?pts[pts.length-2]:null;
-  let chartPts=windowPoints(pts,90), chartWin="3 мес.";
-  if(chartPts.length<2&&pts.length>=2){chartPts=pts;chartWin="всё время";}
+  const {pts:chartPts,label:chartWin}=autoWindow(pts);
   const chartChange=chartPts.length>=2?chartPts[chartPts.length-1].weight-chartPts[0].weight:null;
 
   return(
@@ -3522,6 +3761,20 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,toas
           ?<div className="w-chart-empty">График появится, когда запишешь вес.<br/>Вес из замеров тела тоже попадёт сюда.</div>
           :<WeightChart points={chartPts} height={120}/>}
       </div>
+      {layoutTiles.length>0?(
+        <>
+          <div className="p-hd">
+            <span className="w-chart-title">Показатели</span>
+            <button className="edit-badge" onClick={()=>setLayoutView(true)}>Настроить</button>
+          </div>
+          <TilesGrid tiles={layoutTiles} measurements={measurements} onOpen={setParamKey}/>
+        </>
+      ):(
+        <button className="p-add" onClick={()=>setLayoutView(true)}>
+          + Настроить показатели
+          <span>Талия, грудь, руки... — выведи нужные на главный экран</span>
+        </button>
+      )}
       <button className="btn" onClick={()=>guardOpen(()=>setShowNew(true))}><IconPlus/>Измерить тело</button>
       {measurements.length===0 && !listDraft
         ?<div className="empty"><div className="empty-icon">📏</div>Замеров пока нет.<br/>Добавь первый!</div>
@@ -4964,6 +5217,7 @@ export default function App() {
   const [workouts,setWorkouts]=useState([]);
   const [measurements,setMeasurements]=useState([]);
   const [weighIns,setWeighIns]=useState([]);
+  const [layoutTiles,setLayoutTiles]=useState([]); // плитки показателей на вкладке «Замеры»
   const [templates,setTemplates]=useState([]);
   const [profiles,setProfiles]=useState([]);
   const [friends,setFriends]=useState([]);
@@ -5017,11 +5271,12 @@ export default function App() {
   // профиля, когда список профилей и друзей не изменился, менять их незачем.
   const reloadDiaryOnly=()=>{
     setLoading(true);
-    Promise.all([api.getWorkouts(), api.getMeasurements(), api.getTemplates(), api.getWeighIns().catch(()=>[])])
-      .then(([w,m,tpl,wi])=>{
+    Promise.all([api.getWorkouts(), api.getMeasurements(), api.getTemplates(), api.getWeighIns().catch(()=>[]), api.getMeasureLayout().catch(()=>({tiles:[]}))])
+      .then(([w,m,tpl,wi,lay])=>{
         setWorkouts([...w].reverse());
         setMeasurements([...m].reverse());
         setWeighIns(wi);
+        setLayoutTiles(lay.tiles||[]);
         setTemplates(tpl);
         setLoading(false);
       })
@@ -5074,10 +5329,11 @@ export default function App() {
     try{
       // Взвешивания — второстепенные данные: если эндпоинта нет (бэкенд ещё не
       // обновлён) или он не ответил, приложение всё равно должно открыться.
-      const [w,m,p,f,tpl,wi] = await Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends(), api.getTemplates(), api.getWeighIns().catch(()=>[])]);
+      const [w,m,p,f,tpl,wi,lay] = await Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends(), api.getTemplates(), api.getWeighIns().catch(()=>[]), api.getMeasureLayout().catch(()=>({tiles:[]}))]);
       setWorkouts([...w].reverse()); // сервер даёт DESC, нам нужен ASC для логики
       setMeasurements([...m].reverse());
       setWeighIns(wi);
+      setLayoutTiles(lay.tiles||[]);
       setTemplates(tpl); // шаблоны сортировкой по дате не завязаны — оставляем как отдаёт сервер (новые сверху)
       setProfiles(p);
       setFriends(f);
@@ -5216,7 +5472,7 @@ export default function App() {
         {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft} progressions={progressions} onProgressionsChange={setProgressions} templates={templates} setTemplates={setTemplates} templateDraft={templateDraft} setTemplateDraft={setTemplateDraft} isPremium={isPremium} premiumChecked={premiumChecked} reloadProgressions={reloadProgressions} progressionDraft={progressionDraft} setProgressionDraft={setProgressionDraft}/>}
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
         {tab===2&&<CommunityTab friends={friends} setFriends={setFriends} toast={showToast} badge={communityBadge} onBadgeChange={setCommunityBadge} reloadBadge={reloadCommunityBadge}/>}
-        {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} weighIns={weighIns} setWeighIns={setWeighIns} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
+        {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} weighIns={weighIns} setWeighIns={setWeighIns} layoutTiles={layoutTiles} setLayoutTiles={setLayoutTiles} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
         {tab===4&&<ProfileTab profiles={profiles} workouts={workouts} setProfiles={setProfiles} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
         {(showWorkoutBar||showMeasurementBar||showProgressionBar||showTemplateBar)&&(
           <div className="draft-bars-wrap">
