@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { api, BOT_USERNAME } from "./api.js";
 
 /** Мой собственный Telegram user_id (строкой — как id приходят из API) —
@@ -57,6 +57,18 @@ const templateDraftHasData = (d) => {
   if((d.name||"").trim()) return true;
   return (d.exercises||[]).some(e=>e.name?.trim());
 };
+
+// Необязательная цветовая метка подхода: у подхода появляется поле color (id из списка),
+// а текст этого подхода везде красится в соответствующий цвет. Значение смысла не несёт —
+// каждый сам решает, что для него значит цвет. Нет поля = цвет по умолчанию, как раньше.
+// В файле хранится id, а не цвет: на экране рисуется только то, что есть в этом списке,
+// так что чужая запись (друг, старая версия) не может принести произвольный стиль.
+const SET_COLORS = [
+  ["red","#EF5350","Красный"], ["orange","#FFA726","Оранжевый"], ["yellow","#FFEE58","Жёлтый"],
+  ["green","#66BB6A","Зелёный"], ["blue","#42A5F5","Синий"], ["purple","#B388FF","Фиолетовый"],
+];
+const SET_COLOR_HEX = Object.fromEntries(SET_COLORS.map(([id, hex]) => [id, hex]));
+const setColorStyle = (s) => (s && SET_COLOR_HEX[s.color]) ? { color: SET_COLOR_HEX[s.color] } : undefined;
 
 const MEASUREMENT_FIELDS = [
   {key:"weight",label:"Вес тела"},{key:"waist",label:"Талия"},{key:"chest",label:"Грудь"},
@@ -284,6 +296,15 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .ex-note-done:active{background:#222}
 .sets{padding:10px 14px;overflow:hidden;contain:layout}
 .set-row{display:flex;align-items:center;gap:5px;margin-bottom:8px;width:100%;min-width:0}
+.set-clr{background:none;border:none;padding:0;width:20px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.set-clr-sw{display:block;width:8px;height:26px;border:1px solid #3A3A3A;box-sizing:border-box}
+.set-clr:active .set-clr-sw{border-color:#999}
+.set-clr-strip{display:flex;align-items:center;gap:8px;margin:-2px 0 10px;padding:8px 10px;background:#161616;border:1px solid #2A2A2A}
+.set-clr-hint{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#666;margin-right:2px;flex-shrink:0}
+.set-clr-opt{width:30px;height:30px;border:2px solid transparent;padding:0;cursor:pointer;flex-shrink:0;box-sizing:border-box;font-family:inherit;-webkit-tap-highlight-color:transparent}
+.set-clr-opt.sel{border-color:#FFF}
+.set-clr-opt.none{background:#0A0A0A;border:1px solid #444;color:#999;font-size:16px;line-height:1}
+.set-clr-opt.none.sel{border-color:#FFF;border-width:2px}
 .set-n{font-size:11px;color:#5C5C5C;font-weight:600;text-align:center;flex-shrink:0;width:18px}
 .set-inp{background:#1A1A1A;border:1px solid #3A3A3A;color:#FFF;font-size:14px;padding:8px 6px;outline:none;font-family:inherit;text-align:center;-webkit-appearance:none;min-width:0;width:0;flex:1}
 .set-inp:focus{border-color:#777}
@@ -416,6 +437,16 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .seg button.active{background:#FFF;color:#000;font-weight:600}
 .pick-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 0;border-bottom:1px solid #1A1A1A;cursor:pointer}
 .pick-val{font-size:13px;color:#777;flex-shrink:0}
+.w-hero.ro{cursor:default}
+.w-hero.ro:active{border-color:#3A3A3A}
+.cf-lbl{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.cf-lbl span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cf-del{background:none;border:none;color:#666;font-size:17px;line-height:1;padding:2px 4px;cursor:pointer;flex-shrink:0;font-family:inherit}
+.cf-del:active{color:#EF5350}
+.cf-new{border:1px solid #3A3A3A;background:#111;padding:12px;margin-top:10px}
+.cf-new .inp{margin-bottom:8px}
+.w-mrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:8px 14px;border-top:1px solid #1A1A1A}
+.w-ex-name + .w-mrow{border-top:none}
 .m-prev-delta{font-size:11px;font-weight:600}
 .m-prev-delta.pos{color:#4CAF50}
 .m-prev-delta.neg{color:#EF5350}
@@ -878,6 +909,7 @@ function ExerciseHistoryList({ history }) {
             {exercise.sets.filter(s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps)).map((s,si)=>(
               <div key={si}>
                 <span style={{color:"#555"}}>{si+1}.</span>{" "}
+                <span style={setColorStyle(s)}>
                 {s.bilateral?(
                   <>
                     <span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}
@@ -887,6 +919,7 @@ function ExerciseHistoryList({ history }) {
                 ):(
                   <>{s.weight?`${s.weight} кг`:"—"} × {s.reps?`${s.reps} повт`:"—"}</>
                 )}
+                </span>
               </div>
             ))}
           </div>
@@ -1024,7 +1057,14 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
     return {...e,sets:[...e.sets,s]};
   }));
   const upSet=(id,si,f,v)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,[f]:v}:s)}:e));
-  const remSet=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.filter((_,i)=>i!==si)}:e));
+  const remSet=(id,si)=>{ setClrOpen(null); setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.filter((_,i)=>i!==si)}:e)); };
+  // Цветовая метка подхода. «Без цвета» убирает поле совсем — запись остаётся такой же, как раньше.
+  const [clrOpen,setClrOpen]=useState(null); // "id упражнения:номер подхода" открытой палитры
+  const setSetColor=(id,si,color)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>{
+    if(i!==si)return s;
+    const {color:_old,...rest}=s;
+    return color?{...rest,color}:rest;
+  })}:e));
   const toggleBilateral=(id,si)=>setExercises(p=>p.map(e=>e.id===id?{...e,sets:e.sets.map((s,i)=>i===si?{...s,bilateral:!s.bilateral}:s)}:e));
 
   // Есть ли реально внесённые данные — не только подходы с весом/повторами, но и
@@ -1230,7 +1270,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
                       const str=s.bilateral
                         ?`Л${s.weightL||"—"}×${s.repsL||"—"} П${s.weightR||"—"}×${s.repsR||"—"}`
                         :`${s.weight?s.weight+"кг":"—"}×${s.reps||"—"}`;
-                      return str+(i<arr.length-1?", ":"");
+                      return <span key={i} style={setColorStyle(s)}>{str+(i<arr.length-1?", ":"")}</span>;
                     })}
                     {prev.exercise.comment?<><br/><span style={{fontStyle:"italic",color:"#555"}}>{prev.exercise.comment}</span></>:null}
                   </div>
@@ -1238,35 +1278,56 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
                 </div>
               )}
               <div className="sets">
-                {ex.sets.map((s,si)=>(
-                  <div key={si} className="set-row">
+                {ex.sets.map((s,si)=>{
+                  const cs=setColorStyle(s);
+                  const ckey=`${ex.id}:${si}`;
+                  return (
+                  <Fragment key={si}>
+                  <div className="set-row">
+                    <button type="button" className="set-clr" aria-label="Цвет подхода" title="Цветовая метка подхода"
+                      onClick={()=>setClrOpen(clrOpen===ckey?null:ckey)}>
+                      <span className="set-clr-sw" style={SET_COLOR_HEX[s.color]?{background:SET_COLOR_HEX[s.color],borderColor:SET_COLOR_HEX[s.color]}:undefined}/>
+                    </button>
                     <span className="set-n">{si+1}</span>
                     {s.bilateral?(
                       <div className="set-bi-wrap">
                         <div className="set-bi-row">
                           <span className="set-side L">Л</span>
-                          <input className="set-inp sm" type="text" inputMode="decimal" placeholder="кг" value={s.weightL} onChange={e=>upSet(ex.id,si,"weightL",normalizeDecimal(e.target.value))}/>
-                          <span className="set-sep">×</span>
-                          <input className="set-inp sm" type="number" inputMode="numeric" placeholder="повт" value={s.repsL} onChange={e=>upSet(ex.id,si,"repsL",e.target.value)}/>
+                          <input style={cs} className="set-inp sm" type="text" inputMode="decimal" placeholder="кг" value={s.weightL} onChange={e=>upSet(ex.id,si,"weightL",normalizeDecimal(e.target.value))}/>
+                          <span className="set-sep" style={cs}>×</span>
+                          <input style={cs} className="set-inp sm" type="number" inputMode="numeric" placeholder="повт" value={s.repsL} onChange={e=>upSet(ex.id,si,"repsL",e.target.value)}/>
                         </div>
                         <div className="set-bi-row">
                           <span className="set-side R">П</span>
-                          <input className="set-inp sm" type="text" inputMode="decimal" placeholder="кг" value={s.weightR} onChange={e=>upSet(ex.id,si,"weightR",normalizeDecimal(e.target.value))}/>
-                          <span className="set-sep">×</span>
-                          <input className="set-inp sm" type="number" inputMode="numeric" placeholder="повт" value={s.repsR} onChange={e=>upSet(ex.id,si,"repsR",e.target.value)}/>
+                          <input style={cs} className="set-inp sm" type="text" inputMode="decimal" placeholder="кг" value={s.weightR} onChange={e=>upSet(ex.id,si,"weightR",normalizeDecimal(e.target.value))}/>
+                          <span className="set-sep" style={cs}>×</span>
+                          <input style={cs} className="set-inp sm" type="number" inputMode="numeric" placeholder="повт" value={s.repsR} onChange={e=>upSet(ex.id,si,"repsR",e.target.value)}/>
                         </div>
                       </div>
                     ):(
                       <>
-                        <input className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",normalizeDecimal(e.target.value))}/>
-                        <span className="set-sep">×</span>
-                        <input className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)}/>
+                        <input style={cs} className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",normalizeDecimal(e.target.value))}/>
+                        <span className="set-sep" style={cs}>×</span>
+                        <input style={cs} className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)}/>
                       </>
                     )}
                     <button className={`btn-bi${s.bilateral?" active":""}`} onClick={()=>toggleBilateral(ex.id,si)} title="Унилатеральный режим"><IconBilateral/></button>
                     <button className="del-btn" onClick={()=>remSet(ex.id,si)}><IconTrash/></button>
                   </div>
-                ))}
+                  {clrOpen===ckey&&(
+                    <div className="set-clr-strip" role="group" aria-label="Цвет подхода">
+                      <span className="set-clr-hint">Метка</span>
+                      {SET_COLORS.map(([id,hex,label])=>(
+                        <button key={id} type="button" className={`set-clr-opt${s.color===id?" sel":""}`} style={{background:hex}} aria-label={label}
+                          onClick={()=>{setSetColor(ex.id,si,id);setClrOpen(null);}}/>
+                      ))}
+                      <button type="button" className={`set-clr-opt none${!SET_COLOR_HEX[s.color]?" sel":""}`} aria-label="Без цвета"
+                        onClick={()=>{setSetColor(ex.id,si,null);setClrOpen(null);}}>×</button>
+                    </div>
+                  )}
+                  </Fragment>
+                  );
+                })}
                 <button className="add-set" onClick={()=>addSet(ex.id)}><IconPlus/>подход</button>
               </div>
               <div className="ex-comment">
@@ -1785,13 +1846,13 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
                 <div key={si} className="w-set-row">
                   <span className="w-set-n">{si+1}</span>
                   {s.bilateral?(
-                    <span className="w-set-v w-set-bi">
+                    <span className="w-set-v w-set-bi" style={setColorStyle(s)}>
                       <span className="w-set-bi-side"><span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}</span>
                       <span className="w-set-bi-sep">|</span>
                       <span className="w-set-bi-side"><span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}</span>
                     </span>
                   ):(
-                    <span className="w-set-v">{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
+                    <span className="w-set-v" style={setColorStyle(s)}>{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
                   )}
                 </div>
               ))}
@@ -2892,7 +2953,7 @@ function EditProgressionSheet({ data, onSaved, onClose }) {
 }
 
 // ── MeasurementSheet ──────────────────────────────────────────────────────
-function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMinimize}) {
+function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMinimize, customFields = [], onCustomFieldsChange = null}) {
   const isEdit=!!initial;
   const defName=draft?.name ?? (isEdit?initial.name:`Замер ${(measurements?.length||0) + 1}`);
   const [name,setName]=useState(defName);
@@ -2915,6 +2976,41 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
   useLockBodyScroll();
   const set=(k,v)=>setVals(p=>({...p,[k]:v}));
 
+  // Свои поля. Значения — по нормализованному названию. Поля формы: справочник профиля плюс
+  // значения, уже записанные в редактируемом замере (даже если поле позже убрали из
+  // справочника) — чтобы правка замера не стирала их молча.
+  const [customVals,setCustomVals]=useState(()=>{
+    if(draft?.customVals) return draft.customVals;
+    const v={};
+    if(isEdit) (initial.custom||[]).forEach(c=>{v[normName(c.name)]=String(c.value);});
+    return v;
+  });
+  const [newField,setNewField]=useState(null); // null | {name, unit}
+  const [fieldBusy,setFieldBusy]=useState(false);
+  const extraFields=(isEdit?(initial.custom||[]):[])
+    .filter(c=>!customFields.some(f=>normName(f.name)===normName(c.name)))
+    .map(c=>({name:c.name,unit:c.unit||"",extra:true}));
+  const formFields=[...customFields,...extraFields];
+  const addField=async()=>{
+    const name=newField.name.trim().replace(/\s+/g," ");
+    const unit=newField.unit.trim();
+    if(!name){window.alert("Введи название поля");return;}
+    const norm=normName(name);
+    if(STD_LABELS.has(norm)){window.alert("Такой показатель уже есть среди стандартных — впиши его выше.");return;}
+    if(formFields.some(f=>normName(f.name)===norm)){window.alert("Поле с таким названием уже есть.");return;}
+    if(customFields.length>=CUSTOM_MAX){window.alert(`Можно завести не больше ${CUSTOM_MAX} своих полей.`);return;}
+    if(!onCustomFieldsChange)return;
+    setFieldBusy(true);
+    try{ await onCustomFieldsChange([...customFields,{name,unit}]); setNewField(null); }
+    catch(e){ window.alert("Не удалось сохранить поле — проверь соединение."); }
+    setFieldBusy(false);
+  };
+  const removeField=async(f)=>{
+    if(!window.confirm(`Убрать поле «${f.name}» из формы замера? Уже записанные значения останутся в истории.`))return;
+    try{ await onCustomFieldsChange(customFields.filter(x=>normName(x.name)!==normName(f.name))); }
+    catch(e){ window.alert("Не удалось убрать поле — проверь соединение."); }
+  };
+
   // Ищем предыдущий замер строго раньше текущей даты
   const prevMeasurement = (() => {
     const src = isEdit ? measurements.filter(m=>m.id!==initial.id) : measurements;
@@ -2923,19 +3019,22 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
     return earlier.reduce((best,m)=>m.date>best.date?m:best);
   })();
 
-  const hasRealData = () => Object.values(vals).some(v=>v!==""&&v!=null);
-  const buildDraft = () => ({ name, date, vals });
+  const hasRealData = () => Object.values(vals).some(v=>v!==""&&v!=null) || Object.values(customVals).some(v=>v!==""&&v!=null);
+  const buildDraft = () => ({ name, date, vals, customVals });
 
   useEffect(() => {
     const t = setTimeout(() => {
-      saveDraftToStorage("measurement", { editId: isEdit?initial.id:null, name, date, vals });
+      saveDraftToStorage("measurement", { editId: isEdit?initial.id:null, name, date, vals, customVals });
     }, 600);
     return () => clearTimeout(t);
-  }, [name, date, vals]);
+  }, [name, date, vals, customVals]);
 
   const handleSave=async()=>{
     setSaving(true);
-    await onSave({id:isEdit?initial.id:-1,name:name.trim()||defName,date,...vals});
+    const custom=formFields
+      .map(f=>({name:f.name,unit:f.unit,value:(customVals[normName(f.name)]||"").trim()}))
+      .filter(c=>c.value!=="");
+    await onSave({id:isEdit?initial.id:-1,name:name.trim()||defName,date,...vals,...(custom.length?{custom}:{})});
     clearDraftFromStorage("measurement");
     setSaving(false);
   };
@@ -3008,6 +3107,50 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
             </div>
           ))}
         </div>
+        <div className="sec-lbl" style={{marginTop:16}}>Свои поля</div>
+        {formFields.length>0&&(
+          <div className="m-grid" style={{marginTop:8}}>
+            {formFields.map(f=>{
+              const norm=normName(f.name);
+              const prevC=prevMeasurement?customOf(prevMeasurement,norm):null;
+              const cur=customVals[norm];
+              const cd=(prevC&&cur!=null&&cur!==""&&Number.isFinite(parseFloat(cur)))?parseFloat(cur)-parseFloat(prevC.value):null;
+              return(
+                <div key={norm} className="field" data-testid={`cf-${norm}`}>
+                  <div className="lbl cf-lbl">
+                    <span title={f.name}>{f.name}</span>
+                    {!f.extra&&onCustomFieldsChange&&<button type="button" className="cf-del" aria-label={`Убрать поле ${f.name}`} onClick={()=>removeField(f)}>×</button>}
+                  </div>
+                  <input className="inp" type="text" inputMode="decimal" placeholder={f.unit||"значение"} value={customVals[norm]||""}
+                    onChange={e=>setCustomVals(p=>({...p,[norm]:normalizeDecimal(e.target.value)}))}/>
+                  {prevC&&(
+                    <div className="m-prev-hint" style={{marginTop:4}}>
+                      <span className="m-prev-val">{prevC.value}{f.unit?` ${f.unit}`:""}</span>
+                      {cd!=null&&Math.abs(cd)>=0.05&&<span className={`m-prev-delta ${cd>0?"pos":"neg"}`}>{fmtDelta(cd)}</span>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {onCustomFieldsChange&&(newField?(
+          <div className="cf-new">
+            <input className="inp" placeholder="Название, например: Пульс покоя" maxLength={CUSTOM_NAME_MAX} value={newField.name}
+              onChange={e=>setNewField(p=>({...p,name:e.target.value}))} autoFocus/>
+            <input className="inp" placeholder="Единица (необязательно): уд/мин, %, мм" maxLength={CUSTOM_UNIT_MAX} value={newField.unit}
+              onChange={e=>setNewField(p=>({...p,unit:e.target.value}))}/>
+            <div className="w-actions">
+              <button className="ghost" onClick={()=>setNewField(null)} disabled={fieldBusy}>Отмена</button>
+              <button onClick={addField} disabled={fieldBusy}>{fieldBusy?"Сохранение...":"Добавить поле"}</button>
+            </div>
+          </div>
+        ):(
+          <button className="p-add" style={{marginTop:10,marginBottom:0}} disabled={customFields.length>=CUSTOM_MAX} onClick={()=>setNewField({name:"",unit:""})}>
+            + Своё поле
+            <span>{formFields.length===0?"Пульс, обхват запястья... — любая метрика, которую хочешь отслеживать":"Добавить ещё одну метрику"}</span>
+          </button>
+        ))}
         <div className="sec-lbl" style={{marginTop:16}}>Комментарий</div>
         <textarea
           className="ex-note-inp"
@@ -3078,13 +3221,51 @@ const TILE_MAX = 6;
 const PARAM_FIELDS = MEASUREMENT_FIELDS.filter(f => f.key !== "weight"); // вес — отдельный главный блок
 const fmtNum = (n) => String(Number(Number(n).toFixed(2)));
 
+// ── Свои поля замеров (пульс покоя, обхват запястья и т.п.) ──
+// Значения лежат в замере: m.custom = [{name, unit, value}] — вместе с названием и единицей,
+// поэтому друг/лента/экспорт показывают их без отдельного справочника. Поле опознаётся по
+// названию без учёта регистра и лишних пробелов (normName); справочник профиля нужен только
+// форме нового замера. Ключ плитки для своего поля — "c:" + normName.
+const CUSTOM_MAX = 12, CUSTOM_NAME_MAX = 40, CUSTOM_UNIT_MAX = 12;
+const normName = (s) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
+const customKey = (name) => "c:" + normName(name);
+const isCustomKey = (k) => typeof k === "string" && k.startsWith("c:");
+const customOf = (m, norm) => (Array.isArray(m?.custom) ? m.custom : []).find(c => normName(c.name) === norm);
+const STD_LABELS = new Set(MEASUREMENT_FIELDS.map(f => normName(f.label)));
+
+// Параметр для плитки/экрана деталей: стандартный (см) или своё поле (название и единица —
+// из справочника, а если его нет (друг, удалённое поле) — из самого свежего значения в замерах).
+function resolveParam(key, measurements, customFields) {
+  if (!isCustomKey(key)) {
+    const f = PARAM_FIELDS.find(x => x.key === key);
+    return f ? { key, label: f.label, unit: "см", custom: false } : null;
+  }
+  const norm = key.slice(2);
+  const reg = (customFields || []).find(f => normName(f.name) === norm);
+  let latest = null;
+  measurements.forEach(m => { const c = customOf(m, norm); if (c && (!latest || m.date >= latest.date)) latest = { date: m.date, c }; });
+  return {
+    key, custom: true,
+    label: reg ? reg.name : (latest ? latest.c.name : norm),
+    unit: reg ? reg.unit : (latest ? (latest.c.unit || "") : ""),
+  };
+}
+const paramOptions = (customFields) => [
+  ...PARAM_FIELDS.map(f => ({ key: f.key, label: f.label, unit: "см", custom: false })),
+  ...customFields.map(f => ({ key: customKey(f.name), label: f.name, unit: f.unit || "", custom: true })),
+];
+
 // Записи одного параметра замеров (талия, грудь, ...). Формат тот же, что у buildWeightData,
 // поэтому тот же экран деталей и тот же график работают для любого параметра.
 function buildParamData(measurements, key) {
   const entries = [];
+  const custom = isCustomKey(key), norm = custom ? key.slice(2) : null;
   measurements.forEach(m => {
-    const v = parseFloat(m[key]);
-    if (Number.isFinite(v) && v > 0)
+    let v;
+    if (custom) { const c = customOf(m, norm); v = c ? parseFloat(c.value) : NaN; }
+    else v = parseFloat(m[key]);
+    // стандартные обхваты — только положительные; у своего поля допустим любой числовой смысл
+    if (Number.isFinite(v) && (custom || v > 0))
       entries.push({ key: `m${m.id}`, kind: "measurement", id: m.id, name: m.name, date: m.date, weight: v });
   });
   const byDate = new Map();
@@ -3107,7 +3288,7 @@ function ParamTile({ field, data, form, size, onClick }) {
          role={onClick ? "button" : undefined} aria-label={onClick ? `${field.label}: подробнее` : undefined}>
       <div className="p-tile-lbl">{field.label}</div>
       <div className="p-tile-row">
-        {cur ? <div className="p-tile-val">{fmtNum(cur.weight)}<small>см</small></div> : <div className="p-tile-val none">—</div>}
+        {cur ? <div className="p-tile-val">{fmtNum(cur.weight)}{field.unit && <small>{field.unit}</small>}</div> : <div className="p-tile-val none">—</div>}
         {d != null && Math.abs(d) >= 0.05 && <span className={`m-prev-delta ${d > 0 ? "pos" : "neg"}`}>{fmtDelta(d)}</span>}
       </div>
       {form === "chart"
@@ -3118,11 +3299,11 @@ function ParamTile({ field, data, form, size, onClick }) {
   );
 }
 
-function TilesGrid({ tiles, measurements, onOpen = null }) {
+function TilesGrid({ tiles, measurements, customFields = [], onOpen = null }) {
   return (
     <div className="p-grid" data-testid="tiles-grid">
       {tiles.map(t => {
-        const field = PARAM_FIELDS.find(f => f.key === t.key);
+        const field = resolveParam(t.key, measurements, customFields);
         if (!field) return null; // параметр, которого больше нет, — тихо пропускаем
         return <ParamTile key={t.key} field={field} data={buildParamData(measurements, t.key)} form={t.form} size={t.size}
                           onClick={onOpen ? () => onOpen(t.key) : null}/>;
@@ -3152,8 +3333,8 @@ function ParamPickerSheet({ fields, measurements, onPick, onClose }) {
               const cur = pts.length ? pts[pts.length - 1] : null;
               return (
                 <div key={f.key} className="pick-row" onClick={() => onPick(f.key)}>
-                  <span>{f.label}</span>
-                  <span className="pick-val">{cur ? `${fmtNum(cur.weight)} см` : "нет данных"}</span>
+                  <span>{f.label}{f.custom && <span className="tag" style={{marginLeft:8}}>своё</span>}</span>
+                  <span className="pick-val">{cur ? `${fmtNum(cur.weight)}${f.unit ? " " + f.unit : ""}` : "нет данных"}</span>
                 </div>
               );
             })}
@@ -3164,10 +3345,10 @@ function ParamPickerSheet({ fields, measurements, onPick, onClose }) {
 
 // Экран настройки показателей (как настройка полей данных в часах): сверху живой
 // предпросмотр, ниже — каждая плитка: порядок, форма («число»/«график»), размер.
-function LayoutScreen({ tiles, setTiles, measurements, onBack }) {
+function LayoutScreen({ tiles, setTiles, measurements, customFields = [], onBack }) {
   const [picker, setPicker] = useState(false);
   const used = new Set(tiles.map(t => t.key));
-  const free = PARAM_FIELDS.filter(f => !used.has(f.key));
+  const free = paramOptions(customFields).filter(f => !used.has(f.key));
   const isFull = tiles.length >= TILE_MAX;
   const patch = (i, ch) => setTiles(tiles.map((t, j) => j === i ? { ...t, ...ch } : t));
   const move = (i, dir) => {
@@ -3188,10 +3369,10 @@ function LayoutScreen({ tiles, setTiles, measurements, onBack }) {
       </div>
       <p className="lay-note">Вес всегда остаётся главным блоком сверху. Здесь — до {TILE_MAX} дополнительных показателей: выбери, какие вывести, в каком порядке и в какой форме.</p>
       {tiles.length > 0
-        ? <TilesGrid tiles={tiles} measurements={measurements}/>
+        ? <TilesGrid tiles={tiles} measurements={measurements} customFields={customFields}/>
         : <div className="w-chart-empty" style={{border:"1px dashed #333",marginBottom:10}}>Пока ничего не выбрано</div>}
       {tiles.map((t, i) => {
-        const f = PARAM_FIELDS.find(x => x.key === t.key);
+        const f = resolveParam(t.key, measurements, customFields);
         return (
           <div className="lay-card" key={t.key} data-testid={`lay-${t.key}`}>
             <div className="lay-top">
@@ -3310,7 +3491,7 @@ function WeightStepper({ val, setVal, autoFocus = false, onEnter = null }) {
 
 // Титульный блок вкладки «Замеры»: текущий вес. Тап — режим правки (− / +, либо
 // вписать цифрами), сохранение пишет взвешивание на сегодня.
-function WeightHero({ current, prev, onSave, toast }) {
+function WeightHero({ current, prev, onSave, toast, readOnly = false }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState("");
   const [saving, setSaving] = useState(false);
@@ -3335,8 +3516,9 @@ function WeightHero({ current, prev, onSave, toast }) {
   );
   const d = current && prev ? current.weight - prev.weight : null;
   return (
-    <div className="w-hero" onClick={start} role="button" aria-label="Изменить текущий вес">
-      <span className="w-hero-ic"><IconEdit/></span>
+    <div className={`w-hero${readOnly ? " ro" : ""}`} onClick={readOnly ? undefined : start}
+         role={readOnly ? undefined : "button"} aria-label={readOnly ? undefined : "Изменить текущий вес"}>
+      {!readOnly && <span className="w-hero-ic"><IconEdit/></span>}
       <div className="w-hero-lbl">Текущий вес</div>
       {current
         ? <div className="w-hero-val">{fmtKg(current.weight)}<small>кг</small></div>
@@ -3344,7 +3526,7 @@ function WeightHero({ current, prev, onSave, toast }) {
       <div className="w-hero-sub">
         {current && <>{dayLabel(current.date)}{d != null && Math.abs(d) >= 0.05 && <> · <span className={`m-prev-delta ${d > 0 ? "pos" : "neg"}`}>{fmtDelta(d)} кг</span> к прошлой записи</>}</>}
       </div>
-      <div className="w-hero-hint">{current ? "Нажми, чтобы изменить вес" : "Нажми, чтобы записать вес"}</div>
+      <div className="w-hero-hint">{readOnly ? (current ? "" : "Записей веса пока нет") : (current ? "Нажми, чтобы изменить вес" : "Нажми, чтобы записать вес")}</div>
     </div>
   );
 }
@@ -3456,8 +3638,11 @@ function WeightDetailView({ data, onBack, onAdd = null, onEdit = null, onOpenMea
         : rows.map(e => {
             const d = deltas.get(e.key);
             const shadowed = !usedKeys.has(e.key);
+            // в профиле друга править/открывать нечего — строка просто показывает запись
+            const clickable = e.kind === "weighin" ? !!onEdit : !!onOpenMeasurement;
             return (
-              <div key={e.key} className="w-row" onClick={() => e.kind === "weighin" ? onEdit(e) : onOpenMeasurement(e.id)}>
+              <div key={e.key} className="w-row" style={clickable ? undefined : {cursor:"default"}}
+                   onClick={() => { if (!clickable) return; e.kind === "weighin" ? onEdit(e) : onOpenMeasurement(e.id); }}>
                 <div style={{minWidth:0}}>
                   <div className="w-row-val">{fmt(e.weight)} <span style={{color:"#555",fontWeight:400,fontSize:12}}>{unit}</span>
                     {tagMeasurements && e.kind === "measurement" && <span className="tag">Замер</span>}
@@ -3465,7 +3650,7 @@ function WeightDetailView({ data, onBack, onAdd = null, onEdit = null, onOpenMea
                   </div>
                   <div className="w-row-sub">{formatDate(e.date)}{e.kind === "measurement" && <> · {e.name}</>}{shadowed && <> · <i>{shadowNote}</i></>}</div>
                 </div>
-                <IconChevron/>
+                {clickable && <IconChevron/>}
               </div>
             );
           })}
@@ -3473,8 +3658,26 @@ function WeightDetailView({ data, onBack, onAdd = null, onEdit = null, onOpenMea
   );
 }
 
+// Карточка «Динамика веса»: график (окно — см. autoWindow) и итог изменения; тап открывает экран веса.
+function WeightChartCard({ points, onOpen, emptyText = null }) {
+  const { pts, label } = autoWindow(points);
+  const change = pts.length >= 2 ? pts[pts.length - 1].weight - pts[0].weight : null;
+  return (
+    <div className="w-chart-card" onClick={onOpen} role="button" aria-label="Открыть динамику веса">
+      <div className="w-chart-hd">
+        <span className="w-chart-title">Динамика веса</span>
+        {change != null && <span className="w-chart-sum"><span className={`m-prev-delta ${change > 0 ? "pos" : "neg"}`}>{Math.abs(change) >= 0.05 ? `${fmtDelta(change)} кг` : "без изменений"}</span> · {label}</span>}
+        <IconChevron/>
+      </div>
+      {pts.length === 0
+        ? <div className="w-chart-empty">{emptyText || <>График появится, когда запишешь вес.<br/>Вес из замеров тела тоже попадёт сюда.</>}</div>
+        : <WeightChart points={pts} height={120}/>}
+    </div>
+  );
+}
+
 // ── MeasurementsTab ───────────────────────────────────────────────────────
-function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layoutTiles,setLayoutTiles,toast,measurementDraft,setMeasurementDraft}) {
+function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layoutTiles,setLayoutTiles,customFields,setCustomFields,toast,measurementDraft,setMeasurementDraft}) {
   const [showNew,setShowNew]=useState(false);
   const [editId,setEditId]=useState(null);
   const [detailId,setDetailId]=useState(null);
@@ -3522,6 +3725,13 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layo
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []);
 
+  // Справочник своих полей замера (какие поля предлагает форма). Сервер возвращает нормализованный список.
+  const changeCustomFields=async(next)=>{
+    const res=await api.saveCustomFields(next);
+    const fields=res.fields||next;
+    setCustomFields(fields);
+    return fields;
+  };
   const handleSaveWeighIn=async(date,weight,replaceId=null)=>{
     const saved=await api.saveWeighIn(date,weight,replaceId);
     setWeighIns(p=>[...p.filter(w=>w.id!==replaceId&&w.date!==saved.date),saved]);
@@ -3668,9 +3878,10 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layo
           </div>
         )}
         <div className="sec-lbl">Показатели</div>
-        {filled.length===0
+        {filled.length===0&&!(detail.custom||[]).length
           ?<p style={{color:"#555",fontSize:13}}>Ничего не заполнено</p>
-          :filled.map(f=>{
+          :null}
+        {filled.map(f=>{
             const d=delta(f.key);
             const hasPrev=prevM&&prevM[f.key]!=null&&prevM[f.key]!=="";
             return(
@@ -3687,6 +3898,22 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layo
               </div>
             );
           })}
+        {(detail.custom||[]).map(c=>{
+          const norm=normName(c.name);
+          const pc=prevM?customOf(prevM,norm):null;
+          const dv=pc?parseFloat(c.value)-parseFloat(pc.value):null;
+          return(
+            <div key={norm} data-testid={`cd-${norm}`} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #1A1A1A"}}>
+              <span style={{color:"#888",fontSize:13}}>{c.name} <span className="tag" style={{marginLeft:4}}>своё</span></span>
+              <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+                {pc&&<span style={{fontSize:11,color:"#555",fontStyle:"italic"}}>{pc.value}{pc.unit?` ${pc.unit}`:""}</span>}
+                {pc&&<span style={{color:"#444",fontSize:11}}>→</span>}
+                <span style={{fontWeight:600,fontSize:15}}>{c.value} <span style={{color:"#555",fontWeight:400,fontSize:12}}>{c.unit}</span></span>
+                {dv!=null&&Math.abs(dv)>=0.05&&<span className={`m-prev-delta ${dv>0?"pos":"neg"}`} style={{fontSize:12}}>{fmtDelta(dv)}</span>}
+              </div>
+            </div>
+          );
+        })}
         {detail.comment&&(
           <>
             <div className="sec-lbl" style={{marginTop:16}}>Комментарий</div>
@@ -3695,7 +3922,7 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layo
         )}
         <hr className="divider"/>
         <button className="btn danger" onClick={()=>handleDelete(detail.id)}>Удалить замер</button>
-        {editTarget&&<MeasurementSheet measurements={measurements} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+        {editTarget&&<MeasurementSheet customFields={customFields} onCustomFieldsChange={changeCustomFields} measurements={measurements} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
       </div>
     );
   }
@@ -3722,11 +3949,11 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layo
   }
 
   if(paramKey){
-    const f=PARAM_FIELDS.find(x=>x.key===paramKey);
+    const f=resolveParam(paramKey,measurements,customFields);
     return(
       <WeightDetailView key={paramKey}
         data={buildParamData(measurements,paramKey)}
-        title={f?f.label:paramKey} unit="см" fmt={fmtNum} tagMeasurements={false}
+        title={f?f.label:paramKey} unit={f?f.unit:""} fmt={fmtNum} tagMeasurements={false}
         shadowNote="на графике — более поздний замер за этот день"
         emptyAll="Пока нет ни одного замера с этим показателем"
         emptyList="Замеров с этим показателем пока нет. Внеси его при следующем замере тела."
@@ -3736,38 +3963,27 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layo
     );
   }
   if(layoutView){
-    return <LayoutScreen tiles={layoutTiles} setTiles={updateTiles} measurements={measurements}
+    return <LayoutScreen tiles={layoutTiles} setTiles={updateTiles} measurements={measurements} customFields={customFields}
              onBack={()=>{flushLayout();setLayoutView(false);}}/>;
   }
 
-  // Блок «Текущий вес» и график (окно — см. autoWindow).
+  // Блок «Текущий вес» и карточка с графиком.
   const pts=wData.points;
   const curPt=pts.length?pts[pts.length-1]:null;
   const prevPt=pts.length>1?pts[pts.length-2]:null;
-  const {pts:chartPts,label:chartWin}=autoWindow(pts);
-  const chartChange=chartPts.length>=2?chartPts[chartPts.length-1].weight-chartPts[0].weight:null;
 
   return(
     <div className="page">
       <WeightHero current={curPt} prev={prevPt} toast={toast}
         onSave={async(w)=>{await handleSaveWeighIn(today(),w);toast("Вес сохранён ✓");}}/>
-      <div className="w-chart-card" onClick={()=>setWeightView(true)} role="button" aria-label="Открыть динамику веса">
-        <div className="w-chart-hd">
-          <span className="w-chart-title">Динамика веса</span>
-          {chartChange!=null&&<span className="w-chart-sum"><span className={`m-prev-delta ${chartChange>0?"pos":"neg"}`}>{Math.abs(chartChange)>=0.05?`${fmtDelta(chartChange)} кг`:"без изменений"}</span> · {chartWin}</span>}
-          <IconChevron/>
-        </div>
-        {chartPts.length===0
-          ?<div className="w-chart-empty">График появится, когда запишешь вес.<br/>Вес из замеров тела тоже попадёт сюда.</div>
-          :<WeightChart points={chartPts} height={120}/>}
-      </div>
+      <WeightChartCard points={pts} onOpen={()=>setWeightView(true)}/>
       {layoutTiles.length>0?(
         <>
           <div className="p-hd">
             <span className="w-chart-title">Показатели</span>
             <button className="edit-badge" onClick={()=>setLayoutView(true)}>Настроить</button>
           </div>
-          <TilesGrid tiles={layoutTiles} measurements={measurements} onOpen={setParamKey}/>
+          <TilesGrid tiles={layoutTiles} measurements={measurements} customFields={customFields} onOpen={setParamKey}/>
         </>
       ):(
         <button className="p-add" onClick={()=>setLayoutView(true)}>
@@ -3791,7 +4007,7 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layo
             </div>
           );
           const m=item.m;
-          const fc=MEASUREMENT_FIELDS.filter(f=>m[f.key]!==""&&m[f.key]!=null).length;
+          const fc=MEASUREMENT_FIELDS.filter(f=>m[f.key]!==""&&m[f.key]!=null).length+(Array.isArray(m.custom)?m.custom.length:0);
           return(
             <div key={m.id} className="card" onClick={()=>setDetailId(m.id)}>
               <div style={{minWidth:0}}>
@@ -3804,8 +4020,8 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layo
             </div>
           );
         })}
-      {showNew&&<MeasurementSheet measurements={measurements} initial={null} draft={draft} onSave={handleCreate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
-      {editTarget&&<MeasurementSheet measurements={measurements} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+      {showNew&&<MeasurementSheet customFields={customFields} onCustomFieldsChange={changeCustomFields} measurements={measurements} initial={null} draft={draft} onSave={handleCreate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
+      {editTarget&&<MeasurementSheet customFields={customFields} onCustomFieldsChange={changeCustomFields} measurements={measurements} initial={editTarget} draft={draft} onSave={handleUpdate} onClose={handleSheetClose} onMinimize={handleMinimize}/>}
     </div>
   );
 }
@@ -3863,11 +4079,15 @@ function FriendProfileView({friendId, onBack, onRemove}) {
   const [loading,setLoading]=useState(true);
   const [subTab,setSubTab]=useState(0);
   const [selectedEx,setSelectedEx]=useState(null);
+  // Экраны веса и показателей друга (график + список) — как у себя на вкладке «Замеры», только чтение.
+  const [weightView,setWeightView]=useState(false);
+  const [paramKey,setParamKey]=useState(null);
+  const closeFriendDetail=()=>{ setWeightView(false); setParamKey(null); };
 
-  // Два уровня внутри этого экрана: список профиля друга -> история упражнения
-  // (selectedEx). Свайп-назад должен закрывать САМЫЙ глубокий открытый уровень.
-  useSwipeBack(selectedEx ? ()=>setSelectedEx(null) : onBack);
-  useScrollTopOnChange(selectedEx);
+  // Уровни внутри этого экрана: список профиля друга -> история упражнения (selectedEx)
+  // или вес/показатель. Свайп-назад должен закрывать САМЫЙ глубокий открытый уровень.
+  useSwipeBack(selectedEx ? ()=>setSelectedEx(null) : (weightView||paramKey) ? closeFriendDetail : onBack);
+  useScrollTopOnChange(selectedEx || (weightView?"w":paramKey?`p${paramKey}`:null));
 
   useEffect(()=>{
     api.getFriendProfile(friendId).then(d=>{setData(d);setLoading(false);}).catch(()=>setLoading(false));
@@ -3888,10 +4108,30 @@ function FriendProfileView({friendId, onBack, onRemove}) {
 
   const workouts = data.workouts || [];
   const friendMeasurements = data.measurements || [];
+  // Вес и раскладка показателей друга приходят вместе с замерами (скрыл «замеры» — не приходят).
+  // Старый бэкенд этих полей не отдаёт — тогда остаются только сами замеры, как раньше.
+  const friendTiles = (data.measure_layout && data.measure_layout.tiles) || [];
+  const friendW = buildWeightData(data.weigh_ins || [], friendMeasurements);
   const hasNothing = !data.show_workouts && !data.show_exercises && !data.show_measurements;
   const allNames = data.show_exercises
     ? [...new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name.trim()).filter(Boolean)))].sort((a,b)=>a.localeCompare(b,"ru"))
     : [];
+
+  if(weightView||paramKey){
+    if(paramKey){
+      const f=resolveParam(paramKey,friendMeasurements,[]);
+      return(
+        <WeightDetailView key={paramKey}
+          data={buildParamData(friendMeasurements,paramKey)}
+          title={f?f.label:paramKey} unit={f?f.unit:""} fmt={fmtNum} tagMeasurements={false}
+          shadowNote="на графике — более поздний замер за этот день"
+          emptyAll="Пока нет ни одного замера с этим показателем"
+          emptyList="Замеров с этим показателем пока нет."
+          onBack={closeFriendDetail}/>
+      );
+    }
+    return <WeightDetailView data={friendW} onBack={closeFriendDetail} emptyList="Записей веса пока нет."/>;
+  }
 
   if(selectedEx){
     const lc=selectedEx.toLowerCase();
@@ -3912,6 +4152,7 @@ function FriendProfileView({friendId, onBack, onRemove}) {
               {exercise.sets.filter(s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps)).map((s,si)=>(
                 <div key={si}>
                   <span style={{color:"#555"}}>{si+1}.</span>{" "}
+                  <span style={setColorStyle(s)}>
                   {s.bilateral?(
                     <>
                       <span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}
@@ -3921,6 +4162,7 @@ function FriendProfileView({friendId, onBack, onRemove}) {
                   ):(
                     <>{s.weight?`${s.weight} кг`:"—"} × {s.reps?`${s.reps} повт`:"—"}</>
                   )}
+                  </span>
                 </div>
               ))}
             </div>
@@ -3965,13 +4207,13 @@ function FriendProfileView({friendId, onBack, onRemove}) {
                             <div key={si} className="w-set-row">
                               <span className="w-set-n">{si+1}</span>
                               {s.bilateral?(
-                                <span className="w-set-v w-set-bi">
+                                <span className="w-set-v w-set-bi" style={setColorStyle(s)}>
                                   <span className="w-set-bi-side"><span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}</span>
                                   <span className="w-set-bi-sep">|</span>
                                   <span className="w-set-bi-side"><span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}</span>
                                 </span>
                               ):(
-                                <span className="w-set-v">{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
+                                <span className="w-set-v" style={setColorStyle(s)}>{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
                               )}
                             </div>
                           ))}
@@ -3999,27 +4241,49 @@ function FriendProfileView({friendId, onBack, onRemove}) {
                 })
             )}
             {subTab===2&&data.show_measurements&&(
-              friendMeasurements.length===0
-                ?<div className="empty"><div className="empty-icon">📏</div>Замеров пока нет</div>
-                :[...friendMeasurements].sort((a,b)=>b.date.localeCompare(a.date)).map(m=>{
-                  const filled=MEASUREMENT_FIELDS.filter(f=>m[f.key]!==""&&m[f.key]!=null);
-                  return(
-                    <div key={m.id} className="w-ex" style={{marginBottom:10}}>
-                      <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between"}}>
-                        <span>{m.name}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(m.date)}</span>
-                      </div>
-                      {filled.length===0&&!m.comment
-                        ?<p style={{color:"#555",fontSize:12,marginTop:8}}>Ничего не заполнено</p>
-                        :filled.map(f=>(
-                          <div key={f.key} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"1px solid #1A1A1A"}}>
-                            <span style={{color:"#888",fontSize:12}}>{f.label}</span>
-                            <span style={{fontSize:13,fontWeight:600}}>{m[f.key]} <span style={{color:"#555",fontWeight:400,fontSize:11}}>{f.key==="weight"?"кг":"см"}</span></span>
+              <>
+                <WeightHero readOnly current={friendW.points.length?friendW.points[friendW.points.length-1]:null}
+                  prev={friendW.points.length>1?friendW.points[friendW.points.length-2]:null}/>
+                <WeightChartCard points={friendW.points} onOpen={()=>setWeightView(true)} emptyText="Записей веса пока нет."/>
+                {friendTiles.length>0&&(
+                  <>
+                    <div className="p-hd"><span className="w-chart-title">Показатели</span></div>
+                    <TilesGrid tiles={friendTiles} measurements={friendMeasurements} onOpen={setParamKey}/>
+                  </>
+                )}
+                {friendMeasurements.length===0
+                  ?<div className="empty"><div className="empty-icon">📏</div>Замеров пока нет</div>
+                  :<>
+                    <div className="sec-lbl" style={{marginTop:16}}>Все замеры ({friendMeasurements.length})</div>
+                    {[...friendMeasurements].sort((a,b)=>b.date.localeCompare(a.date)).map(m=>{
+                      const filled=MEASUREMENT_FIELDS.filter(f=>m[f.key]!==""&&m[f.key]!=null);
+                      const customRows=Array.isArray(m.custom)?m.custom:[];
+                      return(
+                        <div key={m.id} className="w-ex" style={{marginBottom:10}}>
+                          <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between"}}>
+                            <span>{m.name}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(m.date)}</span>
                           </div>
-                        ))}
-                      {m.comment&&<div className="ex-hist-comment">{m.comment}</div>}
-                    </div>
-                  );
-                })
+                          {filled.length===0&&customRows.length===0&&!m.comment
+                            ?<p style={{color:"#555",fontSize:12,margin:0,padding:"10px 14px"}}>Ничего не заполнено</p>
+                            :null}
+                          {filled.map(f=>(
+                            <div key={f.key} className="w-mrow">
+                              <span style={{color:"#888",fontSize:12}}>{f.label}</span>
+                              <span style={{fontSize:13,fontWeight:600}}>{m[f.key]} <span style={{color:"#555",fontWeight:400,fontSize:11}}>{f.key==="weight"?"кг":"см"}</span></span>
+                            </div>
+                          ))}
+                          {customRows.map(c=>(
+                            <div key={normName(c.name)} className="w-mrow">
+                              <span style={{color:"#888",fontSize:12}}>{c.name}</span>
+                              <span style={{fontSize:13,fontWeight:600}}>{c.value} <span style={{color:"#555",fontWeight:400,fontSize:11}}>{c.unit}</span></span>
+                            </div>
+                          ))}
+                          {m.comment&&<div className="w-ex-comment">{m.comment}</div>}
+                        </div>
+                      );
+                    })}
+                  </>}
+              </>
             )}
           </>
         )}
@@ -4300,13 +4564,13 @@ function FeedPost({post, onLikeToggle, onCommentAdd, onCommentDelete, onOpenAuth
                 <div key={si} className="w-set-row">
                   <span className="w-set-n">{si+1}</span>
                   {s.bilateral?(
-                    <span className="w-set-v w-set-bi">
+                    <span className="w-set-v w-set-bi" style={setColorStyle(s)}>
                       <span className="w-set-bi-side"><span style={{color:"#5B9CF6",fontSize:10}}>Л</span> {s.weightL?`${s.weightL} кг`:"—"} × {s.repsL||"—"}</span>
                       <span className="w-set-bi-sep">|</span>
                       <span className="w-set-bi-side"><span style={{color:"#F6845B",fontSize:10}}>П</span> {s.weightR?`${s.weightR} кг`:"—"} × {s.repsR||"—"}</span>
                     </span>
                   ):(
-                    <span className="w-set-v">{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
+                    <span className="w-set-v" style={setColorStyle(s)}>{s.weight?`${s.weight} кг`:"—"} × {s.reps||"—"} повт</span>
                   )}
                 </div>
               ))}
@@ -4320,6 +4584,12 @@ function FeedPost({post, onLikeToggle, onCommentAdd, onCommentDelete, onOpenAuth
             <div key={f.key} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"1px solid #1A1A1A"}}>
               <span style={{color:"#888",fontSize:12}}>{f.label}</span>
               <span style={{fontSize:13,fontWeight:600}}>{post[f.key]} <span style={{color:"#555",fontWeight:400,fontSize:11}}>{f.key==="weight"?"кг":"см"}</span></span>
+            </div>
+          ))}
+          {(Array.isArray(post.custom)?post.custom:[]).map(c=>(
+            <div key={normName(c.name)} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"1px solid #1A1A1A"}}>
+              <span style={{color:"#888",fontSize:12}}>{c.name}</span>
+              <span style={{fontSize:13,fontWeight:600}}>{c.value} <span style={{color:"#555",fontWeight:400,fontSize:11}}>{c.unit}</span></span>
             </div>
           ))}
           {post.comment&&<div className="ex-hist-comment">{post.comment}</div>}
@@ -5218,6 +5488,7 @@ export default function App() {
   const [measurements,setMeasurements]=useState([]);
   const [weighIns,setWeighIns]=useState([]);
   const [layoutTiles,setLayoutTiles]=useState([]); // плитки показателей на вкладке «Замеры»
+  const [customFields,setCustomFields]=useState([]); // справочник своих полей замера (название + единица)
   const [templates,setTemplates]=useState([]);
   const [profiles,setProfiles]=useState([]);
   const [friends,setFriends]=useState([]);
@@ -5271,12 +5542,13 @@ export default function App() {
   // профиля, когда список профилей и друзей не изменился, менять их незачем.
   const reloadDiaryOnly=()=>{
     setLoading(true);
-    Promise.all([api.getWorkouts(), api.getMeasurements(), api.getTemplates(), api.getWeighIns().catch(()=>[]), api.getMeasureLayout().catch(()=>({tiles:[]}))])
-      .then(([w,m,tpl,wi,lay])=>{
+    Promise.all([api.getWorkouts(), api.getMeasurements(), api.getTemplates(), api.getWeighIns().catch(()=>[]), api.getMeasureLayout().catch(()=>({tiles:[]})), api.getCustomFields().catch(()=>({fields:[]}))])
+      .then(([w,m,tpl,wi,lay,cf])=>{
         setWorkouts([...w].reverse());
         setMeasurements([...m].reverse());
         setWeighIns(wi);
         setLayoutTiles(lay.tiles||[]);
+        setCustomFields(cf.fields||[]);
         setTemplates(tpl);
         setLoading(false);
       })
@@ -5329,11 +5601,12 @@ export default function App() {
     try{
       // Взвешивания — второстепенные данные: если эндпоинта нет (бэкенд ещё не
       // обновлён) или он не ответил, приложение всё равно должно открыться.
-      const [w,m,p,f,tpl,wi,lay] = await Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends(), api.getTemplates(), api.getWeighIns().catch(()=>[]), api.getMeasureLayout().catch(()=>({tiles:[]}))]);
+      const [w,m,p,f,tpl,wi,lay,cf] = await Promise.all([api.getWorkouts(), api.getMeasurements(), api.getProfiles(), api.getFriends(), api.getTemplates(), api.getWeighIns().catch(()=>[]), api.getMeasureLayout().catch(()=>({tiles:[]})), api.getCustomFields().catch(()=>({fields:[]}))]);
       setWorkouts([...w].reverse()); // сервер даёт DESC, нам нужен ASC для логики
       setMeasurements([...m].reverse());
       setWeighIns(wi);
       setLayoutTiles(lay.tiles||[]);
+      setCustomFields(cf.fields||[]);
       setTemplates(tpl); // шаблоны сортировкой по дате не завязаны — оставляем как отдаёт сервер (новые сверху)
       setProfiles(p);
       setFriends(f);
@@ -5472,7 +5745,7 @@ export default function App() {
         {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft} progressions={progressions} onProgressionsChange={setProgressions} templates={templates} setTemplates={setTemplates} templateDraft={templateDraft} setTemplateDraft={setTemplateDraft} isPremium={isPremium} premiumChecked={premiumChecked} reloadProgressions={reloadProgressions} progressionDraft={progressionDraft} setProgressionDraft={setProgressionDraft}/>}
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
         {tab===2&&<CommunityTab friends={friends} setFriends={setFriends} toast={showToast} badge={communityBadge} onBadgeChange={setCommunityBadge} reloadBadge={reloadCommunityBadge}/>}
-        {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} weighIns={weighIns} setWeighIns={setWeighIns} layoutTiles={layoutTiles} setLayoutTiles={setLayoutTiles} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
+        {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} weighIns={weighIns} setWeighIns={setWeighIns} layoutTiles={layoutTiles} setLayoutTiles={setLayoutTiles} customFields={customFields} setCustomFields={setCustomFields} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
         {tab===4&&<ProfileTab profiles={profiles} workouts={workouts} setProfiles={setProfiles} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
         {(showWorkoutBar||showMeasurementBar||showProgressionBar||showTemplateBar)&&(
           <div className="draft-bars-wrap">

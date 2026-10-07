@@ -93,6 +93,10 @@ export const api = {
   getMeasureLayout:  ()      => request("GET", "/measure-layout"),
   saveMeasureLayout: (tiles) => request("PUT", "/measure-layout", { tiles }),
 
+  // ── Свои поля замеров: справочник профиля (название + единица) ──────────────
+  getCustomFields:  ()       => request("GET", "/custom-fields"),
+  saveCustomFields: (fields) => request("PUT", "/custom-fields", { fields }),
+
   // ── Профили ─────────────────────────────────────────────────────────────
   getProfiles:      ()          => request("GET",    "/profiles"),
   createProfile:    (name)      => request("POST",   "/profiles", { name }),
