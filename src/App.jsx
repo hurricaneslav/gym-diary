@@ -10,7 +10,9 @@ function getMyUserId(){
   return id!=null ? String(id) : "12345"; // тот же dev-фолбэк, что и в api.js
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+// «Сегодня» — по местному времени телефона (раньше по UTC: в первые часы после
+// местной полуночи записи уходили «вчерашним» числом).
+const today = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const formatDate = (iso) => { try { const [y,m,d]=iso.split("-"); return `${d}.${m}.${y}`; } catch { return iso; } };
 
 // Нормализация ввода веса/дробных чисел: на некоторых телефонах (особенно
@@ -130,6 +132,21 @@ const weightForTargetReps = (oneRM, targetReps, increment) => {
   return Math.round(raw / step) * step;
 };
 // Лучший (по оценке 1ПМ) рабочий подход в самой свежей тренировке с этим упражнением.
+// Индекс истории упражнений: ключ (имя без регистра/краёв) → записи {workout, exercise}
+// от новых к старым. Строится один раз на набор тренировок и не пересчитывается на
+// каждое нажатие клавиши. Порядок и правила отбора — те же, что были у прямого перебора.
+const buildExIndex = (workouts) => {
+  const idx = new Map();
+  for (const w of workouts) for (const e of w.exercises) {
+    const k = e.name.trim().toLowerCase();
+    if (!k) continue;
+    let a = idx.get(k); if (!a) idx.set(k, a = []);
+    a.push({ workout: w, exercise: e });
+  }
+  for (const a of idx.values()) a.sort((x, y) => y.workout.date.localeCompare(x.workout.date));
+  return idx;
+};
+
 const findLastBestSet = (workouts, name) => {
   const lc = name.trim().toLowerCase();
   if (!lc) return null;
@@ -556,6 +573,43 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .news-body div{margin-bottom:10px}
 .news-body div:last-child{margin-bottom:0}
 `;
+
+// ── Кэш последних данных (IndexedDB) ─────────────────────────────────────
+// Приложение открывается сразу из сохранённого снимка, а свежие данные с сервера
+// подтягиваются следом. Это прячет «холодный старт» сервера (первые секунды после
+// простоя) и тяжёлую загрузку всей истории. IndexedDB, а не localStorage: там лимит
+// ~5 МБ, а история тренировок весит больше мегабайта. Любая ошибка кэша —
+// просто работа без кэша, как раньше.
+const SNAP_VERSION = 1;
+const snapOpen = () => new Promise((res, rej) => {
+  try {
+    const r = indexedDB.open("gym-cache", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("snap");
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  } catch (e) { rej(e); }
+});
+const snapKey = () => "u:" + (window.Telegram?.WebApp?.initDataUnsafe?.user?.id || "dev");
+const snapGet = async (key) => {
+  try {
+    const db = await snapOpen();
+    return await new Promise(res => {
+      const q = db.transaction("snap").objectStore("snap").get(key);
+      q.onsuccess = () => res(q.result || null);
+      q.onerror = () => res(null);
+    });
+  } catch (e) { return null; }
+};
+const snapSet = async (key, val) => {
+  try {
+    const db = await snapOpen();
+    await new Promise(res => {
+      const tx = db.transaction("snap", "readwrite");
+      tx.objectStore("snap").put(val, key);
+      tx.oncomplete = tx.onerror = tx.onabort = () => res();
+    });
+  } catch (e) {}
+};
 
 // ── Аварийное сохранение черновика в localStorage ────────────────────────
 // В отличие от React-стейта (живёт только в памяти вкладки), это переживает
@@ -984,6 +1038,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   // Имя упражнения, чья полная история сейчас открыта шторкой поверх формы (null — закрыта)
   const [historyFor, setHistoryFor] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const sheetRef = useRef(null);
   useKeyboardScroll(sheetRef);
   useLockBodyScroll();
@@ -1114,28 +1169,17 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   // та же, что у getPrev: при редактировании исключаем саму тренировку и берём
   // только более ранние по дате — т.е. ровно то, что человек считает "прошлыми
   // разами" относительно этой тренировки, а не будущее/текущее.
+  const exIndex=useMemo(()=>buildExIndex(workouts),[workouts]);
+  const isEarlierEntry=(r)=>r.workout.date<date && !(isEdit && r.workout.id===initial.id);
   const getHistory=(exName)=>{
     if(!exName||!exName.trim())return [];
-    const lc=exName.trim().toLowerCase();
-    const src=isEdit?workouts.filter(w=>w.id!==initial.id):workouts;
-    const rows=[];
-    src.filter(w=>w.date<date).forEach(w=>w.exercises.forEach(e=>{
-      if(e.name.trim().toLowerCase()===lc) rows.push({workout:w,exercise:e});
-    }));
-    return rows.sort((a,b)=>b.workout.date.localeCompare(a.workout.date));
+    return (exIndex.get(exName.trim().toLowerCase())||[]).filter(isEarlierEntry);
   };
 
   const getPrev=(exName)=>{
     if(!exName.trim())return null;
-    const lc=exName.trim().toLowerCase();
-    const src=isEdit?workouts.filter(w=>w.id!==initial.id):workouts;
-    const earlier=src.filter(w=>w.date<date);
-    earlier.sort((a,b)=>b.date.localeCompare(a.date));
-    for(const w of earlier){
-      const f=w.exercises.find(e=>e.name.trim().toLowerCase()===lc);
-      if(f)return{workout:w,exercise:f};
-    }
-    return null;
+    const r=(exIndex.get(exName.trim().toLowerCase())||[]).find(isEarlierEntry);
+    return r?{workout:r.workout,exercise:r.exercise}:null;
   };
 
   // Цель активной прогрессии по названию упражнения (без учёта регистра) — если
@@ -1163,10 +1207,18 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
       .filter(e=>e.name.trim()||e.sets.some(hasData))
       .map(e=>({...e,sets:e.sets.filter(hasData)}));
     const payload={id:isEdit?initial.id:-1,name:name.trim()||defName,date,exercises:filtered};
-    const res=await onSave(payload);
-    clearDraftFromStorage("workout");
-    setSaving(false);
-    return res;
+    try{
+      const res=await onSave(payload);
+      clearDraftFromStorage("workout");
+      return res;
+    }catch(e){
+      // Раньше тут не было обработки: кнопка навсегда застревала на «Сохранение...» без
+      // единого сообщения. Теперь форма остаётся открытой, данные на месте.
+      setSaveFailed(true);
+      window.alert("Не удалось сохранить тренировку"+(e&&e.message?" ("+e.message+")":"")+".\nДанные не потеряны — проверь соединение и нажми «Сохранить» ещё раз.");
+    }finally{
+      setSaving(false);
+    }
   };
 
   // Свернуть: всегда сохраняем черновик (и в память, и на диск) — даже пустую
@@ -1179,7 +1231,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
 
   // Закрыть крестиком: если есть данные — спросим подтверждение (можно случайно стереть тренировку)
   const handleCloseClick=()=>{
-    if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+    if (hasRealData() && !window.confirm(saveFailed?"Сохранение не удалось — эти данные сейчас есть только на этом телефоне. Закрыть и потерять их?":"Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
     clearDraftFromStorage("workout");
     onClose();
   };
@@ -1384,6 +1436,7 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
   });
   const [showWorkoutPicker, setShowWorkoutPicker] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const sheetRef = useRef(null);
   useKeyboardScroll(sheetRef);
   useLockBodyScroll();
@@ -1439,10 +1492,16 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
     setSaving(true);
     const filtered = exercises.filter(e=>e.name.trim()).map(e=>({name:e.name.trim(), sets_count:Math.max(1,e.sets.length), bilateral:!!e.bilateral}));
     const payload = { id: isEdit?initial.id:-1, name: name.trim()||defName, exercises: filtered };
-    const res = await onSave(payload);
-    clearDraftFromStorage("template");
-    setSaving(false);
-    return res;
+    try {
+      const res = await onSave(payload);
+      clearDraftFromStorage("template");
+      return res;
+    } catch (e) {
+      setSaveFailed(true);
+      window.alert("Не удалось сохранить шаблон" + (e && e.message ? " (" + e.message + ")" : "") + ".\nДанные не потеряны — проверь соединение и нажми «Сохранить» ещё раз.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleMinimize = () => {
@@ -1452,7 +1511,7 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
   };
 
   const handleCloseClick = () => {
-    if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+    if (hasRealData() && !window.confirm(saveFailed?"Сохранение не удалось — эти данные сейчас есть только на этом телефоне. Закрыть и потерять их?":"Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
     clearDraftFromStorage("template");
     onClose();
   };
@@ -1694,6 +1753,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
   const autoLogProgress = async (workoutId, savedExercises) => {
     if(!progressions.length) return;
     let touched = false;
+    const failed = [];
     for(const ex of savedExercises){
       const lc = ex.name.trim().toLowerCase();
       const prog = progressions.find(p=>p.exercise_name_lc===lc && p.status==="active" && p.next_session);
@@ -1723,10 +1783,13 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
       try{
         await api.logProgressionSession(prog.id, prog.next_session.id, payload);
         touched = true;
-      }catch(e){ /* тихо игнорируем — сохранение тренировки не должно от этого зависеть */ }
+      }catch(e){ failed.push(prog.exercise_name); /* тренировка уже сохранена — не откатываем, но сообщаем ниже */ }
     }
     if(touched && onProgressionsChange){
       try{ const fresh = await api.getProgressions(); onProgressionsChange(fresh); }catch(e){}
+    }
+    if(failed.length){
+      window.alert("Тренировка сохранена, но прогрессия не обновилась: "+failed.join(", ")+".\nОткрой прогрессию и внеси результат этой тренировки вручную.");
     }
   };
 
@@ -2971,6 +3034,7 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
     return v;
   });
   const [saving,setSaving]=useState(false);
+  const [saveFailed,setSaveFailed]=useState(false);
   const sheetRef=useRef(null);
   useKeyboardScroll(sheetRef);
   useLockBodyScroll();
@@ -3034,9 +3098,15 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
     const custom=formFields
       .map(f=>({name:f.name,unit:f.unit,value:(customVals[normName(f.name)]||"").trim()}))
       .filter(c=>c.value!=="");
-    await onSave({id:isEdit?initial.id:-1,name:name.trim()||defName,date,...vals,...(custom.length?{custom}:{})});
-    clearDraftFromStorage("measurement");
-    setSaving(false);
+    try{
+      await onSave({id:isEdit?initial.id:-1,name:name.trim()||defName,date,...vals,...(custom.length?{custom}:{})});
+      clearDraftFromStorage("measurement");
+    }catch(e){
+      setSaveFailed(true);
+      window.alert("Не удалось сохранить замер"+(e&&e.message?" ("+e.message+")":"")+".\nДанные не потеряны — проверь соединение и нажми «Сохранить» ещё раз.");
+    }finally{
+      setSaving(false);
+    }
   };
 
   // Свернуть: всегда сохраняем черновик, даже пустую заготовку.
@@ -3046,7 +3116,7 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
     onMinimize(d);
   };
   const handleCloseClick=()=>{
-    if (hasRealData() && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+    if (hasRealData() && !window.confirm(saveFailed?"Сохранение не удалось — эти данные сейчас есть только на этом телефоне. Закрыть и потерять их?":"Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
     clearDraftFromStorage("measurement");
     onClose();
   };
@@ -4050,8 +4120,13 @@ function ProfileCreateSheet({onSave, onClose}) {
   useLockBodyScroll();
   const handleSave=async()=>{
     setSaving(true);
-    await onSave(name.trim()||"Новый профиль");
-    setSaving(false);
+    try{
+      await onSave(name.trim()||"Новый профиль");
+    }catch(e){
+      window.alert("Не удалось создать профиль"+(e&&e.message?" ("+e.message+")":"")+". Проверь соединение и попробуй ещё раз.");
+    }finally{
+      setSaving(false);
+    }
   };
   return(
     <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
@@ -5559,6 +5634,34 @@ export default function App() {
   };
 
   const initialLoad = async () => {
+    // Сначала — сохранённый снимок (если есть): экран появляется сразу, свежие данные
+    // подтянутся и заменят его. Черновики восстанавливаются один раз, как только
+    // приложение что-то показало.
+    let shownFromCache = false, draftsRestored = false;
+    const restoreDrafts = () => {
+      if(draftsRestored) return;
+      draftsRestored = true;
+      const storedWorkout = loadDraftFromStorage("workout");
+      if(storedWorkout) setWorkoutDraft({...storedWorkout, restoring:false});
+      const storedMeasurement = loadDraftFromStorage("measurement");
+      if(storedMeasurement) setMeasurementDraft({...storedMeasurement, restoring:false});
+      const storedProgression = loadDraftFromStorage("progression");
+      if(storedProgression) setProgressionDraft({...storedProgression, restoring:false});
+      const storedTemplate = loadDraftFromStorage("template");
+      if(storedTemplate) setTemplateDraft({...storedTemplate, restoring:false});
+    };
+    try{
+      const snap = await snapGet(snapKey());
+      if(snap && snap.v === SNAP_VERSION && snap.data && Array.isArray(snap.data.workouts)){
+        const d = snap.data;
+        setWorkouts(d.workouts); setMeasurements(d.measurements||[]); setWeighIns(d.weighIns||[]);
+        setLayoutTiles(d.layoutTiles||[]); setCustomFields(d.customFields||[]); setTemplates(d.templates||[]);
+        setProfiles(d.profiles||[]); setFriends(d.friends||[]);
+        setLoading(false);
+        shownFromCache = true;
+        restoreDrafts();
+      }
+    }catch(e){}
     // Ссылка-приглашение всегда в формате t.me/бот?start=add_XXXX (обычный
     // диплинк бота) — он гарантированно создаёт/открывает диалог с ботом и
     // тот присылает сообщение с кнопкой запуска. Формат ?startapp= технически
@@ -5597,7 +5700,7 @@ export default function App() {
     }
 
     setError(null);
-    setLoading(true);
+    if(!shownFromCache) setLoading(true);
     try{
       // Взвешивания — второстепенные данные: если эндпоинта нет (бэкенд ещё не
       // обновлён) или он не ответил, приложение всё равно должно открыться.
@@ -5619,23 +5722,44 @@ export default function App() {
       // восстановить (тем же плавающим блоком, что и при обычном сворачивании).
       // Тренировка и замер проверяются независимо — оба черновика могут
       // существовать одновременно.
-      const storedWorkout = loadDraftFromStorage("workout");
-      if(storedWorkout) setWorkoutDraft({...storedWorkout, restoring:false});
-      const storedMeasurement = loadDraftFromStorage("measurement");
-      if(storedMeasurement) setMeasurementDraft({...storedMeasurement, restoring:false});
-      const storedProgression = loadDraftFromStorage("progression");
-      if(storedProgression) setProgressionDraft({...storedProgression, restoring:false});
-      const storedTemplate = loadDraftFromStorage("template");
-      if(storedTemplate) setTemplateDraft({...storedTemplate, restoring:false});
+      restoreDrafts();
     }catch(e){
       // Бэкенд на Railway может "просыпаться" несколько секунд после простоя —
       // api.js уже делает несколько попыток сам, это резервный случай на будущее.
-      setError("Не удалось подключиться к серверу.\nЭто может занять несколько секунд, если сервер долго не использовался — попробуй ещё раз.");
+      if(shownFromCache){
+        showToast("Нет связи с сервером — показаны сохранённые данные");
+      }else{
+        setError("Не удалось подключиться к серверу.\nЭто может занять несколько секунд, если сервер долго не использовался — попробуй ещё раз.");
+      }
       setLoading(false);
     }
   };
 
   useEffect(()=>{ initialLoad(); },[]);
+
+  // Снимок для быстрого открытия: после загрузки и при любых изменениях данных
+  // (с задержкой, чтобы не писать на каждое нажатие).
+  useEffect(()=>{
+    if(loading||error) return;
+    const t=setTimeout(()=>{
+      snapSet(snapKey(),{v:SNAP_VERSION,savedAt:Date.now(),data:{workouts,measurements,weighIns,layoutTiles,customFields,templates,profiles,friends}});
+    },1500);
+    return ()=>clearTimeout(t);
+  },[loading,error,workouts,measurements,weighIns,layoutTiles,customFields,templates,profiles,friends]);
+
+  // Страховочная сетка: любая «забытая» ошибка запроса (удаление, переименование и т.п.)
+  // раньше пропадала молча — теперь пользователь видит, что действие не выполнилось.
+  useEffect(()=>{
+    const onRej=(ev)=>{
+      const msg=String(ev&&ev.reason&&ev.reason.message||"");
+      if(/^HTTP \d+/.test(msg)||/Failed to fetch|Load failed|NetworkError|network/i.test(msg)){
+        showToast("Не удалось выполнить действие — проверь соединение и повтори");
+        if(ev.preventDefault) ev.preventDefault();
+      }
+    };
+    window.addEventListener("unhandledrejection",onRej);
+    return ()=>window.removeEventListener("unhandledrejection",onRej);
+  },[]);
 
   const reloadProgressions=()=>{
     api.getProgressions().then(setProgressions).catch(()=>{});

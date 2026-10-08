@@ -15,6 +15,13 @@ function getInitData() {
   return "user=%7B%22id%22%3A12345%2C%22first_name%22%3A%22Test%22%7D&hash=dev";
 }
 
+/** Уникальный ключ действия: одинаковый во всех повторах одного POST, чтобы сервер
+ *  не выполнил его дважды (иначе потерянный ответ + повтор = дубль тренировки). */
+function newKey() {
+  try { if (crypto?.randomUUID) return crypto.randomUUID(); } catch { /* старый WebView */ }
+  return Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -26,8 +33,9 @@ function sleep(ms) {
  * Повторяем только при сетевых ошибках и 502/503/504 — не при 4xx, там
  * повтор не поможет (это ошибка запроса, а не временная недоступность).
  */
-async function request(method, path, body, attempt = 1) {
+async function request(method, path, body, attempt = 1, key = null) {
   const MAX_ATTEMPTS = 3;
+  if (method === "POST" && !key) key = newKey();
   let res;
   try {
     res = await fetch(`${API_URL}${path}`, {
@@ -35,6 +43,7 @@ async function request(method, path, body, attempt = 1) {
       headers: {
         "Content-Type": "application/json",
         "x-init-data": getInitData(),
+        ...(key ? { "x-idempotency-key": key } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -42,7 +51,7 @@ async function request(method, path, body, attempt = 1) {
     // fetch сам бросает исключение при обрыве соединения/недоступности сервера
     if (attempt < MAX_ATTEMPTS) {
       await sleep(attempt * 800);
-      return request(method, path, body, attempt + 1);
+      return request(method, path, body, attempt + 1, key);
     }
     throw networkErr;
   }
@@ -51,9 +60,11 @@ async function request(method, path, body, attempt = 1) {
     const isRetryable = [502, 503, 504].includes(res.status);
     if (isRetryable && attempt < MAX_ATTEMPTS) {
       await sleep(attempt * 800);
-      return request(method, path, body, attempt + 1);
+      return request(method, path, body, attempt + 1, key);
     }
-    throw new Error(`HTTP ${res.status}`);
+    const err = new Error(`HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
