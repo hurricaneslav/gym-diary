@@ -474,6 +474,12 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .loading{text-align:center;padding:60px 24px;color:#585858;font-size:13px}
 .spinner{width:24px;height:24px;border:2px solid #3A3A3A;border-top-color:#FFF;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 12px}
 @keyframes spin{to{transform:rotate(360deg)}}
+@keyframes dlgIn{from{opacity:0}to{opacity:1}}
+.dlg-ov{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:300;display:flex;align-items:center;justify-content:center;padding:24px;animation:dlgIn .15s ease}
+.dlg{width:100%;max-width:340px;background:#0A0A0A;border:1px solid #3A3A3A;padding:20px 18px 18px}
+.dlg-msg{font-size:14px;line-height:1.5;color:#DDD;white-space:pre-line;word-break:break-word;margin-bottom:18px}
+.dlg-btns{display:flex;gap:10px}
+.dlg-btns .btn{margin-bottom:0;flex:1}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;border:1px solid #444;color:#CCC;font-size:13px;padding:10px 18px;z-index:200;white-space:nowrap;animation:fadeIn .2s ease}
 .kbd-dismiss-btn{position:fixed;right:13px;z-index:60;background:#1A1A1A;border:1px solid #3A3A3A;color:#DDD;font-size:12px;font-weight:600;padding:9px 13px;font-family:inherit;cursor:pointer;display:flex;align-items:center;gap:6px;box-shadow:0 2px 10px rgba(0,0,0,.5)}
 .kbd-dismiss-btn:active{border-color:#FFF;color:#FFF}
@@ -573,6 +579,68 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .news-body div{margin-bottom:10px}
 .news-body div:last-child{margin-bottom:0}
 `;
+
+// ── Диалоги в стиле приложения вместо нативных alert/confirm ─────────────────
+// askConfirm(текст) → Promise<boolean>, notify(текст) → Promise<void>. Рисуются
+// компонентом <DialogHost/> (смонтирован один раз, снаружи основного экрана).
+// Пока хост не смонтирован, используем системные окна как запасной вариант.
+// Одинаковый вопрос, уже ожидающий ответа, повторно не открывается (например, когда
+// жест «назад» и кнопка «закрыть» сработали одновременно).
+const dialogBus = { push: null };
+const pendingConfirms = new Map();
+const askConfirm = (message) => {
+  if (!dialogBus.push) return Promise.resolve(window.confirm(message));
+  if (pendingConfirms.has(message)) return pendingConfirms.get(message);
+  const p = new Promise(resolve => dialogBus.push({ kind: "confirm", message, resolve }))
+    .finally(() => pendingConfirms.delete(message));
+  pendingConfirms.set(message, p);
+  return p;
+};
+const notify = (message) => {
+  if (!dialogBus.push) { window.alert(message); return Promise.resolve(); }
+  return new Promise(resolve => dialogBus.push({ kind: "alert", message, resolve }));
+};
+const dialogLabels = (msg, isConfirm) => {
+  if (!isConfirm) return { okText: "Ок", danger: false };
+  const m = String(msg);
+  const danger = /Удалить|Убрать|потеряны|потерять|безвозвратно/.test(m);
+  const okText = /^Удалить/.test(m) ? "Удалить" : /^Закрыть/.test(m) ? "Закрыть" : /^Убрать/.test(m) ? "Убрать"
+    : /^Отменить незавершённую/.test(m) ? "Отменить запись" : "Да";
+  return { okText, danger };
+};
+function DialogHost() {
+  const [queue, setQueue] = useState([]);
+  useEffect(() => {
+    dialogBus.push = (d) => setQueue(q => [...q, d]);
+    return () => { dialogBus.push = null; };
+  }, []);
+  const cur = queue[0];
+  const close = (val) => {
+    if (!cur) return;
+    cur.resolve(cur.kind === "confirm" ? !!val : undefined);
+    setQueue(q => q.slice(1));
+  };
+  useEffect(() => {
+    if (!cur) return;
+    const onKey = (e) => { if (e.key === "Escape") close(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cur]);
+  if (!cur) return null;
+  const isConfirm = cur.kind === "confirm";
+  const { okText, danger } = dialogLabels(cur.message, isConfirm);
+  return (
+    <div className="dlg-ov" onClick={() => close(false)}>
+      <div className="dlg" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="dlg-msg">{cur.message}</div>
+        <div className="dlg-btns">
+          {isConfirm && <button className="btn ghost" onClick={() => close(false)}>Отмена</button>}
+          <button className={"btn" + (isConfirm && danger ? " danger" : "")} onClick={() => close(true)}>{okText}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Кэш последних данных (IndexedDB) ─────────────────────────────────────
 // Приложение открывается сразу из сохранённого снимка, а свежие данные с сервера
@@ -1090,9 +1158,9 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   const setHasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
   // Если в упражнении уже есть внесённые подходы — спрашиваем подтверждение
   // (случайное нажатие иначе стирает записанные данные без возможности отменить).
-  const remEx=(id)=>{
+  const remEx=async (id)=>{
     const ex=exercises.find(e=>e.id===id);
-    if(ex && ex.sets.some(setHasData) && !window.confirm("Удалить упражнение? Внесённые подходы будут потеряны."))return;
+    if(ex && ex.sets.some(setHasData) && !(await askConfirm("Удалить упражнение? Внесённые подходы будут потеряны.")))return;
     setExercises(p=>p.filter(e=>e.id!==id));
   };
   // Перемещение упражнения в списке — на 1 позицию за нажатие (вверх/вниз).
@@ -1145,8 +1213,8 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   // (только названия + количество подходов, без веса/повторов — их вписываем
   // уже по факту). Название тренировки помечается именем шаблона в скобках.
   // Если уже применяли другой шаблон — его пометка в названии заменяется, а не копится.
-  const applyTemplate = (t) => {
-    if(hasRealData() && !window.confirm(`Заменить упражнения на шаблон «${t.name}»? Внесённые подходы будут потеряны.`)) return;
+  const applyTemplate = async (t) => {
+    if(hasRealData() && !(await askConfirm(`Заменить упражнения на шаблон «${t.name}»? Внесённые подходы будут потеряны.`))) return;
     setExercises(t.exercises.map(te=>({
       id: Date.now()+Math.random(),
       name: te.name,
@@ -1215,7 +1283,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
       // Раньше тут не было обработки: кнопка навсегда застревала на «Сохранение...» без
       // единого сообщения. Теперь форма остаётся открытой, данные на месте.
       setSaveFailed(true);
-      window.alert("Не удалось сохранить тренировку"+(e&&e.message?" ("+e.message+")":"")+".\nДанные не потеряны — проверь соединение и нажми «Сохранить» ещё раз.");
+      notify("Не удалось сохранить тренировку"+(e&&e.message?" ("+e.message+")":"")+".\nДанные не потеряны — проверь соединение и нажми «Сохранить» ещё раз.");
     }finally{
       setSaving(false);
     }
@@ -1230,8 +1298,8 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   };
 
   // Закрыть крестиком: если есть данные — спросим подтверждение (можно случайно стереть тренировку)
-  const handleCloseClick=()=>{
-    if (hasRealData() && !window.confirm(saveFailed?"Сохранение не удалось — эти данные сейчас есть только на этом телефоне. Закрыть и потерять их?":"Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+  const handleCloseClick=async ()=>{
+    if (hasRealData() && !(await askConfirm(saveFailed?"Сохранение не удалось — эти данные сейчас есть только на этом телефоне. Закрыть и потерять их?":"Закрыть без сохранения? Внесённые данные будут потеряны."))) return;
     clearDraftFromStorage("workout");
     onClose();
   };
@@ -1482,8 +1550,8 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
   // Возврат к выбору способа создания (с нуля / из тренировки) — например если
   // выбрали не ту тренировку или передумали. Спрашиваем подтверждение только
   // если уже успели что-то назвать вручную (иначе, сразу после выбора — просто откатываем).
-  const goBackToModePick = () => {
-    if (hasRealData() && !window.confirm("Вернуться к выбору? Текущий список упражнений будет очищён.")) return;
+  const goBackToModePick = async () => {
+    if (hasRealData() && !(await askConfirm("Вернуться к выбору? Текущий список упражнений будет очищён."))) return;
     setExercises([]);
     setShowWorkoutPicker(false);
   };
@@ -1498,7 +1566,7 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
       return res;
     } catch (e) {
       setSaveFailed(true);
-      window.alert("Не удалось сохранить шаблон" + (e && e.message ? " (" + e.message + ")" : "") + ".\nДанные не потеряны — проверь соединение и нажми «Сохранить» ещё раз.");
+      notify("Не удалось сохранить шаблон" + (e && e.message ? " (" + e.message + ")" : "") + ".\nДанные не потеряны — проверь соединение и нажми «Сохранить» ещё раз.");
     } finally {
       setSaving(false);
     }
@@ -1510,8 +1578,8 @@ function TemplateSheet({ templates, workouts, initial, draft, onSave, onClose, o
     onMinimize(d);
   };
 
-  const handleCloseClick = () => {
-    if (hasRealData() && !window.confirm(saveFailed?"Сохранение не удалось — эти данные сейчас есть только на этом телефоне. Закрыть и потерять их?":"Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+  const handleCloseClick = async () => {
+    if (hasRealData() && !(await askConfirm(saveFailed?"Сохранение не удалось — эти данные сейчас есть только на этом телефоне. Закрыть и потерять их?":"Закрыть без сохранения? Внесённые данные будут потеряны."))) return;
     clearDraftFromStorage("template");
     onClose();
   };
@@ -1623,7 +1691,7 @@ function TemplatesView({templates, setTemplates, workouts, toast, templateDraft,
     toast("Изменения сохранены ✓");
   };
   const handleDelete=async(id)=>{
-    if(!window.confirm("Удалить шаблон?"))return;
+    if(!(await askConfirm("Удалить шаблон?")))return;
     await api.deleteTemplate(id);
     setTemplates(p=>p.filter(t=>t.id!==id));
     setDetailId(null);
@@ -1644,7 +1712,7 @@ function TemplatesView({templates, setTemplates, workouts, toast, templateDraft,
 
   const guardOpen=(openFn)=>{
     if(templateDraft && !templateDraft.restoring){
-      window.alert("Сначала заверши текущий шаблон — он ещё не сохранён. Нажми на плашку внизу, чтобы продолжить.");
+      notify("Сначала заверши текущий шаблон — он ещё не сохранён. Нажми на плашку внизу, чтобы продолжить.");
       return;
     }
     openFn();
@@ -1771,7 +1839,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
         : Number(s.reps)));
       const plannedW = prog.next_session.planned_weight;
       if(plannedW && Math.abs(weight-plannedW)/plannedW > 0.2){
-        if(!window.confirm(`Вес по прогрессии «${prog.exercise_name}» сильно отличается от плана (план ${plannedW} кг, введено ${weight} кг). Всё равно засчитать в прогрессию?`))continue;
+        if(!(await askConfirm(`Вес по прогрессии «${prog.exercise_name}» сильно отличается от плана (план ${plannedW} кг, введено ${weight} кг). Всё равно засчитать в прогрессию?`)))continue;
       }
       const payload = { actual_weight: weight, actual_reps: reps, actual_sets: used.length, workout_id: workoutId };
       // план детализирован по каждому подходу — пишем и факт по каждому подходу, а не только сводку
@@ -1789,7 +1857,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
       try{ const fresh = await api.getProgressions(); onProgressionsChange(fresh); }catch(e){}
     }
     if(failed.length){
-      window.alert("Тренировка сохранена, но прогрессия не обновилась: "+failed.join(", ")+".\nОткрой прогрессию и внеси результат этой тренировки вручную.");
+      notify("Тренировка сохранена, но прогрессия не обновилась: "+failed.join(", ")+".\nОткрой прогрессию и внеси результат этой тренировки вручную.");
     }
   };
 
@@ -1810,7 +1878,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
     toast("Изменения сохранены ✓");
   };
   const handleDelete=async(id)=>{
-    if(!window.confirm("Удалить тренировку?"))return;
+    if(!(await askConfirm("Удалить тренировку?")))return;
     await api.deleteWorkout(id);
     setWorkouts(p=>p.filter(w=>w.id!==id));
     setDetailId(null);
@@ -1842,7 +1910,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
   // новую или другую тренировку на редактирование, чтобы старую не потерять.
   const guardOpen=(openFn)=>{
     if(workoutDraft && !workoutDraft.restoring){
-      window.alert("Сначала заверши текущую тренировку — она ещё не сохранена. Нажми на неё в списке, чтобы продолжить.");
+      notify("Сначала заверши текущую тренировку — она ещё не сохранена. Нажми на неё в списке, чтобы продолжить.");
       return;
     }
     openFn();
@@ -2167,7 +2235,7 @@ function ManualProgressionSheet({ workouts, draft, onSaved, onClose, onMinimize 
       });
       clearDraftFromStorage("progression");
       onSaved();
-    }catch(e){ window.alert("Не удалось создать прогрессию: "+(e.message||"")); }
+    }catch(e){ notify("Не удалось создать прогрессию: "+(e.message||"")); }
     setSaving(false);
   };
 
@@ -2176,8 +2244,8 @@ function ManualProgressionSheet({ workouts, draft, onSaved, onClose, onMinimize 
     saveDraftToStorage("progression", d);
     onMinimize(d);
   };
-  const handleCloseClick=()=>{
-    if(progressionDraftHasData({mode:"manual",name,sessions}) && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны."))return;
+  const handleCloseClick=async ()=>{
+    if(progressionDraftHasData({mode:"manual",name,sessions}) && !(await askConfirm("Закрыть без сохранения? Внесённые данные будут потеряны.")))return;
     clearDraftFromStorage("progression");
     onClose();
   };
@@ -2297,8 +2365,8 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
     saveDraftToStorage("progression", d);
     onMinimize(d);
   };
-  const handleCloseClick=()=>{
-    if(progressionDraftHasData(buildDraft()) && !window.confirm("Закрыть без сохранения? Внесённые данные будут потеряны."))return;
+  const handleCloseClick=async ()=>{
+    if(progressionDraftHasData(buildDraft()) && !(await askConfirm("Закрыть без сохранения? Внесённые данные будут потеряны.")))return;
     clearDraftFromStorage("progression");
     onClose();
   };
@@ -2316,7 +2384,7 @@ function CalculatedProgressionWizard({ workouts, draft, onSaved, onClose, onMini
       });
       clearDraftFromStorage("progression");
       onSaved();
-    }catch(e){ window.alert("Не удалось создать прогрессию: "+(e.message||"")); }
+    }catch(e){ notify("Не удалось создать прогрессию: "+(e.message||"")); }
     setSaving(false);
   };
 
@@ -2615,46 +2683,46 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
       setLogging(null);
       load(); onChanged();
       toast("Записано ✓");
-    }catch(e){ window.alert("Не удалось сохранить: "+(e.message||"")); }
+    }catch(e){ notify("Не удалось сохранить: "+(e.message||"")); }
     setBusy(false);
   };
   const doSkip=async(s)=>{
-    if(!window.confirm("Пропустить эту сессию без пересчёта весов?"))return;
+    if(!(await askConfirm("Пропустить эту сессию без пересчёта весов?")))return;
     await api.skipProgressionSession(data.id, s.id);
     load(); onChanged();
   };
   const doUndo=async()=>{
-    if(!window.confirm("Отменить последнюю запись и пересчитать план?"))return;
+    if(!(await askConfirm("Отменить последнюю запись и пересчитать план?")))return;
     setBusy(true);
     try{ await api.undoLastProgressionLog(data.id); load(); onChanged(); toast("Отменено ✓"); }
-    catch(e){ window.alert("Не удалось отменить: "+(e.message||"")); }
+    catch(e){ notify("Не удалось отменить: "+(e.message||"")); }
     setBusy(false);
   };
   const doDelete=async()=>{
-    if(!window.confirm("Удалить прогрессию из базы? Вся история планирования этого цикла будет безвозвратно удалена. (Данные о фактически выполненных тренировках сохранятся в дневнике)."))return;
+    if(!(await askConfirm("Удалить прогрессию из базы? Вся история планирования этого цикла будет безвозвратно удалена. (Данные о фактически выполненных тренировках сохранятся в дневнике).")))return;
     setBusy(true);
     try{ await api.deleteProgression(data.id); onChanged(); onBack(); }
-    catch(e){ window.alert("Не удалось удалить: "+(e.message||"")); setBusy(false); }
+    catch(e){ notify("Не удалось удалить: "+(e.message||"")); setBusy(false); }
   };
   const doNewCycle=async()=>{
-    if(!window.confirm(`Начать новый цикл с текущей точки — ${data.current_weight} кг × ${data.current_reps}${repUnit}?`))return;
+    if(!(await askConfirm(`Начать новый цикл с текущей точки — ${data.current_weight} кг × ${data.current_reps}${repUnit}?`)))return;
     setBusy(true);
     try{ await api.startNewProgressionCycle(data.id, {}); onChanged(); load(); toast("Новый цикл начат ✓"); }
-    catch(e){ window.alert("Не удалось начать новый цикл: "+(e.message||"")); }
+    catch(e){ notify("Не удалось начать новый цикл: "+(e.message||"")); }
     setBusy(false);
   };
   const doComplete=async()=>{
-    if(!window.confirm("Завершить прогрессию? Дальше можно начать новый цикл с изменёнными параметрами."))return;
+    if(!(await askConfirm("Завершить прогрессию? Дальше можно начать новый цикл с изменёнными параметрами.")))return;
     setBusy(true);
     try{ await api.completeProgression(data.id); onChanged(); load(); toast("Прогрессия завершена ✓"); }
-    catch(e){ window.alert("Не удалось завершить: "+(e.message||"")); }
+    catch(e){ notify("Не удалось завершить: "+(e.message||"")); }
     setBusy(false);
   };
   const doFlagAmrap=async()=>{
-    if(!window.confirm("Пометить ближайшую тренировку как AMRAP-тест (последний подход — в отказ)?"))return;
+    if(!(await askConfirm("Пометить ближайшую тренировку как AMRAP-тест (последний подход — в отказ)?")))return;
     setBusy(true);
     try{ await api.flagAmrapSession(data.id); load(); toast("Следующая тренировка — AMRAP ✓"); }
-    catch(e){ window.alert("Не удалось: "+(e.message||"")); }
+    catch(e){ notify("Не удалось: "+(e.message||"")); }
     setBusy(false);
   };
   const doResetStart=async()=>{
@@ -2664,7 +2732,7 @@ function ProgressionDetail({ id, onBack, onChanged, toast }) {
       await api.resetProgressionStart(data.id, {start_weight:Number(resetWeight), start_reps:Number(resetReps), beginner_mode:resetBeginner});
       setShowReset(false); setResetWeight(""); setResetReps("");
       onChanged(); load(); toast("Стартовая точка сброшена ✓");
-    }catch(e){ window.alert("Не удалось сбросить старт: "+(e.message||"")); }
+    }catch(e){ notify("Не удалось сбросить старт: "+(e.message||"")); }
     setBusy(false);
   };
 
@@ -2872,7 +2940,7 @@ function ProgressionTab({ isPremium, premiumChecked, progressions, reloadProgres
   // поверх, чтобы старый не потерять (как и с тренировкой/замером).
   const guardOpen=(openFn)=>{
     if(progressionDraft && !progressionDraft.restoring){
-      window.alert("Сначала заверши текущую прогрессию — она ещё не сохранена. Нажми на неё в списке, чтобы продолжить.");
+      notify("Сначала заверши текущую прогрессию — она ещё не сохранена. Нажми на неё в списке, чтобы продолжить.");
       return;
     }
     openFn();
@@ -2955,7 +3023,7 @@ function EditProgressionSheet({ data, onSaved, onClose }) {
         frequency, sets_count:Number(setsCount), increment:Number(increment), deload_enabled:deload,
       });
       onSaved();
-    }catch(e){ window.alert("Не удалось сохранить: "+(e.message||"")); }
+    }catch(e){ notify("Не удалось сохранить: "+(e.message||"")); }
     setSaving(false);
   };
 
@@ -3058,21 +3126,21 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
   const addField=async()=>{
     const name=newField.name.trim().replace(/\s+/g," ");
     const unit=newField.unit.trim();
-    if(!name){window.alert("Введи название поля");return;}
+    if(!name){notify("Введи название поля");return;}
     const norm=normName(name);
-    if(STD_LABELS.has(norm)){window.alert("Такой показатель уже есть среди стандартных — впиши его выше.");return;}
-    if(formFields.some(f=>normName(f.name)===norm)){window.alert("Поле с таким названием уже есть.");return;}
-    if(customFields.length>=CUSTOM_MAX){window.alert(`Можно завести не больше ${CUSTOM_MAX} своих полей.`);return;}
+    if(STD_LABELS.has(norm)){notify("Такой показатель уже есть среди стандартных — впиши его выше.");return;}
+    if(formFields.some(f=>normName(f.name)===norm)){notify("Поле с таким названием уже есть.");return;}
+    if(customFields.length>=CUSTOM_MAX){notify(`Можно завести не больше ${CUSTOM_MAX} своих полей.`);return;}
     if(!onCustomFieldsChange)return;
     setFieldBusy(true);
     try{ await onCustomFieldsChange([...customFields,{name,unit}]); setNewField(null); }
-    catch(e){ window.alert("Не удалось сохранить поле — проверь соединение."); }
+    catch(e){ notify("Не удалось сохранить поле — проверь соединение."); }
     setFieldBusy(false);
   };
   const removeField=async(f)=>{
-    if(!window.confirm(`Убрать поле «${f.name}» из формы замера? Уже записанные значения останутся в истории.`))return;
+    if(!(await askConfirm(`Убрать поле «${f.name}» из формы замера? Уже записанные значения останутся в истории.`)))return;
     try{ await onCustomFieldsChange(customFields.filter(x=>normName(x.name)!==normName(f.name))); }
-    catch(e){ window.alert("Не удалось убрать поле — проверь соединение."); }
+    catch(e){ notify("Не удалось убрать поле — проверь соединение."); }
   };
 
   // Ищем предыдущий замер строго раньше текущей даты
@@ -3103,7 +3171,7 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
       clearDraftFromStorage("measurement");
     }catch(e){
       setSaveFailed(true);
-      window.alert("Не удалось сохранить замер"+(e&&e.message?" ("+e.message+")":"")+".\nДанные не потеряны — проверь соединение и нажми «Сохранить» ещё раз.");
+      notify("Не удалось сохранить замер"+(e&&e.message?" ("+e.message+")":"")+".\nДанные не потеряны — проверь соединение и нажми «Сохранить» ещё раз.");
     }finally{
       setSaving(false);
     }
@@ -3115,8 +3183,8 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
     saveDraftToStorage("measurement", { editId: isEdit?initial.id:null, ...d });
     onMinimize(d);
   };
-  const handleCloseClick=()=>{
-    if (hasRealData() && !window.confirm(saveFailed?"Сохранение не удалось — эти данные сейчас есть только на этом телефоне. Закрыть и потерять их?":"Закрыть без сохранения? Внесённые данные будут потеряны.")) return;
+  const handleCloseClick=async ()=>{
+    if (hasRealData() && !(await askConfirm(saveFailed?"Сохранение не удалось — эти данные сейчас есть только на этом телефоне. Закрыть и потерять их?":"Закрыть без сохранения? Внесённые данные будут потеряны."))) return;
     clearDraftFromStorage("measurement");
     onClose();
   };
@@ -3612,17 +3680,17 @@ function WeighInSheet({ initial, onSave, onDelete, onClose }) {
   useLockBodyScroll();
   const submit = async () => {
     const n = parseFloat(val);
-    if (!date) { window.alert("Укажи дату"); return; }
-    if (!Number.isFinite(n) || n < WEIGHT_MIN || n > WEIGHT_MAX) { window.alert(`Вес — от ${WEIGHT_MIN} до ${WEIGHT_MAX} кг`); return; }
+    if (!date) { notify("Укажи дату"); return; }
+    if (!Number.isFinite(n) || n < WEIGHT_MIN || n > WEIGHT_MAX) { notify(`Вес — от ${WEIGHT_MIN} до ${WEIGHT_MAX} кг`); return; }
     setBusy(true);
     try { await onSave(date, n, initial?.id ?? null); }
-    catch (e) { window.alert("Не удалось сохранить — проверь соединение"); setBusy(false); }
+    catch (e) { notify("Не удалось сохранить — проверь соединение"); setBusy(false); }
   };
   const remove = async () => {
-    if (!window.confirm("Удалить это взвешивание?")) return;
+    if (!(await askConfirm("Удалить это взвешивание?"))) return;
     setBusy(true);
     try { await onDelete(initial.id); }
-    catch (e) { window.alert("Не удалось удалить — проверь соединение"); setBusy(false); }
+    catch (e) { notify("Не удалось удалить — проверь соединение"); setBusy(false); }
   };
   return (
     <div className="overlay" onClick={(e) => e.target === e.currentTarget && !busy && onClose()}>
@@ -3855,7 +3923,7 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layo
     toast("Изменения сохранены ✓");
   };
   const handleDelete=async(id)=>{
-    if(!window.confirm("Удалить замер?"))return;
+    if(!(await askConfirm("Удалить замер?")))return;
     await api.deleteMeasurement(id);
     setMeasurements(p=>p.filter(m=>m.id!==id));
     setDetailId(null);
@@ -3887,7 +3955,7 @@ function MeasurementsTab({measurements,setMeasurements,weighIns,setWeighIns,layo
   // или другой замер на редактирование, чтобы старый не потерять.
   const guardOpen=(openFn)=>{
     if(measurementDraft && !measurementDraft.restoring){
-      window.alert("Сначала заверши текущий замер — он ещё не сохранён. Нажми на него в списке, чтобы продолжить.");
+      notify("Сначала заверши текущий замер — он ещё не сохранён. Нажми на него в списке, чтобы продолжить.");
       return;
     }
     openFn();
@@ -4123,7 +4191,7 @@ function ProfileCreateSheet({onSave, onClose}) {
     try{
       await onSave(name.trim()||"Новый профиль");
     }catch(e){
-      window.alert("Не удалось создать профиль"+(e&&e.message?" ("+e.message+")":"")+". Проверь соединение и попробуй ещё раз.");
+      notify("Не удалось создать профиль"+(e&&e.message?" ("+e.message+")":"")+". Проверь соединение и попробуй ещё раз.");
     }finally{
       setSaving(false);
     }
@@ -4442,7 +4510,7 @@ function FriendsView({friends, setFriends, onBack, toast, onRequestsChanged}) {
 
   const handleInvite=async()=>{
     if(!BOT_USERNAME){
-      window.alert("Юзернейм бота не настроен. Добавь VITE_BOT_USERNAME в переменные окружения фронтенда.");
+      notify("Юзернейм бота не настроен. Добавь VITE_BOT_USERNAME в переменные окружения фронтенда.");
       return;
     }
     setInviteBusy(true);
@@ -4490,12 +4558,12 @@ function FriendsView({friends, setFriends, onBack, toast, onRequestsChanged}) {
         toast("Заявка отправлена ✓");
       }
     }catch(e){
-      window.alert("Не удалось отправить заявку — возможно пользователь ещё не открывал приложение");
+      notify("Не удалось отправить заявку — возможно пользователь ещё не открывал приложение");
     }
   };
 
   const handleRemoveFriend=async(id)=>{
-    if(!window.confirm("Удалить из друзей?"))return;
+    if(!(await askConfirm("Удалить из друзей?")))return;
     await api.removeFriend(id);
     setFriends(prev=>prev.filter(f=>f.id!==id));
   };
@@ -4509,7 +4577,7 @@ function FriendsView({friends, setFriends, onBack, toast, onRequestsChanged}) {
       toast("Заявка принята ✓");
       onRequestsChanged?.();
     }catch(e){
-      window.alert("Не удалось принять заявку");
+      notify("Не удалось принять заявку");
     }
     setBusyReqId(null);
   };
@@ -4521,7 +4589,7 @@ function FriendsView({friends, setFriends, onBack, toast, onRequestsChanged}) {
       setRequests(prev=>prev.filter(r=>r.request_id!==req.request_id));
       onRequestsChanged?.();
     }catch(e){
-      window.alert("Не удалось отклонить заявку");
+      notify("Не удалось отклонить заявку");
     }
     setBusyReqId(null);
   };
@@ -4787,7 +4855,7 @@ function CommunityTab({friends, setFriends, toast, badge, onBadgeChange, reloadB
   const [feedKey,setFeedKey]=useState(0);
   useScrollTopOnChange(openFriendId);
   const handleRemoveOpenFriend=async()=>{
-    if(!window.confirm("Удалить из друзей?"))return;
+    if(!(await askConfirm("Удалить из друзей?")))return;
     const id=openFriendId;
     await api.removeFriend(id);
     setFriends(prev=>prev.filter(f=>f.id!==id));
@@ -5214,7 +5282,7 @@ function AvatarEditorSheet({ initial, onSave, onClose }) {
   const [cfg, setCfg] = useState(() => normalizeAvatar(initial));
   useLockBodyScroll();
   const dirty = avatarKey(cfg) !== avatarKey(initial);
-  const tryClose = () => { if (!dirty || window.confirm("Отменить изменения внешности?")) onClose(); };
+  const tryClose = async () => { if (!dirty || (await askConfirm("Отменить изменения внешности?"))) onClose(); };
   useSwipeBack(tryClose);
   const set = (k, v) => setCfg(c => ({ ...c, [k]: v }));
   const chips = (key, list) => (
@@ -5462,13 +5530,13 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ha
         URL.revokeObjectURL(url);
       }
     }catch(e){
-      window.alert("Не удалось выгрузить данные");
+      notify("Не удалось выгрузить данные");
     }
     setExportBusy(false);
   };
 
   const handleActivate=async(id)=>{
-    if(hasUnsavedDrafts && !window.confirm("У тебя есть несохранённая тренировка, замер или прогрессия — при переключении профиля они будут потеряны. Переключить профиль?")) return;
+    if(hasUnsavedDrafts && !(await askConfirm("У тебя есть несохранённая тренировка, замер или прогрессия — при переключении профиля они будут потеряны. Переключить профиль?"))) return;
     await api.activateProfile(id);
     setProfiles(prev=>prev.map(p=>({...p,is_active:p.id===id})));
     onProfileSwitch();
@@ -5480,7 +5548,7 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ha
     const wasActiveBefore=profiles.find(p=>p.id===id)?.is_active;
     let msg="Удалить профиль? Все его тренировки, упражнения и замеры удалятся без возможности восстановления.";
     if(wasActiveBefore && hasUnsavedDrafts) msg+="\n\nТакже у тебя есть несохранённая тренировка, замер или прогрессия — они будут потеряны.";
-    if(!window.confirm(msg))return;
+    if(!(await askConfirm(msg)))return;
     try{
       const wasActive=wasActiveBefore;
       await api.deleteProfile(id);
@@ -5489,7 +5557,7 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ha
       if(wasActive) onProfileSwitch();
       toast("Профиль удалён");
     }catch(e){
-      window.alert("Нельзя удалить последний профиль");
+      notify("Нельзя удалить последний профиль");
     }
   };
 
@@ -5554,7 +5622,7 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ha
 }
 
 // ── Root App ──────────────────────────────────────────────────────────────
-export default function App() {
+function AppInner() {
   const [tab,setTab]=useState(0);
   const [isPremium,setIsPremium]=useState(false);
   const [premiumChecked,setPremiumChecked]=useState(false);
@@ -5883,7 +5951,7 @@ export default function App() {
                   <div className="draft-bar-title">{workoutDraft.name || "Тренировка"}</div>
                   <div className="draft-bar-sub">Тренировка не сохранена · нажми чтобы продолжить</div>
                 </div>
-                <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage("workout");setWorkoutDraft(null);}}}><IconClose/></button>
+                <button className="draft-bar-close" onClick={async (e)=>{e.stopPropagation();if((await askConfirm("Отменить незавершённую запись? Данные будут потеряны."))){clearDraftFromStorage("workout");setWorkoutDraft(null);}}}><IconClose/></button>
               </div>
             )}
             {showMeasurementBar&&(
@@ -5896,7 +5964,7 @@ export default function App() {
                   <div className="draft-bar-title">{measurementDraft.name || "Замер"}</div>
                   <div className="draft-bar-sub">Замер не сохранён · нажми чтобы продолжить</div>
                 </div>
-                <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage("measurement");setMeasurementDraft(null);}}}><IconClose/></button>
+                <button className="draft-bar-close" onClick={async (e)=>{e.stopPropagation();if((await askConfirm("Отменить незавершённую запись? Данные будут потеряны."))){clearDraftFromStorage("measurement");setMeasurementDraft(null);}}}><IconClose/></button>
               </div>
             )}
             {showProgressionBar&&(
@@ -5909,7 +5977,7 @@ export default function App() {
                   <div className="draft-bar-title">{progressionDraft.name || "Прогрессия"}</div>
                   <div className="draft-bar-sub">Не сохранена · нажми чтобы продолжить</div>
                 </div>
-                <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage("progression");setProgressionDraft(null);}}}><IconClose/></button>
+                <button className="draft-bar-close" onClick={async (e)=>{e.stopPropagation();if((await askConfirm("Отменить незавершённую запись? Данные будут потеряны."))){clearDraftFromStorage("progression");setProgressionDraft(null);}}}><IconClose/></button>
               </div>
             )}
             {showTemplateBar&&(
@@ -5922,7 +5990,7 @@ export default function App() {
                   <div className="draft-bar-title">{templateDraft.name || "Шаблон"}</div>
                   <div className="draft-bar-sub">Шаблон не сохранён · нажми чтобы продолжить</div>
                 </div>
-                <button className="draft-bar-close" onClick={(e)=>{e.stopPropagation();if(window.confirm("Отменить незавершённую запись? Данные будут потеряны.")){clearDraftFromStorage("template");setTemplateDraft(null);}}}><IconClose/></button>
+                <button className="draft-bar-close" onClick={async (e)=>{e.stopPropagation();if((await askConfirm("Отменить незавершённую запись? Данные будут потеряны."))){clearDraftFromStorage("template");setTemplateDraft(null);}}}><IconClose/></button>
               </div>
             )}
           </div>
@@ -5932,4 +6000,10 @@ export default function App() {
       </div>
     </>
   );
+}
+
+// Корневой компонент: диалоги живут снаружи основного экрана, поэтому не пропадают,
+// когда он на время показывает «Загрузка…» (например, при переключении профиля).
+export default function App() {
+  return (<><AppInner /><DialogHost /></>);
 }
