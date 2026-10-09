@@ -494,6 +494,7 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .draft-bar-close{background:none;border:none;color:#8A7050;cursor:pointer;padding:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .draft-bar-close:active{color:#FFF}
 .badge-active{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#4CAF50;border:1px solid #2E4A2E;padding:2px 6px;flex-shrink:0}
+.badge-draft{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#D9A441;border:1px solid #4A3E22;padding:2px 6px;flex-shrink:0}
 .badge-main{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#5B9CF6;border:1px solid #2A3A4A;padding:2px 6px;flex-shrink:0}
 .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #242424;gap:12px}
 .toggle-row:last-child{border-bottom:none}
@@ -692,18 +693,58 @@ const DRAFT_STORAGE_KEYS = {
   template: "gym_diary_draft_template_v1",
 };
 
-function saveDraftToStorage(type, draft) {
-  try { localStorage.setItem(DRAFT_STORAGE_KEYS[type], JSON.stringify(draft)); } catch(e) {}
+// Черновики у каждого профиля свои: незавершённая тренировка одного профиля не
+// мешает другому и не теряется при переключении. Ключ = общий ключ типа + id профиля.
+// draftProfileId — профиль, чьи черновики сейчас «в работе»; его выставляет корневой
+// компонент после загрузки и при смене профиля. Вызовы save/load/clear внутри форм
+// про профиль ничего не знают — берут текущий.
+let draftProfileId = null;
+const setDraftProfile = (pid) => { draftProfileId = (pid == null ? null : String(pid)); };
+const DRAFT_TYPES = ["workout", "measurement", "progression", "template"];
+const DRAFT_LABELS = { workout: "тренировка", measurement: "замер", progression: "прогрессия", template: "шаблон" };
+const draftKey = (type, pid = draftProfileId) =>
+  DRAFT_STORAGE_KEYS[type] + (pid != null && pid !== "" ? `_p${pid}` : "");
+
+function saveDraftToStorage(type, draft, pid) {
+  try { localStorage.setItem(draftKey(type, pid), JSON.stringify(draft)); } catch(e) {}
 }
-function loadDraftFromStorage(type) {
+function loadDraftFromStorage(type, pid) {
   try {
-    const raw = localStorage.getItem(DRAFT_STORAGE_KEYS[type]);
+    const raw = localStorage.getItem(draftKey(type, pid));
     return raw ? JSON.parse(raw) : null;
   } catch(e) { return null; }
 }
-function clearDraftFromStorage(type) {
-  try { localStorage.removeItem(DRAFT_STORAGE_KEYS[type]); } catch(e) {}
+function clearDraftFromStorage(type, pid) {
+  try { localStorage.removeItem(draftKey(type, pid)); } catch(e) {}
 }
+// Черновики, записанные до появления профильных ключей (один общий слот на тип),
+// переезжают к активному профилю — ничего не пропадает при обновлении приложения.
+function migrateLegacyDrafts(pid) {
+  try {
+    for (const t of DRAFT_TYPES) {
+      const legacy = DRAFT_STORAGE_KEYS[t];
+      const raw = localStorage.getItem(legacy);
+      if (raw == null) continue;
+      if (localStorage.getItem(draftKey(t, pid)) == null) localStorage.setItem(draftKey(t, pid), raw);
+      localStorage.removeItem(legacy);
+    }
+  } catch(e) {}
+}
+// Есть ли в сохранённом черновике этого типа реальные данные (а не пустая заготовка).
+function draftHasRealData(type, d) {
+  if (!d) return false;
+  if (type === "workout") return workoutDraftHasData(d.exercises, d.name, d.defaultName);
+  if (type === "measurement") return measurementDraftHasData(d.vals);
+  if (type === "progression") return progressionDraftHasData(d);
+  if (type === "template") return templateDraftHasData(d);
+  return false;
+}
+// Подписи черновиков профиля с реальными данными — для пометки в списке профилей.
+function profileDraftLabels(pid) {
+  return DRAFT_TYPES.filter(t => draftHasRealData(t, loadDraftFromStorage(t, pid))).map(t => DRAFT_LABELS[t]);
+}
+function clearProfileDrafts(pid) { DRAFT_TYPES.forEach(t => clearDraftFromStorage(t, pid)); }
+const activeProfileIdOf = (plist) => { const a = (plist || []).find(x => x.is_active) || (plist || [])[0]; return a ? a.id : null; };
 
 // ── Keyboard-aware scroll ─────────────────────────────────────────────────
 // Единственный правильный способ: слушаем visualViewport.resize,
@@ -5458,7 +5499,7 @@ function StatsHero({ workouts, profileId, profileName, avatarRaw, pinsRaw, readO
   );
 }
 
-function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, hasUnsavedDrafts}) {
+function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, activeDraftLabels}) {
   const [detailId,setDetailId]=useState(null);
   const [renamingId,setRenamingId]=useState(null);
   const [renameVal,setRenameVal]=useState("");
@@ -5536,7 +5577,6 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ha
   };
 
   const handleActivate=async(id)=>{
-    if(hasUnsavedDrafts && !(await askConfirm("У тебя есть несохранённая тренировка, замер или прогрессия — при переключении профиля они будут потеряны. Переключить профиль?"))) return;
     await api.activateProfile(id);
     setProfiles(prev=>prev.map(p=>({...p,is_active:p.id===id})));
     onProfileSwitch();
@@ -5547,14 +5587,16 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ha
   const handleDelete=async(id)=>{
     const wasActiveBefore=profiles.find(p=>p.id===id)?.is_active;
     let msg="Удалить профиль? Все его тренировки, упражнения и замеры удалятся без возможности восстановления.";
-    if(wasActiveBefore && hasUnsavedDrafts) msg+="\n\nТакже у тебя есть несохранённая тренировка, замер или прогрессия — они будут потеряны.";
+    const delLabels=wasActiveBefore?activeDraftLabels:profileDraftLabels(id);
+    if(delLabels.length) msg+=`\n\nУ этого профиля есть несохранённый черновик (${delLabels.join(", ")}) — он тоже будет удалён.`;
     if(!(await askConfirm(msg)))return;
     try{
       const wasActive=wasActiveBefore;
       await api.deleteProfile(id);
+      clearProfileDrafts(id);
       setProfiles(prev=>prev.filter(p=>p.id!==id));
       setDetailId(null);
-      if(wasActive) onProfileSwitch();
+      if(wasActive) onProfileSwitch(true);
       toast("Профиль удалён");
     }catch(e){
       notify("Нельзя удалить последний профиль");
@@ -5611,6 +5653,7 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ha
             <div className="card-sub" style={{display:"flex",gap:6,marginTop:5}}>
               {p.is_active&&<span className="badge-active">Активен</span>}
               {p.is_main&&<span className="badge-main">Основной</span>}
+              {(()=>{const l=p.is_active?activeDraftLabels:profileDraftLabels(p.id); return l.length?<span className="badge-draft">Черновик: {l.join(", ")}</span>:null;})()}
             </div>
           </div>
           <IconChevron/>
@@ -5685,8 +5728,11 @@ function AppInner() {
   // профиля, когда список профилей и друзей не изменился, менять их незачем.
   const reloadDiaryOnly=()=>{
     setLoading(true);
-    Promise.all([api.getWorkouts(), api.getMeasurements(), api.getTemplates(), api.getWeighIns().catch(()=>[]), api.getMeasureLayout().catch(()=>({tiles:[]})), api.getCustomFields().catch(()=>({fields:[]}))])
-      .then(([w,m,tpl,wi,lay,cf])=>{
+    Promise.all([api.getWorkouts(), api.getMeasurements(), api.getTemplates(), api.getWeighIns().catch(()=>[]), api.getMeasureLayout().catch(()=>({tiles:[]})), api.getCustomFields().catch(()=>({fields:[]})), api.getProfiles()])
+      .then(([w,m,tpl,wi,lay,cf,plist])=>{
+        setProfiles(plist);
+        // Теперь активен другой профиль — показываем его собственные черновики (если есть).
+        restoreDrafts(activeProfileIdOf(plist), true);
         setWorkouts([...w].reverse());
         setMeasurements([...m].reverse());
         setWeighIns(wi);
@@ -5701,23 +5747,26 @@ function AppInner() {
       });
   };
 
+  // Достаёт черновики профиля `pid` из хранилища в состояние приложения. Повторный вызов
+  // для того же профиля ничего не делает (чтобы не затереть то, что уже на экране);
+  // force — при смене профиля, когда состояние нужно подменить в любом случае.
+  const restoredPidRef = useRef(null);
+  const restoreDrafts = (pid, force = false) => {
+    if(!force && restoredPidRef.current !== null && String(restoredPidRef.current) === String(pid)) return;
+    restoredPidRef.current = pid;
+    setDraftProfile(pid);
+    if(pid != null) migrateLegacyDrafts(pid);
+    const w = loadDraftFromStorage("workout");     setWorkoutDraft(w ? {...w, restoring:false} : null);
+    const m = loadDraftFromStorage("measurement"); setMeasurementDraft(m ? {...m, restoring:false} : null);
+    const g = loadDraftFromStorage("progression"); setProgressionDraft(g ? {...g, restoring:false} : null);
+    const t = loadDraftFromStorage("template");    setTemplateDraft(t ? {...t, restoring:false} : null);
+  };
+
   const initialLoad = async () => {
     // Сначала — сохранённый снимок (если есть): экран появляется сразу, свежие данные
     // подтянутся и заменят его. Черновики восстанавливаются один раз, как только
     // приложение что-то показало.
-    let shownFromCache = false, draftsRestored = false;
-    const restoreDrafts = () => {
-      if(draftsRestored) return;
-      draftsRestored = true;
-      const storedWorkout = loadDraftFromStorage("workout");
-      if(storedWorkout) setWorkoutDraft({...storedWorkout, restoring:false});
-      const storedMeasurement = loadDraftFromStorage("measurement");
-      if(storedMeasurement) setMeasurementDraft({...storedMeasurement, restoring:false});
-      const storedProgression = loadDraftFromStorage("progression");
-      if(storedProgression) setProgressionDraft({...storedProgression, restoring:false});
-      const storedTemplate = loadDraftFromStorage("template");
-      if(storedTemplate) setTemplateDraft({...storedTemplate, restoring:false});
-    };
+    let shownFromCache = false;
     try{
       const snap = await snapGet(snapKey());
       if(snap && snap.v === SNAP_VERSION && snap.data && Array.isArray(snap.data.workouts)){
@@ -5727,7 +5776,7 @@ function AppInner() {
         setProfiles(d.profiles||[]); setFriends(d.friends||[]);
         setLoading(false);
         shownFromCache = true;
-        restoreDrafts();
+        restoreDrafts(activeProfileIdOf(d.profiles));
       }
     }catch(e){}
     // Ссылка-приглашение всегда в формате t.me/бот?start=add_XXXX (обычный
@@ -5790,7 +5839,7 @@ function AppInner() {
       // восстановить (тем же плавающим блоком, что и при обычном сворачивании).
       // Тренировка и замер проверяются независимо — оба черновика могут
       // существовать одновременно.
-      restoreDrafts();
+      restoreDrafts(activeProfileIdOf(p));
     }catch(e){
       // Бэкенд на Railway может "просыпаться" несколько секунд после простоя —
       // api.js уже делает несколько попыток сам, это резервный случай на будущее.
@@ -5860,11 +5909,20 @@ function AppInner() {
       .finally(()=>setPremiumChecked(true));
   },[]);
 
-  // После переключения/удаления активного профиля дневник меняется — оба
-  // черновика относятся к старому профилю и больше не актуальны, сбрасываем их.
-  const handleProfileSwitch=()=>{
+  // После переключения активного профиля дневник меняется. Незавершённое НЕ теряется:
+  // черновики старого профиля остаются в его собственных слотах (draftProfileId ещё
+  // указывает на него), а когда загрузятся данные нового профиля, подтянутся уже его
+  // черновики. discard — профиль удалён вместе с черновиками, сохранять нечего.
+  const handleProfileSwitch=(discard=false)=>{
+    if(!discard){
+      if(workoutDraft && !workoutDraft.restoring) saveDraftToStorage("workout", workoutDraft);
+      if(measurementDraft && !measurementDraft.restoring) saveDraftToStorage("measurement", measurementDraft);
+      if(progressionDraft && !progressionDraft.restoring) saveDraftToStorage("progression", progressionDraft);
+      if(templateDraft && !templateDraft.restoring) saveDraftToStorage("template", templateDraft);
+    }
     setWorkoutDraft(null);
     setMeasurementDraft(null);
+    setProgressionDraft(null);
     setTemplateDraft(null);
     reloadDiaryOnly();
   };
@@ -5914,11 +5972,12 @@ function AppInner() {
 
   // Есть ли несохранённые данные в черновиках — если да, при переключении
   // профиля (или удалении активного) предупреждаем, что они будут потеряны.
-  const hasUnsavedDrafts =
-    (!!workoutDraft && workoutDraftHasData(workoutDraft.exercises, workoutDraft.name, workoutDraft.defaultName)) ||
-    (!!measurementDraft && measurementDraftHasData(measurementDraft.vals)) ||
-    (!!progressionDraft && progressionDraftHasData(progressionDraft)) ||
-    (!!templateDraft && templateDraftHasData(templateDraft));
+  const activeDraftLabels = [
+    (!!workoutDraft && workoutDraftHasData(workoutDraft.exercises, workoutDraft.name, workoutDraft.defaultName)) ? DRAFT_LABELS.workout : null,
+    (!!measurementDraft && measurementDraftHasData(measurementDraft.vals)) ? DRAFT_LABELS.measurement : null,
+    (!!progressionDraft && progressionDraftHasData(progressionDraft)) ? DRAFT_LABELS.progression : null,
+    (!!templateDraft && templateDraftHasData(templateDraft)) ? DRAFT_LABELS.template : null,
+  ].filter(Boolean);
 
   return(
     <>
@@ -5938,7 +5997,7 @@ function AppInner() {
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
         {tab===2&&<CommunityTab friends={friends} setFriends={setFriends} toast={showToast} badge={communityBadge} onBadgeChange={setCommunityBadge} reloadBadge={reloadCommunityBadge}/>}
         {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} weighIns={weighIns} setWeighIns={setWeighIns} layoutTiles={layoutTiles} setLayoutTiles={setLayoutTiles} customFields={customFields} setCustomFields={setCustomFields} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
-        {tab===4&&<ProfileTab profiles={profiles} workouts={workouts} setProfiles={setProfiles} onProfileSwitch={handleProfileSwitch} toast={showToast} hasUnsavedDrafts={hasUnsavedDrafts}/>}
+        {tab===4&&<ProfileTab profiles={profiles} workouts={workouts} setProfiles={setProfiles} onProfileSwitch={handleProfileSwitch} toast={showToast} activeDraftLabels={activeDraftLabels}/>}
         {(showWorkoutBar||showMeasurementBar||showProgressionBar||showTemplateBar)&&(
           <div className="draft-bars-wrap">
             {showWorkoutBar&&(
