@@ -489,6 +489,22 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .draft-bar-dot{width:9px;height:9px;background:#E0A030;flex-shrink:0;animation:pulse 1.6s ease infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .draft-bar-text{flex:1;min-width:0}
+.wk-timer{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:10px;margin:-8px -16px 14px;padding:8px 16px;background:#0A0A0A;border-bottom:1px solid #282828;font-size:12px;color:#888;font-variant-numeric:tabular-nums}
+.wk-timer .wk-ic{display:flex;color:#666}
+.wk-timer .wk-t{color:#DDD;font-size:14px;letter-spacing:.02em}
+.wk-timer.paused .wk-t,.wk-timer.paused .wk-ic{color:#666}
+.wk-timer .wk-note{color:#777;text-transform:uppercase;letter-spacing:.08em;font-size:10px}
+.wk-timer .wk-btn{margin-left:auto;background:none;border:1px solid #333;color:#AAA;width:34px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+.wk-timer .wk-btn:active{background:#1A1A1A}
+.dur-row{margin:20px 0 10px}
+.dur-main{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.dur-lbl{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#777}
+.dur-val{background:none;border:none;color:#DDD;font-size:15px;display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0;font-family:inherit}
+.dur-inp{width:110px;text-align:right;padding:8px 10px;margin:0}
+.dur-link{background:none;border:none;color:#D9A441;font-size:12px;padding:0;cursor:pointer;text-decoration:underline;font-family:inherit}
+.dur-hint{font-size:12px;color:#888;margin-top:2px}
+.draft-timer{font-variant-numeric:tabular-nums}
+.draft-timer.paused{opacity:.65}
 .draft-bar-title{font-size:15px;font-weight:700;color:#FFF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .draft-bar-sub{font-size:12px;color:#C08A30;margin-top:2px;font-weight:500}
 .draft-bar-close{background:none;border:none;color:#8A7050;cursor:pointer;padding:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
@@ -580,6 +596,144 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .news-body div{margin-bottom:10px}
 .news-body div:last-child{margin-bottom:0}
 `;
+
+// ── Таймер тренировки ─────────────────────────────────────────────────────
+// Время считается по МЕТКАМ времени, а не бегущими секундами: так оно верно и после
+// сворачивания, выключенного экрана и даже выгрузки приложения из памяти (метки лежат
+// в черновике). Общее время = сумма «активных» отрезков: пауза останавливает счёт.
+// Секундомер отдыха стартует, когда подход впервые внесён (повторы), и сбрасывается
+// следующим внесённым подходом.
+// <timer-helpers>
+const TIMER_OFF_KEY = "gym_timer_off";
+const timerEnabled = () => { try { return localStorage.getItem(TIMER_OFF_KEY) !== "1"; } catch (e) { return true; } };
+const setTimerEnabled = (on) => { try { if (on) localStorage.removeItem(TIMER_OFF_KEY); else localStorage.setItem(TIMER_OFF_KEY, "1"); } catch (e) {} };
+const TIMER_GAP_MS = 2 * 3600 * 1000;   // пауза в активности дольше 2 ч — предложим вычесть при сохранении
+const timerNew = (now) => ({ accMs: 0, runStart: now, restFrom: null, lastSetAt: null, gaps: [], subMs: 0 });
+const timerElapsed = (t, now) => Math.max(0, t.accMs + (t.runStart != null ? Math.max(0, now - t.runStart) : 0) - (t.subMs || 0));
+const timerPause = (t, now) => t.runStart == null ? t
+  : { ...t, accMs: t.accMs + Math.max(0, now - t.runStart), runStart: null, restFrom: null, lastSetAt: null };
+const timerResume = (t, now) => t.runStart != null ? t : { ...t, runStart: now };
+const timerActivityRef = (t) => (t.lastSetAt != null ? t.lastSetAt : t.runStart);
+const timerOnSetDone = (t, now) => {
+  let n = t;
+  if (n.runStart == null) n = timerResume(n, now);   // внёс подход на паузе — счёт продолжается сам
+  else {
+    const ref = timerActivityRef(n);
+    if (ref != null && now - ref > TIMER_GAP_MS) n = { ...n, gaps: [...n.gaps, { ms: now - ref }] };
+  }
+  return { ...n, restFrom: now, lastSetAt: now };
+};
+const timerRest = (t, now) => (t.runStart != null && t.restFrom != null) ? Math.max(0, now - t.restFrom) : null;
+// Сколько времени «подозрительно»: долгие паузы между подходами + хвост после последнего подхода
+const timerPendingGapMs = (t, now) => {
+  const gaps = t.gaps.reduce((a, g) => a + g.ms, 0);
+  const ref = t.runStart != null ? timerActivityRef(t) : null;
+  const trailing = (ref != null && now - ref > TIMER_GAP_MS) ? now - ref : 0;
+  return gaps + trailing;
+};
+// После вычитания точка отсчёта «последней активности» переносится на «сейчас» — иначе тот же хвост вычитался бы снова.
+const timerSubtractGaps = (t, now) => ({ ...t, subMs: (t.subMs || 0) + timerPendingGapMs(t, now), gaps: [],
+  lastSetAt: t.runStart != null ? now : t.lastSetAt });
+const fmtClock = (ms) => {
+  const total = Math.floor(Math.max(0, ms) / 1000), h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
+  const p = (n) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${p(m)}:${p(sec)}` : `${m}:${p(sec)}`;
+};
+const fmtDur = (sec) => {
+  if (sec == null) return "—";
+  const mins = Math.floor(sec / 60), h = Math.floor(mins / 60), m = mins % 60;
+  if (h > 0) return `${h} ч ${String(m).padStart(2, "0")} мин`;
+  return mins > 0 ? `${mins} мин` : "< 1 мин";
+};
+// «1:35» или «95» (минуты) → секунды; пусто → null; не распознано → undefined
+const parseDurInput = (str) => {
+  const t = String(str || "").trim().replace(",", ".");
+  if (!t) return null;
+  let mins; const mm = t.match(/^(\d+):(\d{1,2})$/);
+  if (mm) mins = +mm[1] * 60 + +mm[2];
+  else if (/^\d+(\.\d+)?$/.test(t)) mins = Math.round(parseFloat(t));
+  else return undefined;
+  return (mins >= 0 && mins <= 48 * 60) ? mins * 60 : undefined;
+};
+const setIsDone = (st) => st.bilateral ? !!(st.repsL && st.repsR) : !!st.reps;   // подход «выполнен», когда внесены повторы
+const countDoneSets = (exercises) => exercises.reduce((a, e) => a + e.sets.filter(setIsDone).length, 0);
+// </timer-helpers>
+
+// Обновляет «сейчас» раз в секунду (и сразу при возврате в приложение) — только внутри маленьких
+// компонентов, чтобы большая форма тренировки не перерисовывалась каждую секунду.
+function useNow(intervalMs) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    tick();
+    const id = setInterval(tick, intervalMs);
+    document.addEventListener("visibilitychange", tick);
+    window.addEventListener("focus", tick);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", tick); window.removeEventListener("focus", tick); };
+  }, [intervalMs]);
+  return now;
+}
+const IconPause = () => <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect x="2" y="1" width="3" height="10"/><rect x="7" y="1" width="3" height="10"/></svg>;
+const IconPlay = () => <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M3 1l8 5-8 5z"/></svg>;
+const IconClockSm = () => <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><circle cx="6" cy="6" r="5"/><path d="M6 3v3l2 1.2"/></svg>;
+
+// Тонкая полоска вверху формы (закреплена при прокрутке): общее время, отдых, пауза.
+function WorkoutTimerStrip({ timer, onPause, onResume }) {
+  const now = useNow(1000);
+  const paused = timer.runStart == null;
+  const rest = timerRest(timer, now);
+  return (
+    <div className={"wk-timer" + (paused ? " paused" : "")} data-testid="wk-timer">
+      <span className="wk-ic"><IconClockSm/></span>
+      <span className="wk-t">{fmtClock(timerElapsed(timer, now))}</span>
+      {paused ? <span className="wk-note">пауза</span> : (rest != null && <span className="wk-rest">отдых {fmtClock(rest)}</span>)}
+      <button className="wk-btn" onClick={paused ? onResume : onPause} title={paused ? "Продолжить" : "Пауза"} aria-label={paused ? "Продолжить" : "Пауза"}>
+        {paused ? <IconPlay/> : <IconPause/>}
+      </button>
+    </div>
+  );
+}
+
+// Строка «Длительность» над кнопкой сохранения: значение с таймера или введённое вручную.
+function DurationRow({ timer, manualSec, initialSec, onManual, onSubtract }) {
+  const now = useNow(15000);
+  const [editing, setEditing] = useState(false);
+  const [txt, setTxt] = useState("");
+  const auto = timer ? Math.floor(timerElapsed(timer, now) / 1000) : (initialSec != null ? initialSec : null);
+  const shown = manualSec != null ? manualSec : auto;
+  const pendingGap = (timer && manualSec == null) ? timerPendingGapMs(timer, now) : 0;
+  const startEdit = () => {
+    setTxt(shown != null ? `${Math.floor(shown / 3600)}:${String(Math.floor((shown % 3600) / 60)).padStart(2, "0")}` : "");
+    setEditing(true);
+  };
+  const commit = () => {
+    const v = parseDurInput(txt);
+    setEditing(false);
+    if (v !== undefined) onManual(v);   // null — вернуться к значению таймера; нераспознанное — просто не меняем
+  };
+  return (
+    <div className="dur-row" data-testid="dur-row">
+      <div className="dur-main">
+        <span className="dur-lbl">Длительность</span>
+        {editing
+          ? <input className="inp dur-inp" autoFocus value={txt} placeholder="1:35" onChange={e=>setTxt(e.target.value)}
+              onBlur={commit} onKeyDown={e=>{ if(e.key==="Enter") e.currentTarget.blur(); }}/>
+          : <button className="dur-val" onClick={startEdit}>{fmtDur(shown)}<IconEdit/></button>}
+      </div>
+      {manualSec != null && timer && <button className="dur-link" onClick={()=>onManual(null)}>вернуть по таймеру</button>}
+      {pendingGap > 0 && (
+        <div className="dur-hint">Был перерыв ≈ {fmtDur(Math.round(pendingGap / 1000))} — <button className="dur-link" onClick={onSubtract}>вычесть</button></div>
+      )}
+    </div>
+  );
+}
+
+// Время в свёрнутой плашке черновика и в карточке черновика
+function DraftTimerText({ timer }) {
+  const now = useNow(1000);
+  const paused = timer.runStart == null;
+  return <span className={"draft-timer" + (paused ? " paused" : "")}>{fmtClock(timerElapsed(timer, now))}{paused ? " · пауза" : ""}</span>;
+}
 
 // ── Диалоги в стиле приложения вместо нативных alert/confirm ─────────────────
 // askConfirm(текст) → Promise<boolean>, notify(текст) → Promise<void>. Рисуются
@@ -1148,6 +1302,26 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   const [historyFor, setHistoryFor] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+  // Таймер: только для НОВОЙ тренировки (у существующих — ручное поле длительности).
+  // Восстановленный черновик продолжает свой таймер по сохранённым меткам времени.
+  const [timer, setTimer] = useState(() => {
+    if (draft && Object.prototype.hasOwnProperty.call(draft, "timer")) return draft.timer || null;
+    if (isEdit) return null;
+    return timerEnabled() ? timerNew(Date.now()) : null;
+  });
+  const [manualSec, setManualSec] = useState(draft?.manualSec ?? null);
+  const pauseTimer = () => setTimer(t => t ? timerPause(t, Date.now()) : t);
+  const resumeTimer = () => setTimer(t => t ? timerResume(t, Date.now()) : t);
+  // Подход считается внесённым, когда общее число подходов с повторами выросло ровно на 1
+  // (правка уже внесённого и массовые вставки — шаблон/прогрессия — отдых не запускают).
+  const doneCountRef = useRef(null);
+  useEffect(() => {
+    const n = countDoneSets(exercises);
+    const prev = doneCountRef.current;
+    doneCountRef.current = n;
+    if (prev === null) return;
+    if (n === prev + 1) setTimer(t => t ? timerOnSetDone(t, Date.now()) : t);
+  }, [exercises]);
   const sheetRef = useRef(null);
   useKeyboardScroll(sheetRef);
   useLockBodyScroll();
@@ -1237,7 +1411,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   // уже введена пользователем и её жалко потерять по случайному крестику).
   const hasRealData = () => name.trim()!==trueDefaultName.trim() || exercises.some(e=>e.name.trim()||e.sets.some(setHasData));
 
-  const buildDraft = () => ({ name, date, exercises, appliedTemplateName, defaultName: trueDefaultName });
+  const buildDraft = () => ({ name, date, exercises, appliedTemplateName, defaultName: trueDefaultName, timer, manualSec });
 
   // Аварийное автосохранение: пишем в localStorage с небольшой задержкой после
   // каждого изменения (не на каждую букву). Сохраняем всегда, даже если пока
@@ -1245,10 +1419,10 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   // Переживает убийство процесса Telegram в фоне — не только сворачивание внутри приложения.
   useEffect(() => {
     const t = setTimeout(() => {
-      saveDraftToStorage("workout", { editId: isEdit?initial.id:null, name, date, exercises, appliedTemplateName, defaultName: trueDefaultName });
+      saveDraftToStorage("workout", { editId: isEdit?initial.id:null, name, date, exercises, appliedTemplateName, defaultName: trueDefaultName, timer, manualSec });
     }, 600);
     return () => clearTimeout(t);
-  }, [name, date, exercises, appliedTemplateName]);
+  }, [name, date, exercises, appliedTemplateName, timer, manualSec]);
 
   // Применить шаблон: заменяет список упражнений на структуру из шаблона
   // (только названия + количество подходов, без веса/повторов — их вписываем
@@ -1315,7 +1489,11 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
     const filtered=exercises
       .filter(e=>e.name.trim()||e.sets.some(hasData))
       .map(e=>({...e,sets:e.sets.filter(hasData)}));
-    const payload={id:isEdit?initial.id:-1,name:name.trim()||defName,date,exercises:filtered};
+    // Длительность: введённая вручную → по таймеру → прежняя (при правке). Меньше минуты не записываем.
+    const prevDur = isEdit ? (initial.duration_sec ?? null) : null;
+    let dur = manualSec != null ? manualSec : (timer ? Math.floor(timerElapsed(timer, Date.now()) / 1000) : prevDur);
+    if (manualSec == null && timer && dur < 60) dur = prevDur;
+    const payload={id:isEdit?initial.id:-1,name:name.trim()||defName,date,exercises:filtered,duration_sec:dur};
     try{
       const res=await onSave(payload);
       clearDraftFromStorage("workout");
@@ -1357,6 +1535,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
         <div className="sheet-title-row">
           <input className="sheet-title-inp" value={name} onChange={e=>setName(e.target.value)} placeholder={defName}/>
         </div>
+        {timer&&<WorkoutTimerStrip timer={timer} onPause={pauseTimer} onResume={resumeTimer}/>}
         <div className="field">
           <div className="lbl">Дата</div>
           <input type="date" className="inp" value={date} onChange={e=>setDate(e.target.value)}/>
@@ -1505,6 +1684,8 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
           );
         })}
         <button className="add-ex" onClick={addEx}><IconPlus/>Добавить упражнение</button>
+        <DurationRow timer={timer} manualSec={manualSec} initialSec={isEdit?(initial.duration_sec??null):null}
+          onManual={setManualSec} onSubtract={()=>setTimer(t=>t?timerSubtractGaps(t,Date.now()):t)}/>
         <button className="btn" onClick={handleSave} disabled={saving}>{saving?"Сохранение...":(isEdit?"Сохранить изменения":"Сохранить тренировку")}</button>
         <button className="btn ghost" onClick={handleCloseClick}>Отмена</button>
       </div>
@@ -2004,7 +2185,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
         <button className="del-btn" onClick={()=>startRename(detail)}><IconEdit/></button>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:20}}>
-        <span style={{color:"#888",fontSize:13,flex:1,alignSelf:"center"}}>{formatDate(detail.date)}</span>
+        <span style={{color:"#888",fontSize:13,flex:1,alignSelf:"center"}}>{formatDate(detail.date)}{detail.duration_sec!=null&&` · ${fmtDur(detail.duration_sec)}`}</span>
         <button className="edit-badge" onClick={()=>guardOpen(()=>{setDetailId(null);setEditId(detail.id);})}>✎ Редактировать</button>
       </div>
       <div className="sec-lbl">Упражнения — {detail.exercises.length}</div>
@@ -2049,7 +2230,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
           <div key="draft-card" className="card draft-card" onClick={()=>setWorkoutDraft(prev=>({...prev,restoring:true}))}>
             <div style={{minWidth:0}}>
               <div className="card-title">{item.draft.name||"Тренировка"}</div>
-              <div className="card-sub">{formatDate(item.draft.date)} · не сохранено</div>
+              <div className="card-sub">{formatDate(item.draft.date)} · не сохранено{item.draft.timer&&<> · <DraftTimerText timer={item.draft.timer}/></>}</div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
               <span className="draft-pill">Черновик</span><IconChevron/>
@@ -2059,7 +2240,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
           <div key={item.w.id} className="card" onClick={()=>setDetailId(item.w.id)}>
             <div style={{minWidth:0}}>
               <div className="card-title">{item.w.name}</div>
-              <div className="card-sub">{formatDate(item.w.date)} · {item.w.exercises.length} упр.</div>
+              <div className="card-sub">{formatDate(item.w.date)} · {item.w.exercises.length} упр.{item.w.duration_sec!=null&&` · ${fmtDur(item.w.duration_sec)}`}</div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
               <span className="tag">#{arr.length-i}</span><IconChevron/>
@@ -4381,7 +4562,7 @@ function FriendProfileView({friendId, onBack, onRemove}) {
                 :[...workouts].sort((a,b)=>b.date.localeCompare(a.date)).map(w=>(
                   <div key={w.id} className="w-ex" style={{marginBottom:10}}>
                     <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between"}}>
-                      <span>{w.name}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(w.date)}</span>
+                      <span>{w.name}</span><span style={{color:"#555",fontWeight:400,fontSize:12}}>{formatDate(w.date)}{w.duration_sec!=null&&` · ${fmtDur(w.duration_sec)}`}</span>
                     </div>
                     <div className="w-sets">
                       {w.exercises.map((ex,ei)=>(
@@ -4734,7 +4915,7 @@ function FeedPost({post, onLikeToggle, onCommentAdd, onCommentDelete, onOpenAuth
         )}
         <div style={{minWidth:0,flex:1}}>
           <div className="card-title">{post.author.name}</div>
-          <div className="card-sub">{formatDate(post.date)} · {post.post_type==="workout"?post.title:`Замер «${post.title}»`}</div>
+          <div className="card-sub">{formatDate(post.date)} · {post.post_type==="workout"?post.title:`Замер «${post.title}»`}{post.post_type==="workout"&&post.duration_sec!=null&&` · ${fmtDur(post.duration_sec)}`}</div>
         </div>
         {canOpen&&<span className="feed-chev"><IconChevron/></span>}
       </div>
@@ -5504,6 +5685,7 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ac
   const [renamingId,setRenamingId]=useState(null);
   const [renameVal,setRenameVal]=useState("");
   const [showCreate,setShowCreate]=useState(false);
+  const [timerOn,setTimerOn]=useState(timerEnabled);
 
   const activeProfile=profiles.find(p=>p.is_active)||null;
   const detail=detailId!=null?profiles.find(p=>p.id===detailId):null;
@@ -5659,6 +5841,8 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ac
           <IconChevron/>
         </div>
       ))}
+      <div className="sec-lbl" style={{marginTop:24}}>Приложение</div>
+      <ToggleRow label="Таймер тренировки" sub="Общее время и отдых между подходами в форме новой тренировки" checked={timerOn} onChange={v=>{setTimerEnabled(v);setTimerOn(v);}}/>
       {showCreate&&<ProfileCreateSheet onSave={handleCreate} onClose={()=>setShowCreate(false)}/>}
     </div>
   );
@@ -6008,7 +6192,7 @@ function AppInner() {
                 <span className="draft-bar-dot"/>
                 <div className="draft-bar-text">
                   <div className="draft-bar-title">{workoutDraft.name || "Тренировка"}</div>
-                  <div className="draft-bar-sub">Тренировка не сохранена · нажми чтобы продолжить</div>
+                  <div className="draft-bar-sub">{workoutDraft.timer?<>Не сохранено · <DraftTimerText timer={workoutDraft.timer}/> · нажми чтобы продолжить</>:"Тренировка не сохранена · нажми чтобы продолжить"}</div>
                 </div>
                 <button className="draft-bar-close" onClick={async (e)=>{e.stopPropagation();if((await askConfirm("Отменить незавершённую запись? Данные будут потеряны."))){clearDraftFromStorage("workout");setWorkoutDraft(null);}}}><IconClose/></button>
               </div>
