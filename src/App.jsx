@@ -219,7 +219,7 @@ const css = `
 body{background:#0A0A0A;color:#FFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;-webkit-font-smoothing:antialiased}
 .app-frame{max-width:390px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;background:#0A0A0A}
 .tab-bar{display:flex;border-bottom:1px solid #3A3A3A;background:#0A0A0A;position:sticky;top:0;z-index:10}
-.tab{flex:1 1 0;min-width:0;padding:12px 0;text-align:center;font-size:8.5px;font-weight:500;letter-spacing:-0.02em;text-transform:uppercase;color:#666;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;background:none;border-left:none;border-right:none;border-top:none;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tab{flex:1 1 auto;min-width:0;padding:12px 5px;text-align:center;font-size:8.5px;font-weight:500;letter-spacing:-0.02em;text-transform:uppercase;color:#666;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;background:none;border-left:none;border-right:none;border-top:none;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tab.active{color:#FFF;border-bottom-color:#FFF}
 .page{flex:1;padding:13px;padding-bottom:calc(32px + var(--draft-bars-h, 0px))}
 .card{border:1px solid #3A3A3A;padding:14px 16px;margin-bottom:10px;cursor:pointer;background:#111;display:flex;align-items:center;justify-content:space-between;gap:12px;transition:border-color .15s}
