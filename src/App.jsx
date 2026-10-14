@@ -13,7 +13,54 @@ function getMyUserId(){
 // «Сегодня» — по местному времени телефона (раньше по UTC: в первые часы после
 // местной полуночи записи уходили «вчерашним» числом).
 const today = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
-const formatDate = (iso) => { try { const [y,m,d]=iso.split("-"); return `${d}.${m}.${y}`; } catch { return iso; } };
+// ── Настройки приложения (хранятся на этом устройстве, применяются сразу) ──────
+// <settings-core>
+const SETTINGS_KEY = "gym_settings_v1";
+const SETTINGS_DEFAULTS = { swipeTabs: true, swipeBack: true, animation: true, dateFormat: "dmy", gapHours: 2, restGoal: 0, restHaptic: true };
+const SETTINGS_ALLOWED = {
+  swipeTabs: [true, false], swipeBack: [true, false], animation: [true, false], restHaptic: [true, false],
+  dateFormat: ["dmy", "mdy", "ymd"], gapHours: [1, 2, 3, 4], restGoal: [0, 60, 90, 120, 180],
+};
+const loadSettings = () => {
+  let raw = {};
+  try { raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") || {}; } catch (e) { raw = {}; }
+  const out = {};
+  for (const k of Object.keys(SETTINGS_DEFAULTS)) out[k] = SETTINGS_ALLOWED[k].includes(raw[k]) ? raw[k] : SETTINGS_DEFAULTS[k];
+  return out;
+};
+let settingsState = loadSettings();
+const settingsListeners = new Set();
+const persistSettings = () => {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsState)); } catch (e) {}
+  settingsListeners.forEach(f => f());
+};
+const setSetting = (k, v) => {
+  if (!(k in SETTINGS_DEFAULTS) || !SETTINGS_ALLOWED[k].includes(v)) return;
+  settingsState = { ...settingsState, [k]: v };
+  persistSettings();
+};
+const resetSettings = () => { settingsState = { ...SETTINGS_DEFAULTS }; persistSettings(); };
+// Подписка компонента на изменения настроек (перерисовка при смене)
+function useSettings() {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const f = () => force(n => n + 1);
+    settingsListeners.add(f);
+    return () => { settingsListeners.delete(f); };
+  }, []);
+  return settingsState;
+}
+const formatDateAs = (iso, fmt) => {
+  try { const [y, m, d] = iso.split("-"); return fmt === "mdy" ? `${m}/${d}/${y}` : fmt === "ymd" ? `${y}-${m}-${d}` : `${d}.${m}.${y}`; }
+  catch { return iso; }
+};
+const formatDate = (iso) => formatDateAs(iso, settingsState.dateFormat);
+// Короткий отклик: через Telegram (работает и на iPhone), запасной вариант — вибромотор браузера
+const buzz = () => {
+  try { const h = window.Telegram?.WebApp?.HapticFeedback; if (h?.notificationOccurred) { h.notificationOccurred("success"); return; } } catch (e) {}
+  try { navigator.vibrate?.(200); } catch (e) {}
+};
+// </settings-core>
 
 // Нормализация ввода веса/дробных чисел: на некоторых телефонах (особенно
 // iPhone с системной локалью, где принят десятичный разделитель "запятая")
@@ -516,6 +563,16 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .toggle-row:last-child{border-bottom:none}
 .toggle-label{font-size:14px;color:#DDD}
 .toggle-sub{font-size:11px;color:#6E6E6E;margin-top:2px;line-height:1.4}
+.set-block{padding:14px 0;border-bottom:1px solid #242424}
+.set-block .av-chips{margin-top:10px}
+.set-test{margin:10px 0 4px;padding:10px;font-size:12.5px}
+.tab.tab-gear{flex:0 0 42px;padding:0;display:flex;align-items:center;justify-content:center}
+.wk-timer .wk-rest.done{color:#4ADE80}
+.wk-timer .wk-goal{color:#555}
+html.no-anim .flex-fig *{animation:none!important}
+html.no-anim .flex-fig .ff-shine{opacity:0}
+@media (max-width:360px){.tab{font-size:7.5px}}
+@media (max-width:330px){.tab{font-size:6.8px;letter-spacing:-0.05em}}
 .switch{position:relative;width:42px;height:24px;flex-shrink:0;background:#242424;border:1px solid #3A3A3A;cursor:pointer;transition:background .15s,border-color .15s;padding:0}
 .switch.on{background:#2E4A2E;border-color:#4CAF50}
 .switch-knob{position:absolute;top:2px;left:2px;width:18px;height:18px;background:#888;transition:left .15s,background .15s}
@@ -607,7 +664,7 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 const TIMER_OFF_KEY = "gym_timer_off";
 const timerEnabled = () => { try { return localStorage.getItem(TIMER_OFF_KEY) !== "1"; } catch (e) { return true; } };
 const setTimerEnabled = (on) => { try { if (on) localStorage.removeItem(TIMER_OFF_KEY); else localStorage.setItem(TIMER_OFF_KEY, "1"); } catch (e) {} };
-const TIMER_GAP_MS = 2 * 3600 * 1000;   // пауза в активности дольше 2 ч — предложим вычесть при сохранении
+const timerGapMs = () => settingsState.gapHours * 3600 * 1000;   // пауза в активности дольше порога (по умолчанию 2 ч, меняется в настройках) — предложим вычесть при сохранении
 const timerNew = (now) => ({ accMs: 0, runStart: now, restFrom: null, lastSetAt: null, gaps: [], subMs: 0 });
 const timerElapsed = (t, now) => Math.max(0, t.accMs + (t.runStart != null ? Math.max(0, now - t.runStart) : 0) - (t.subMs || 0));
 const timerPause = (t, now) => t.runStart == null ? t
@@ -619,7 +676,7 @@ const timerOnSetDone = (t, now) => {
   if (n.runStart == null) n = timerResume(n, now);   // внёс подход на паузе — счёт продолжается сам
   else {
     const ref = timerActivityRef(n);
-    if (ref != null && now - ref > TIMER_GAP_MS) n = { ...n, gaps: [...n.gaps, { ms: now - ref }] };
+    if (ref != null && now - ref > timerGapMs()) n = { ...n, gaps: [...n.gaps, { ms: now - ref }] };
   }
   return { ...n, restFrom: now, lastSetAt: now };
 };
@@ -628,7 +685,7 @@ const timerRest = (t, now) => (t.runStart != null && t.restFrom != null) ? Math.
 const timerPendingGapMs = (t, now) => {
   const gaps = t.gaps.reduce((a, g) => a + g.ms, 0);
   const ref = t.runStart != null ? timerActivityRef(t) : null;
-  const trailing = (ref != null && now - ref > TIMER_GAP_MS) ? now - ref : 0;
+  const trailing = (ref != null && now - ref > timerGapMs()) ? now - ref : 0;
   return gaps + trailing;
 };
 // После вычитания точка отсчёта «последней активности» переносится на «сейчас» — иначе тот же хвост вычитался бы снова.
@@ -682,11 +739,23 @@ function WorkoutTimerStrip({ timer, onPause, onResume }) {
   const now = useNow(1000);
   const paused = timer.runStart == null;
   const rest = timerRest(timer, now);
+  const goalSec = settingsState.restGoal;
+  const reached = rest != null && goalSec > 0 && rest >= goalSec * 1000;
+  // Вибрация один раз за отдых — только когда цель пройдена «только что»: если вернулись в
+  // приложение спустя минуты, «опоздавший» сигнал не нужен.
+  const firedRef = useRef(null);
+  useEffect(() => {
+    if (!(goalSec > 0) || rest == null) return;
+    const over = rest - goalSec * 1000;
+    if (over < 0 || over > 3500 || firedRef.current === timer.restFrom) return;
+    firedRef.current = timer.restFrom;
+    if (settingsState.restHaptic && document.visibilityState === "visible") buzz();
+  }, [rest, goalSec, timer.restFrom]);
   return (
     <div className={"wk-timer" + (paused ? " paused" : "")} data-testid="wk-timer">
       <span className="wk-ic"><IconClockSm/></span>
       <span className="wk-t">{fmtClock(timerElapsed(timer, now))}</span>
-      {paused ? <span className="wk-note">пауза</span> : (rest != null && <span className="wk-rest">отдых {fmtClock(rest)}</span>)}
+      {paused ? <span className="wk-note">пауза</span> : (rest != null && <span className={"wk-rest" + (reached ? " done" : "")}>отдых {fmtClock(rest)}{goalSec > 0 && <span className="wk-goal"> / {fmtClock(goalSec * 1000)}</span>}</span>)}
       <button className="wk-btn" onClick={paused ? onResume : onPause} title={paused ? "Продолжить" : "Пауза"} aria-label={paused ? "Продолжить" : "Пауза"}>
         {paused ? <IconPlay/> : <IconPause/>}
       </button>
@@ -759,7 +828,7 @@ const dialogLabels = (msg, isConfirm) => {
   if (!isConfirm) return { okText: "Ок", danger: false };
   const m = String(msg);
   const danger = /Удалить|Убрать|потеряны|потерять|безвозвратно/.test(m);
-  const okText = /^Удалить/.test(m) ? "Удалить" : /^Закрыть/.test(m) ? "Закрыть" : /^Убрать/.test(m) ? "Убрать"
+  const okText = /^Удалить/.test(m) ? "Удалить" : /^Закрыть/.test(m) ? "Закрыть" : /^Убрать/.test(m) ? "Убрать" : /^Сбросить/.test(m) ? "Сбросить"
     : /^Отменить незавершённую/.test(m) ? "Отменить запись" : "Да";
   return { okText, danger };
 };
@@ -1025,7 +1094,7 @@ function useSwipeBack(onBack, enabled = true) {
     const onTouchStart = (e) => {
       const t = e.touches[0];
       lockedRef.current = null;
-      if (t.clientX > SWIPE_EDGE_ZONE) { startRef.current = null; return; }
+      if (t.clientX > SWIPE_EDGE_ZONE || !settingsState.swipeBack) { startRef.current = null; return; }
       startRef.current = { x: t.clientX, y: t.clientY };
     };
     const onTouchMove = (e) => {
@@ -1070,13 +1139,15 @@ function useSwipeBack(onBack, enabled = true) {
 // Тот же приём с touchmove/preventDefault, что и в useSwipeBack выше — не
 // даём браузеру скроллить страницу, пока палец уже явно движется горизонтально.
 function useSwipeTabs(tab, setTab, count) {
+  const tabRef = useRef(tab);
+  tabRef.current = tab;   // на экране настроек (вне круга вкладок) листание не работает
   const startRef = useRef(null);
   const lockedRef = useRef(null);
   useEffect(() => {
     const onTouchStart = (e) => {
       const t = e.touches[0];
       lockedRef.current = null;
-      if (document.querySelector(".det-hd") || document.querySelector(".overlay")) { startRef.current = null; return; }
+      if (!settingsState.swipeTabs || tabRef.current >= count || document.querySelector(".det-hd") || document.querySelector(".overlay")) { startRef.current = null; return; }
       startRef.current = { x: t.clientX, y: t.clientY };
     };
     const onTouchMove = (e) => {
@@ -3531,7 +3602,8 @@ function MeasurementSheet({measurements, initial, draft, onSave, onClose, onMini
 const WEIGHT_MIN = 20, WEIGHT_MAX = 400, WEIGHT_SEED = 70;
 const fmtKg = (n) => { const t = String(Number(Number(n).toFixed(2))); return t.includes(".") ? t : t + ".0"; };
 const dayNum = (iso) => Date.parse(iso + "T00:00:00Z") / 86400000;
-const shortDate = (iso) => `${iso.slice(8,10)}.${iso.slice(5,7)}.${iso.slice(2,4)}`;
+const shortDate = (iso) => { const y = iso.slice(2,4), m = iso.slice(5,7), d = iso.slice(8,10), f = settingsState.dateFormat;
+  return f === "mdy" ? `${m}/${d}/${y}` : f === "ymd" ? `${y}-${m}-${d}` : `${d}.${m}.${y}`; };
 const addDaysISO = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
 const dayLabel = (iso) => iso === today() ? "сегодня" : iso === addDaysISO(today(), -1) ? "вчера" : formatDate(iso);
 const fmtDelta = (d) => (d > 0 ? "+" : "") + d.toFixed(1);
@@ -5685,7 +5757,6 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ac
   const [renamingId,setRenamingId]=useState(null);
   const [renameVal,setRenameVal]=useState("");
   const [showCreate,setShowCreate]=useState(false);
-  const [timerOn,setTimerOn]=useState(timerEnabled);
 
   const activeProfile=profiles.find(p=>p.is_active)||null;
   const detail=detailId!=null?profiles.find(p=>p.id===detailId):null;
@@ -5841,9 +5912,69 @@ function ProfileTab({profiles, workouts, setProfiles, onProfileSwitch, toast, ac
           <IconChevron/>
         </div>
       ))}
-      <div className="sec-lbl" style={{marginTop:24}}>Приложение</div>
-      <ToggleRow label="Таймер тренировки" sub="Общее время и отдых между подходами в форме новой тренировки" checked={timerOn} onChange={v=>{setTimerEnabled(v);setTimerOn(v);}}/>
       {showCreate&&<ProfileCreateSheet onSave={handleCreate} onClose={()=>setShowCreate(false)}/>}
+    </div>
+  );
+}
+
+// ── SettingsTab ───────────────────────────────────────────────────────────
+const IconGear = () => (
+  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="miter" aria-hidden="true">
+    <path d="M10.19 5.24 L10.47 2.32 L13.53 2.32 L13.81 5.24A7.0 7.0 0 0 1 15.50 5.94 L17.76 4.07 L19.93 6.24 L18.06 8.50A7.0 7.0 0 0 1 18.76 10.19 L21.68 10.47 L21.68 13.53 L18.76 13.81A7.0 7.0 0 0 1 18.06 15.50 L19.93 17.76 L17.76 19.93 L15.50 18.06A7.0 7.0 0 0 1 13.81 18.76 L13.53 21.68 L10.47 21.68 L10.19 18.76A7.0 7.0 0 0 1 8.50 18.06 L6.24 19.93 L4.07 17.76 L5.94 15.50A7.0 7.0 0 0 1 5.24 13.81 L2.32 13.53 L2.32 10.47 L5.24 10.19A7.0 7.0 0 0 1 5.94 8.50 L4.07 6.24 L6.24 4.07 L8.50 5.94A7.0 7.0 0 0 1 10.19 5.24Z"/><circle cx="12" cy="12" r="3"/>
+  </svg>
+);
+
+// Ряд «заголовок + варианты» (квадратные кнопки, как в редакторе персонажа)
+function ChipsRow({label, sub, value, options, onChange}) {
+  return (
+    <div className="set-block">
+      <div className="toggle-label">{label}</div>
+      {sub&&<div className="toggle-sub">{sub}</div>}
+      <div className="av-chips">
+        {options.map(([v,text])=>(
+          <button key={String(v)} type="button" className={`av-chip${value===v?" on":""}`} aria-pressed={value===v} onClick={()=>onChange(v)}>{text}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SettingsTab({toast}) {
+  const s=useSettings();
+  const [timerOn,setTimerOn]=useState(timerEnabled);
+  const sample="2026-10-25";
+  const reset=async()=>{
+    if(!(await askConfirm("Сбросить все настройки к значениям по умолчанию?"))) return;
+    resetSettings(); setTimerEnabled(true); setTimerOn(true);
+    toast("Настройки сброшены");
+  };
+  return(
+    <div className="page">
+      <div className="sec-lbl">Тренировка</div>
+      <ToggleRow label="Таймер тренировки" sub="Общее время и отдых между подходами в форме новой тренировки" checked={timerOn} onChange={v=>{setTimerEnabled(v);setTimerOn(v);}}/>
+      {timerOn&&<>
+        <ChipsRow label="Цель отдыха между подходами" sub="Счётчик отдыха позеленеет, когда время вышло" value={s.restGoal}
+          options={[[0,"Выкл"],[60,"60 с"],[90,"90 с"],[120,"120 с"],[180,"180 с"]]} onChange={v=>setSetting("restGoal",v)}/>
+        {s.restGoal>0&&<>
+          <ToggleRow label="Вибрация, когда отдых вышел" sub="Срабатывает, пока приложение открыто. Если телефон молчит — проверь вибрацию в настройках Telegram" checked={s.restHaptic} onChange={v=>setSetting("restHaptic",v)}/>
+          <button className="btn ghost set-test" onClick={buzz}>Проверить вибрацию</button>
+        </>}
+        <ChipsRow label="Считать перерывом паузу дольше" sub="Если между подходами прошло больше, при сохранении предложим вычесть это время из длительности" value={s.gapHours}
+          options={[[1,"1 ч"],[2,"2 ч"],[3,"3 ч"],[4,"4 ч"]]} onChange={v=>setSetting("gapHours",v)}/>
+      </>}
+
+      <div className="sec-lbl" style={{marginTop:28}}>Управление</div>
+      <ToggleRow label="Свайп между вкладками" sub="Листание вкладок жестом влево и вправо" checked={s.swipeTabs} onChange={v=>setSetting("swipeTabs",v)}/>
+      <ToggleRow label="Свайп «назад»" sub="Возврат из раздела жестом от левого края экрана" checked={s.swipeBack} onChange={v=>setSetting("swipeBack",v)}/>
+
+      <div className="sec-lbl" style={{marginTop:28}}>Вид</div>
+      <ToggleRow label="Анимация персонажей" sub="Если выключить, все персонажи будут неподвижны" checked={s.animation} onChange={v=>setSetting("animation",v)}/>
+      <ChipsRow label="Формат даты" sub="Только в приложении; в файле выгрузки формат не меняется" value={s.dateFormat}
+        options={[["dmy",formatDateAs(sample,"dmy")],["mdy",formatDateAs(sample,"mdy")],["ymd",formatDateAs(sample,"ymd")]]} onChange={v=>setSetting("dateFormat",v)}/>
+
+      <div style={{height:28}}/>
+      <button className="btn ghost" onClick={reset}>Сбросить настройки</button>
+      <div className="toggle-sub" style={{textAlign:"center"}}>Настройки хранятся на этом устройстве</div>
     </div>
   );
 }
@@ -5873,6 +6004,8 @@ function AppInner() {
 
   useSwipeTabs(tab, setTab, 5);
   useScrollTopOnChange(tab);
+  const settings=useSettings();   // смена настроек перерисовывает всё приложение (даты, свайпы, таймер)
+  useEffect(()=>{ document.documentElement.classList.toggle("no-anim", !settings.animation); },[settings.animation]);
 
   const showToast=(msg)=>{
     setToastMsg(msg);
@@ -6176,12 +6309,14 @@ function AppInner() {
               </span>
             </button>
           ))}
+          <button className={`tab tab-gear${tab===5?" active":""}`} aria-label="Настройки" title="Настройки" onClick={()=>{ if(tab===5) window.scrollTo({top:0,behavior:"smooth"}); else setTab(5); }}><IconGear/></button>
         </div>
         {tab===0&&<WorkoutsTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast} workoutDraft={workoutDraft} setWorkoutDraft={setWorkoutDraft} progressions={progressions} onProgressionsChange={setProgressions} templates={templates} setTemplates={setTemplates} templateDraft={templateDraft} setTemplateDraft={setTemplateDraft} isPremium={isPremium} premiumChecked={premiumChecked} reloadProgressions={reloadProgressions} progressionDraft={progressionDraft} setProgressionDraft={setProgressionDraft}/>}
         {tab===1&&<ExercisesTab workouts={workouts} setWorkouts={setWorkouts} toast={showToast}/>}
         {tab===2&&<CommunityTab friends={friends} setFriends={setFriends} toast={showToast} badge={communityBadge} onBadgeChange={setCommunityBadge} reloadBadge={reloadCommunityBadge}/>}
         {tab===3&&<MeasurementsTab measurements={measurements} setMeasurements={setMeasurements} weighIns={weighIns} setWeighIns={setWeighIns} layoutTiles={layoutTiles} setLayoutTiles={setLayoutTiles} customFields={customFields} setCustomFields={setCustomFields} toast={showToast} measurementDraft={measurementDraft} setMeasurementDraft={setMeasurementDraft}/>}
         {tab===4&&<ProfileTab profiles={profiles} workouts={workouts} setProfiles={setProfiles} onProfileSwitch={handleProfileSwitch} toast={showToast} activeDraftLabels={activeDraftLabels}/>}
+        {tab===5&&<SettingsTab toast={showToast}/>}
         {(showWorkoutBar||showMeasurementBar||showProgressionBar||showTemplateBar)&&(
           <div className="draft-bars-wrap">
             {showWorkoutBar&&(
