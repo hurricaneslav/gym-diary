@@ -16,7 +16,7 @@ const today = () => { const d = new Date(); return new Date(d.getTime() - d.getT
 // ── Настройки приложения (хранятся на этом устройстве, применяются сразу) ──────
 // <settings-core>
 const SETTINGS_KEY = "gym_settings_v1";
-const SETTINGS_DEFAULTS = { swipeTabs: true, swipeBack: true, animation: true, dateFormat: "dmy", gapHours: 2, restGoal: 0, restHaptic: true, suggest: true, suggestRepeats: "auto" };
+const SETTINGS_DEFAULTS = { swipeTabs: true, swipeBack: true, animation: true, dateFormat: "dmy", gapHours: 2, restGoal: 0, restHaptic: true, suggest: false, suggestRepeats: "auto" };
 const SETTINGS_ALLOWED = {
   swipeTabs: [true, false], swipeBack: [true, false], animation: [true, false], restHaptic: [true, false],
   dateFormat: ["dmy", "mdy", "ymd"], gapHours: [1, 2, 3, 4], restGoal: [0, 60, 90, 120, 180],
@@ -69,6 +69,7 @@ const buzz = () => {
 const SUG_WINDOW_DAYS = 150;      // старше — не влияет: привычки меняются
 const SUG_BREAK_SOFT = 21;        // после такого перерыва — только повторить прошлый раз
 const SUG_BREAK_RESET = 42;       // после такого перерыва прошлый уровень не считаем
+const SUG_WEEK = 7;               // «повторить перед ростом» — для второй тренировки в ту же неделю; через неделю повтор не требуется
 const SUG_ZONES = [[5, [3, 6]], [8, [5, 8]], [10, [8, 12]], [13, [10, 15]], [17, [12, 18]], [1e9, [15, 25]]];
 const sugDay = (iso) => { const [y, m, d] = iso.split("-").map(Number); return Math.floor(Date.UTC(y, m - 1, d) / 86400000); };
 const sugRnd = (x, step) => Math.round(Math.round(x / step) * step * 1000) / 1000;
@@ -144,25 +145,32 @@ const sugReplay = (history, repeats) => {
     const [W, , reps] = sugBlockReps(h);
     const gap = prevDay != null ? h.day - prevDay : 0; prevDay = h.day;
     const far = s !== null && W > 0 && s.W > 0 && !sugInReach(s.W, W, inc);
-    let streak, fails, reached, slow;
+    let streak, fails, reached, slow, levelDay;
     if (s === null || gap >= SUG_BREAK_RESET || far || (W === 0) !== (s.W === 0)) {
-      streak = 1; fails = 0; reached = reps; slow = false;
+      streak = 1; fails = 0; reached = reps; slow = false; levelDay = h.day;
       if (s !== null && gap >= SUG_BREAK_RESET) hi = Math.max(high, Math.max(...reps) + 2);
     } else {
       const exp = sugExpected(s.W, s.target, W);
       if (reps.length < exp.length) continue;               // сделал меньше подходов — не штрафуем и не растим
+      // прошла неделя с начала уровня — «повторить» уже не нужно, ждём рост
+      const waive = repeats > 0 && s.isRepeat && !s.up && s.levelDay != null && (h.day - s.levelDay) >= SUG_WEEK;
+      let expUp = null;
+      if (waive) { const [, upTg] = sugDecide(s.W, s.reached, 99, s.slow, low, hi, inc, repeats); expUp = sugExpected(s.W, upTg, W); }
       const met = exp.every((e, i) => reps[i] >= e);
-      if (met) { fails = 0; reached = reps; streak = s.isRepeat ? s.streak + 1 : 1; slow = s.slow && s.isRepeat; }
+      const metUp = waive && expUp.every((e, i) => reps[i] >= e);
+      levelDay = s.levelDay;
+      if (metUp) { fails = 0; reached = reps; streak = 1; slow = false; levelDay = h.day; }   // выполнил цель роста — новый уровень
+      else if (met) { fails = 0; reached = reps; streak = s.isRepeat ? s.streak + 1 : 1; slow = s.slow && s.isRepeat; if (!s.isRepeat) levelDay = h.day; }
       else {
         fails = s.fails + 1;
-        if (fails >= 2) { streak = 1; fails = 0; reached = reps; slow = true; }
+        if (fails >= 2) { streak = 1; fails = 0; reached = reps; slow = true; levelDay = h.day; }
         else { s = { ...s, fails }; continue; }               // один промах — цель та же, ещё попытка
       }
     }
     if (s !== null && W > 0 && s.lastW > 0 && W <= s.lastW * 0.97 && !far) hi = Math.max(high, Math.max(...reps) + 2); // осознанно снизил вес
     const [nW, tg, up] = sugDecide(W, reached, streak, slow, low, hi, inc, repeats);
     if (up) hi = high;
-    s = { W: nW, target: tg, streak: up ? 0 : streak, fails, slow, reached, isRepeat: !up && sugArrEq(tg, reached), up, lastW: W };
+    s = { W: nW, target: tg, streak: up ? 0 : streak, fails, slow, reached, isRepeat: !up && sugArrEq(tg, reached), up, lastW: W, levelDay: up ? null : levelDay };
   }
   return [s, [low, hi, inc]];
 };
@@ -187,6 +195,9 @@ const sugSuggest = (history0, today, typedW, repeats) => {
   const [s, [low, hi, inc]] = sugReplay(history, repeats);
   const last = history[history.length - 1], [W0, idx] = sugBlockReps(last), gap = today - last.day;
   let Wd = s.W, tg = [...s.target], note = s.up ? "up" : null;
+  if (repeats > 0 && s.isRepeat && !s.up && s.levelDay != null && (today - s.levelDay) >= SUG_WEEK) {
+    const [, tw] = sugDecide(s.W, s.reached, 99, s.slow, low, hi, inc, repeats); tg = [...tw];   // неделя прошла — растём
+  }
   if (gap >= SUG_BREAK_SOFT && !s.up) { Wd = W0; tg = idx.map(i => Math.trunc(+last.sets[i][1])); note = "break:" + gap; }
   if (typedW != null && Wd > 0 && Math.abs(typedW - Wd) > 1e-9) {
     const r = sugRepsForWeight(history, { W: Wd, target: tg }, typedW, inc);
@@ -744,6 +755,7 @@ input[type=date].inp::-webkit-calendar-picker-indicator{filter:invert(.5)}
 .cf-new .inp{margin-bottom:8px}
 .w-mrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:8px 14px;border-top:1px solid #1A1A1A}
 .w-ex-name + .w-mrow{border-top:none}
+.ex-dur{color:#666;font-weight:400;font-size:12px;white-space:nowrap}
 .m-prev-delta{font-size:11px;font-weight:600}
 .m-prev-delta.pos{color:#4CAF50}
 .m-prev-delta.neg{color:#EF5350}
@@ -846,12 +858,13 @@ html.no-anim .flex-fig .ff-shine{opacity:0}
 .mini-btn:active{border-color:#FFF}
 .mini-btn.ghost{border-color:#333;color:#888}
 .log-form{border:1px solid #3A3A3A;background:#0D0D0D;padding:12px;margin:0 0 10px}
-.sug-hint{margin:0 14px 10px;padding:9px 12px;font-size:12px;color:#8A8A8A;border:1px dashed #3A3A3A;background:#111;cursor:pointer;line-height:1.5}
-.sug-hint b{color:#D0D0D0;font-weight:500}
-.sug-lbl{text-transform:uppercase;font-size:9.5px;letter-spacing:.06em;color:#6A6A6A;margin-right:2px}
-.sug-note{margin-top:3px;font-size:11px;color:#9A9A6A}
-.sug-hint.sug-off{cursor:default;font-size:11px;color:#9A9A6A}
-.set-inp.ghost::placeholder{color:#8A8A8A;font-size:13px}
+.sug-hint{margin:0 14px 10px;padding:5px 10px;border-left:2px solid #262626;cursor:pointer;line-height:1.45}
+.sug-lbl{text-transform:uppercase;font-size:8.5px;letter-spacing:.07em;color:#555}
+.sug-body{display:flex;justify-content:space-between;gap:10px;align-items:baseline;margin-top:2px;font-size:12px;color:#7C7C7C}
+.sug-tap{font-size:10.5px;color:#5A5A5A;text-decoration:underline;white-space:nowrap}
+.sug-note{margin-top:2px;font-size:10.5px;color:#7F7F5F}
+.sug-hint.sug-off{cursor:default}
+.set-inp.ghost::placeholder{color:rgba(255,255,255,.24);font-style:italic;font-size:13px}
 .prog-hint{margin:0 14px 10px;padding:10px 12px;font-size:12px;color:#CCC;border:1px solid #333;background:#141414;cursor:pointer;line-height:1.5}
 .prog-hint b{color:#FFF}
 .prog-lock-detail{font-size:13px;color:#6E6E6E;margin-top:14px;line-height:1.6;text-align:center}
@@ -904,20 +917,32 @@ const TIMER_OFF_KEY = "gym_timer_off";
 const timerEnabled = () => { try { return localStorage.getItem(TIMER_OFF_KEY) !== "1"; } catch (e) { return true; } };
 const setTimerEnabled = (on) => { try { if (on) localStorage.removeItem(TIMER_OFF_KEY); else localStorage.setItem(TIMER_OFF_KEY, "1"); } catch (e) {} };
 const timerGapMs = () => settingsState.gapHours * 3600 * 1000;   // пауза в активности дольше порога (по умолчанию 2 ч, меняется в настройках) — предложим вычесть при сохранении
-const timerNew = (now) => ({ accMs: 0, runStart: now, restFrom: null, lastSetAt: null, gaps: [], subMs: 0 });
+const timerNew = (now) => ({ accMs: 0, runStart: now, restFrom: null, lastSetAt: null, gaps: [], subMs: 0, marks: [] });
 const timerElapsed = (t, now) => Math.max(0, t.accMs + (t.runStart != null ? Math.max(0, now - t.runStart) : 0) - (t.subMs || 0));
+const timerRaw = (t, now) => t.accMs + (t.runStart != null ? Math.max(0, now - t.runStart) : 0);   // активное время без вычетов (пауза не считается)
 const timerPause = (t, now) => t.runStart == null ? t
   : { ...t, accMs: t.accMs + Math.max(0, now - t.runStart), runStart: null, restFrom: null, lastSetAt: null };
 const timerResume = (t, now) => t.runStart != null ? t : { ...t, runStart: now };
 const timerActivityRef = (t) => (t.lastSetAt != null ? t.lastSetAt : t.runStart);
-const timerOnSetDone = (t, now) => {
+const timerOnSetDone = (t, now, exId) => {
   let n = t;
   if (n.runStart == null) n = timerResume(n, now);   // внёс подход на паузе — счёт продолжается сам
   else {
     const ref = timerActivityRef(n);
     if (ref != null && now - ref > timerGapMs()) n = { ...n, gaps: [...n.gaps, { ms: now - ref }] };
   }
-  return { ...n, restFrom: now, lastSetAt: now };
+  // marks: «в такой-то момент активного времени внесён подход упражнения exId» — из них считается время по упражнениям
+  return { ...n, restFrom: now, lastSetAt: now, marks: exId != null ? [...(n.marks || []), [exId, timerRaw(n, now)]] : (n.marks || []) };
+};
+// Время по упражнениям: интервал от предыдущего подхода (первого — от начала) относится к упражнению нового подхода.
+// Интервалы дольше порога перерыва (пауза «вышел из зала») не считаются работой над упражнением. Результат — мс по id.
+const timerExerciseMs = (t) => {
+  const out = {}; let prev = 0;
+  for (const [id, raw] of (t.marks || [])) {
+    const d = raw - prev; prev = raw;
+    if (d > 0 && d <= timerGapMs()) out[String(id)] = (out[String(id)] || 0) + d;
+  }
+  return out;
 };
 const timerRest = (t, now) => (t.runStart != null && t.restFrom != null) ? Math.max(0, now - t.restFrom) : null;
 // Сколько времени «подозрительно»: долгие паузы между подходами + хвост после последнего подхода
@@ -1625,12 +1650,17 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   // Подход считается внесённым, когда общее число подходов с повторами выросло ровно на 1
   // (правка уже внесённого и массовые вставки — шаблон/прогрессия — отдых не запускают).
   const doneCountRef = useRef(null);
+  const doneMapRef = useRef({});
   useEffect(() => {
     const n = countDoneSets(exercises);
     const prev = doneCountRef.current;
-    doneCountRef.current = n;
+    const map = {}; for (const e of exercises) map[e.id] = e.sets.filter(setIsDone).length;
+    const prevMap = doneMapRef.current; doneMapRef.current = map; doneCountRef.current = n;
     if (prev === null) return;
-    if (n === prev + 1) setTimer(t => t ? timerOnSetDone(t, Date.now()) : t);
+    if (n === prev + 1) {
+      const owner = exercises.find(e => map[e.id] === (prevMap[e.id] || 0) + 1);   // у какого упражнения прибавился подход
+      setTimer(t => t ? timerOnSetDone(t, Date.now(), owner ? owner.id : null) : t);
+    }
   }, [exercises]);
   const sheetRef = useRef(null);
   useKeyboardScroll(sheetRef);
@@ -1812,9 +1842,11 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
   const handleSave=async()=>{
     setSaving(true);
     const hasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
+    // Время по упражнениям (если шёл таймер): записываем в упражнение, когда набралось хотя бы 20 с
+    const exMs = timer ? timerExerciseMs(timer) : {};
     const filtered=exercises
       .filter(e=>e.name.trim()||e.sets.some(hasData))
-      .map(e=>({...e,sets:e.sets.filter(hasData)}));
+      .map(e=>{ const ms = exMs[String(e.id)]; return {...e,sets:e.sets.filter(hasData), ...(ms>=20000?{dur_sec:Math.round(ms/1000)}:{})}; });
     // Длительность: введённая вручную → по таймеру → прежняя (при правке). Меньше минуты не записываем.
     const prevDur = isEdit ? (initial.duration_sec ?? null) : null;
     let dur = manualSec != null ? manualSec : (timer ? Math.floor(timerElapsed(timer, Date.now()) / 1000) : prevDur);
@@ -1931,10 +1963,14 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
               )}
               {sug&&(sug.text?(
                 <div className="sug-hint" onClick={()=>fillFromSuggestion(ex.id,sug)}>
-                  <span className="sug-lbl">Подсказка</span> <b>{sug.text}</b> — нажми, чтобы подставить
+                  <div className="sug-lbl">Подсказка прогрессии · по истории упражнения</div>
+                  <div className="sug-body"><span>{sug.text}</span><span className="sug-tap">подставить</span></div>
                   {sug.note&&<div className="sug-note">{sug.note}</div>}
                 </div>
-              ):(sug.note&&<div className="sug-hint sug-off">{sug.note}</div>))}
+              ):(sug.note&&<div className="sug-hint sug-off">
+                  <div className="sug-lbl">Подсказка прогрессии · по истории упражнения</div>
+                  <div className="sug-note">{sug.note}</div>
+                </div>))}
               {prev&&(
                 <div className="prev tappable" onClick={()=>setHistoryFor(ex.name.trim())} title="Показать все прошлые разы">
                   <div className="prev-body">
@@ -2527,7 +2563,7 @@ function WorkoutsTab({workouts, setWorkouts, toast, workoutDraft, setWorkoutDraf
         ?<div className="empty"><div className="empty-icon">📋</div>Упражнения не записаны</div>
         :detail.exercises.map((ex,i)=>(
           <div key={ex.id||i} className="w-ex">
-            <div className="w-ex-name">{ex.name||`Упражнение ${i+1}`}</div>
+            <div className="w-ex-name" style={{display:"flex",justifyContent:"space-between",gap:10}}><span>{ex.name||`Упражнение ${i+1}`}</span>{ex.dur_sec>0&&<span className="ex-dur">{fmtDur(ex.dur_sec)}</span>}</div>
             <div className="w-sets">
               {ex.sets.map((s,si)=>(
                 <div key={si} className="w-set-row">
@@ -4902,7 +4938,7 @@ function FriendProfileView({friendId, onBack, onRemove}) {
                     <div className="w-sets">
                       {w.exercises.map((ex,ei)=>(
                         <div key={ei} style={{marginBottom:12}}>
-                          <div style={{fontSize:13,color:"#AAA",marginBottom:4,fontWeight:600}}>{ex.name||`Упражнение ${ei+1}`}</div>
+                          <div style={{fontSize:13,color:"#AAA",marginBottom:4,fontWeight:600,display:"flex",justifyContent:"space-between",gap:10}}><span>{ex.name||`Упражнение ${ei+1}`}</span>{ex.dur_sec>0&&<span className="ex-dur">{fmtDur(ex.dur_sec)}</span>}</div>
                           {ex.sets.map((s,si)=>(
                             <div key={si} className="w-set-row">
                               <span className="w-set-n">{si+1}</span>
@@ -5259,7 +5295,7 @@ function FeedPost({post, onLikeToggle, onCommentAdd, onCommentDelete, onOpenAuth
         <div className="w-sets" style={{marginTop:10}}>
           {(post.exercises||[]).map((ex,ei)=>(
             <div key={ei} style={{marginBottom:12}}>
-              <div style={{fontSize:13,color:"#AAA",marginBottom:4,fontWeight:600}}>{ex.name||`Упражнение ${ei+1}`}</div>
+              <div style={{fontSize:13,color:"#AAA",marginBottom:4,fontWeight:600,display:"flex",justifyContent:"space-between",gap:10}}><span>{ex.name||`Упражнение ${ei+1}`}</span>{ex.dur_sec>0&&<span className="ex-dur">{fmtDur(ex.dur_sec)}</span>}</div>
               {ex.sets.map((s,si)=>(
                 <div key={si} className="w-set-row">
                   <span className="w-set-n">{si+1}</span>
@@ -6227,7 +6263,7 @@ function SettingsTab({toast}) {
       </>}
 
       <div className="sec-lbl" style={{marginTop:28}}>Подсказки</div>
-      <ToggleRow label="Подсказки к подходам" sub="В форме тренировки серым показывает, сколько сделать, по твоей истории упражнения" checked={s.suggest} onChange={v=>setSetting("suggest",v)}/>
+      <ToggleRow label="Подсказки к подходам" sub="Серым в форме тренировки: что сделать в подходе, по истории этого упражнения. По умолчанию выключено" checked={s.suggest} onChange={v=>setSetting("suggest",v)}/>
       {s.suggest&&<ChipsRow label="Повторять результат перед ростом" sub="Авто: если упражнение у тебя чаще раза в ~6 дней, один раз повторяем результат, потом +1 повтор. «Нет» — расти после каждой удачной тренировки" value={s.suggestRepeats}
         options={[["auto","Авто"],[0,"Нет"],[1,"1 раз"]]} onChange={v=>setSetting("suggestRepeats",v)}/>}
 
