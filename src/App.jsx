@@ -16,10 +16,11 @@ const today = () => { const d = new Date(); return new Date(d.getTime() - d.getT
 // ── Настройки приложения (хранятся на этом устройстве, применяются сразу) ──────
 // <settings-core>
 const SETTINGS_KEY = "gym_settings_v1";
-const SETTINGS_DEFAULTS = { swipeTabs: true, swipeBack: true, animation: true, dateFormat: "dmy", gapHours: 2, restGoal: 0, restHaptic: true };
+const SETTINGS_DEFAULTS = { swipeTabs: true, swipeBack: true, animation: true, dateFormat: "dmy", gapHours: 2, restGoal: 0, restHaptic: true, suggest: true, suggestRepeats: "auto" };
 const SETTINGS_ALLOWED = {
   swipeTabs: [true, false], swipeBack: [true, false], animation: [true, false], restHaptic: [true, false],
   dateFormat: ["dmy", "mdy", "ymd"], gapHours: [1, 2, 3, 4], restGoal: [0, 60, 90, 120, 180],
+  suggest: [true, false], suggestRepeats: ["auto", 0, 1],
 };
 const loadSettings = () => {
   let raw = {};
@@ -61,6 +62,238 @@ const buzz = () => {
   try { navigator.vibrate?.(200); } catch (e) {}
 };
 // </settings-core>
+
+// ── Подсказка цели на подход: считается из истории упражнения, ничего не хранится ──────────
+// Вход: история [{day, sets:[[вес|null, повторы], ...]}] (старые → новые). Выход: строки подходов.
+// <suggest-core>
+const SUG_WINDOW_DAYS = 150;      // старше — не влияет: привычки меняются
+const SUG_BREAK_SOFT = 21;        // после такого перерыва — только повторить прошлый раз
+const SUG_BREAK_RESET = 42;       // после такого перерыва прошлый уровень не считаем
+const SUG_ZONES = [[5, [3, 6]], [8, [5, 8]], [10, [8, 12]], [13, [10, 15]], [17, [12, 18]], [1e9, [15, 25]]];
+const sugDay = (iso) => { const [y, m, d] = iso.split("-").map(Number); return Math.floor(Date.UTC(y, m - 1, d) / 86400000); };
+const sugRnd = (x, step) => Math.round(Math.round(x / step) * step * 1000) / 1000;
+const sugMedian = (a) => { const x = [...a].sort((p, q) => p - q), n = x.length; return n % 2 ? x[(n - 1) / 2] : (x[n / 2 - 1] + x[n / 2]) / 2; };
+const sugQ3 = (a) => { const x = [...a].sort((p, q) => p - q), n = x.length, m = (n + 1) * 0.75, j = Math.floor(m), d = m - j;
+  if (j < 1) return x[0]; if (j >= n) return x[n - 1]; return x[j - 1] + d * (x[j] - x[j - 1]); };
+
+const sugClean = (history) => {                       // подходы без повторов не считаются
+  const out = [];
+  for (const h of history) { const sets = h.sets.filter(([, r]) => r && r > 0); if (sets.length) out.push({ ...h, sets }); }
+  return out;
+};
+const sugWindowed = (history, today) => {            // только недавнее; но не меньше трёх последних
+  const h = history.filter(x => today - x.day <= SUG_WINDOW_DAYS);
+  return h.length >= 3 ? h : history.slice(-3);
+};
+// Рабочий блок: самый тяжёлый вес, повторённый ≥2 раз (топ-одиночки и разминка не мешают)
+const sugSplitBlock = (sets) => {
+  const ws = sets.map(([w, r]) => [w == null ? 0 : +w, Math.trunc(+r)]);
+  let pool = ws.filter(s => s[1] >= 3); if (!pool.length) pool = ws;
+  const cnt = new Map(); for (const [w] of pool) cnt.set(w, (cnt.get(w) || 0) + 1);
+  const rep = [...cnt].filter(([, c]) => c >= 2).map(([w]) => w);
+  let W = rep.length ? Math.max(...rep) : Math.max(...pool.map(s => s[0]));
+  const heavier = pool.map(s => s[0]).filter(w => W > 0 && w >= 1.15 * W);
+  if (heavier.length) W = Math.max(...heavier);
+  const idx = []; ws.forEach(([w], i) => { if (w === W) idx.push(i); });
+  return [W, idx];
+};
+const sugBlockReps = (h) => { const [W, idx] = sugSplitBlock(h.sets); return [W, idx, idx.map(i => Math.trunc(+h.sets[i][1]))]; };
+const sugInferRange = (history) => {
+  const reps = [];
+  for (const h of history.slice(-20)) reps.push(...sugBlockReps(h)[2]);
+  const m = reps.length >= 4 ? sugQ3(reps) : Math.max(...reps);
+  for (const [edge, rng] of SUG_ZONES) if (m <= edge) return rng;
+};
+const sugInferStep = (history) => {
+  const ws = [...new Set(history.slice(-30).map(h => sugSplitBlock(h.sets)[0]).filter(w => w > 0))].sort((a, b) => a - b);
+  const diffs = []; for (let i = 1; i < ws.length; i++) { const d = Math.round((ws[i] - ws[i - 1]) * 1000) / 1000; if (d >= 0.9 && d <= 5.1) diffs.push(d); }
+  return diffs.length >= 2 ? Math.max(1, Math.min(5, Math.min(...diffs))) : 2.5;
+};
+// Повторы на весе w, равноценные цели tgt при весе Wd (по Эпли); на более лёгком весе осторожнее на 2 повтора
+const sugExpected = (Wd, tgt, w) => {
+  if (Wd <= 0 || w <= 0) return [...tgt];
+  let out = tgt.map(t => Math.max(1, Math.floor(30 * (Wd * (1 + t / 30) / w - 1) + 1e-9)));
+  if (w < Wd * 0.995) out = out.map((b, i) => (b > tgt[i] ? Math.max(tgt[i], b - 2) : b));
+  return out;
+};
+const sugInReach = (Wref, w, inc) => Wref <= 0 || (0.85 * Wref <= w && w <= Wref + 2 * inc);
+const sugWeightUp = (W, reached, low, high, inc) => {
+  const nw = sugRnd(W + inc, 0.25);
+  return [nw, reached.map(r => Math.max(low, Math.min(high - 1, Math.floor(30 * (W * (1 + r / 30) / nw - 1)))))];
+};
+const sugBump = (reached, high, mode, capped) => {
+  const r = [...reached];
+  if (mode === "block") return r.map(x => (capped ? Math.min(high, x + 1) : x + 1));
+  for (let i = r.length - 1; i >= 0; i--) {              // микро-шаг: +1 на один подход «лесенкой»
+    if ((!capped || r[i] < high) && (i === 0 || r[i] + 1 <= r[i - 1])) { r[i] += 1; return r; }
+  }
+  return r;
+};
+const sugDecide = (W, reached, streak, slow, low, high, inc, repeats) => {
+  if (W > 0 && reached.every(x => x >= high)) { const [nw, tg] = sugWeightUp(W, reached, low, high, inc); return [nw, tg, true]; }
+  const need = 1 + repeats + (slow ? 1 : 0);
+  if (streak >= need) return [W, sugBump(reached, high, slow ? "micro" : "block", W > 0), false];
+  return [W, [...reached], false];
+};
+const sugArrEq = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+const sugReplay = (history, repeats) => {
+  const [low, high] = sugInferRange(history), inc = sugInferStep(history);
+  let s = null, prevDay = null, hi = high;
+  for (const h of history) {
+    const [W, , reps] = sugBlockReps(h);
+    const gap = prevDay != null ? h.day - prevDay : 0; prevDay = h.day;
+    const far = s !== null && W > 0 && s.W > 0 && !sugInReach(s.W, W, inc);
+    let streak, fails, reached, slow;
+    if (s === null || gap >= SUG_BREAK_RESET || far || (W === 0) !== (s.W === 0)) {
+      streak = 1; fails = 0; reached = reps; slow = false;
+      if (s !== null && gap >= SUG_BREAK_RESET) hi = Math.max(high, Math.max(...reps) + 2);
+    } else {
+      const exp = sugExpected(s.W, s.target, W);
+      if (reps.length < exp.length) continue;               // сделал меньше подходов — не штрафуем и не растим
+      const met = exp.every((e, i) => reps[i] >= e);
+      if (met) { fails = 0; reached = reps; streak = s.isRepeat ? s.streak + 1 : 1; slow = s.slow && s.isRepeat; }
+      else {
+        fails = s.fails + 1;
+        if (fails >= 2) { streak = 1; fails = 0; reached = reps; slow = true; }
+        else { s = { ...s, fails }; continue; }               // один промах — цель та же, ещё попытка
+      }
+    }
+    if (s !== null && W > 0 && s.lastW > 0 && W <= s.lastW * 0.97 && !far) hi = Math.max(high, Math.max(...reps) + 2); // осознанно снизил вес
+    const [nW, tg, up] = sugDecide(W, reached, streak, slow, low, hi, inc, repeats);
+    if (up) hi = high;
+    s = { W: nW, target: tg, streak: up ? 0 : streak, fails, slow, reached, isRepeat: !up && sugArrEq(tg, reached), up, lastW: W };
+  }
+  return [s, [low, hi, inc]];
+};
+// Для веса w: сначала по текущему уровню, иначе по ближайшему по весу недавнему занятию
+const sugRepsForWeight = (history, s, w, inc) => {
+  for (let i = history.length - 1; i >= Math.max(0, history.length - 12); i--) {   // на этом весе недавно уже работал — тот результат
+    const [Wh, , rr] = sugBlockReps(history[i]);
+    if (Wh > 0 && Math.abs(Wh - w) < 1e-9 && Math.abs(w - s.W) > 1e-9) return rr;
+  }
+  if (sugInReach(s.W, w, inc)) return sugExpected(s.W, s.target, w);
+  const c = [];
+  for (const h of history.slice(-12)) { const [Wh, , rr] = sugBlockReps(h); if (Wh > 0 && sugInReach(Wh, w, inc)) c.push([Math.abs(Wh - w), h.day, Wh, rr]); }
+  if (!c.length) return null;
+  c.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  return sugExpected(c[0][2], c[0][3], w);
+};
+// repeats: 0 — расти после каждой удачной тренировки; 1 — один раз повторить результат перед ростом
+// typedW — вес, который человек уже вписал (подсказка пересчитается под него)
+const sugSuggest = (history0, today, typedW, repeats) => {
+  const history = sugWindowed(sugClean(history0), today);
+  if (!history.length) return null;
+  const [s, [low, hi, inc]] = sugReplay(history, repeats);
+  const last = history[history.length - 1], [W0, idx] = sugBlockReps(last), gap = today - last.day;
+  let Wd = s.W, tg = [...s.target], note = s.up ? "up" : null;
+  if (gap >= SUG_BREAK_SOFT && !s.up) { Wd = W0; tg = idx.map(i => Math.trunc(+last.sets[i][1])); note = "break:" + gap; }
+  if (typedW != null && Wd > 0 && Math.abs(typedW - Wd) > 1e-9) {
+    const r = sugRepsForWeight(history, { W: Wd, target: tg }, typedW, inc);
+    if (r === null) return { W: typedW, rows: tg.map(() => [typedW, null, "block"]), note: "newweight", range: [low, hi], inc, blockIdx: idx };
+    Wd = typedW; tg = r; note = null;          // свой вес — пометки про прибавку/перерыв уже не про него
+  }
+  const rows = []; let ni = 0;
+  last.sets.forEach(([w, r], i) => {
+    if (idx.includes(i)) { rows.push([Wd || null, tg[Math.min(ni, tg.length - 1)], "block"]); ni++; }
+    else rows.push([w, r, "copy"]);
+  });
+  while (ni < tg.length) { rows.push([Wd || null, tg[ni], "block"]); ni++; }
+  return { W: Wd, rows, note, range: [low, hi], inc, blockIdx: idx };
+};
+// Авто-выбор «повторить перед ростом»: если упражнение делают чаще раза в ~6 дней — повторяем один раз
+const sugAutoRepeats = (history0, today) => {
+  const h = sugWindowed(sugClean(history0), today).slice(-6);
+  if (h.length < 3) return 0;
+  const gaps = []; for (let i = 1; i < h.length; i++) gaps.push(h[i].day - h[i - 1].day);
+  return sugMedian(gaps) <= 6 ? 1 : 0;
+};
+// </suggest-core>
+
+// ── Адаптер подсказки: записи упражнения из приложения → движок → строки формы ─────────
+const sugNum = (v) => { const x = parseFloat(String(v ?? "").replace(",", ".")); return Number.isFinite(x) ? x : null; };
+// entries — записи упражнения (новые первыми); side: null — обычные подходы, "L"/"R" — стороны унилатеральных
+const sugHistoryFrom = (entries, side) => {
+  const out = [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const { workout, exercise } = entries[i];
+    const sets = [];
+    for (const s of exercise.sets) {
+      if (side ? !s.bilateral : !!s.bilateral) continue;
+      const w = side === "L" ? s.weightL : side === "R" ? s.weightR : s.weight;
+      const r = side === "L" ? s.repsL : side === "R" ? s.repsR : s.reps;
+      const reps = parseInt(r, 10);
+      if (!(reps > 0)) continue;
+      sets.push([sugNum(w), reps]);
+    }
+    if (sets.length) out.push({ day: sugDay(workout.date), sets });
+  }
+  return out;
+};
+const sugNoteText = (n) => !n ? null : n === "up" ? "Все подходы на потолке диапазона — пора добавить вес"
+  : n === "newweight" ? "Для этого веса ориентира по повторам нет"
+  : n.startsWith("break:") ? `Перерыв ${n.slice(6)} дн. — начни как в прошлый раз` : null;
+const sugRowAt = (part, si) => {
+  if (!part || !part.rows.length) return null;
+  return part.rows[si] || [...part.rows].reverse().find(x => x[2] === "block") || part.rows[part.rows.length - 1];
+};
+const sugText = (part) => {
+  if (!part) return "";
+  const g = [];
+  for (const [w, r] of part.rows) {
+    if (r == null) continue;
+    const last = g[g.length - 1];
+    if (last && last.w === w) last.r.push(r); else g.push({ w, r: [r] });
+  }
+  return g.map(x => x.w == null ? `${x.r.join(" · ")} повт` : `${x.w} кг × ${x.r.join(" · ")}`).join("; ");
+};
+// Подсказка для упражнения: { lr, parts:{x|L|R}, text, note } либо null. curSets — подходы, уже внесённые в форму.
+const sugForExercise = (entries, dateStr, curSets) => {
+  if (!entries.length) return null;
+  const today = sugDay(dateStr);
+  const lr = entries[0].exercise.sets.some(s => s.bilateral);
+  const parts = {}, hists = {}, rps = {};
+  for (const side of (lr ? ["L", "R"] : [null])) {
+    const hist = sugHistoryFrom(entries, side);
+    if (!hist.length) continue;
+    const rp = settingsState.suggestRepeats === "auto" ? sugAutoRepeats(hist, today) : settingsState.suggestRepeats;
+    const base = sugSuggest(hist, today, null, rp);
+    if (!base) continue;
+    // вес, уже вписанный в рабочие строки, — подсказка пересчитывается под него
+    let typed = null;
+    for (let i = 0; i < curSets.length && typed == null; i++) {
+      const row = sugRowAt(base, i);
+      const cs = curSets[i];
+      if (!row || row[2] !== "block" || lr !== !!cs.bilateral) continue;
+      const w = sugNum(side === "L" ? cs.weightL : side === "R" ? cs.weightR : cs.weight);
+      if (w != null && w > 0) typed = w;
+    }
+    const part = typed != null ? sugSuggest(hist, today, typed, rp) : base;
+    parts[side || "x"] = part; hists[side || "x"] = hist; rps[side || "x"] = rp;
+  }
+  if (!Object.keys(parts).length) return null;
+  // Гантель одна на обе стороны: если веса сторон разошлись — берём вес более слабой стороны для обеих
+  if (lr && parts.L && parts.R && parts.L.W > 0 && parts.R.W > 0 && Math.abs(parts.L.W - parts.R.W) > 1e-9) {
+    const low = Math.min(parts.L.W, parts.R.W);
+    for (const side of ["L", "R"]) if (parts[side].W > low) parts[side] = sugSuggest(hists[side], today, low, rps[side]);
+  }
+  const note = Object.values(parts).map(p => p.note).find(Boolean) || null;
+  const text = lr
+    ? [parts.L && `Л ${sugText(parts.L)}`, parts.R && `П ${sugText(parts.R)}`].filter(Boolean).join("  ·  ")
+    : sugText(parts.x);
+  const noteText = sugNoteText(note);
+  if (!text && !noteText) return null;
+  return { lr, parts, text, note: noteText };
+};
+// Серые «призрачные» значения для пустых полей конкретной строки подхода
+const sugGhostFor = (sug, si, s) => {
+  if (!!s.bilateral !== sug.lr) return null;
+  const cell = (part) => { const r = sugRowAt(part, si); return r ? { w: r[0] == null ? null : String(r[0]), r: r[1] == null ? null : String(r[1]) } : null; };
+  if (!sug.lr) { const c = cell(sug.parts.x); return c ? { weight: c.w, reps: c.r } : null; }
+  const l = cell(sug.parts.L), r = cell(sug.parts.R);
+  return { weightL: l?.w ?? null, repsL: l?.r ?? null, weightR: r?.w ?? null, repsR: r?.r ?? null };
+};
+const sugRowCount = (sug) => Math.max(1, ...Object.values(sug.parts).map(p => p.rows.length));
 
 // Нормализация ввода веса/дробных чисел: на некоторых телефонах (особенно
 // iPhone с системной локалью, где принят десятичный разделитель "запятая")
@@ -613,6 +846,12 @@ html.no-anim .flex-fig .ff-shine{opacity:0}
 .mini-btn:active{border-color:#FFF}
 .mini-btn.ghost{border-color:#333;color:#888}
 .log-form{border:1px solid #3A3A3A;background:#0D0D0D;padding:12px;margin:0 0 10px}
+.sug-hint{margin:0 14px 10px;padding:9px 12px;font-size:12px;color:#8A8A8A;border:1px dashed #3A3A3A;background:#111;cursor:pointer;line-height:1.5}
+.sug-hint b{color:#D0D0D0;font-weight:500}
+.sug-lbl{text-transform:uppercase;font-size:9.5px;letter-spacing:.06em;color:#6A6A6A;margin-right:2px}
+.sug-note{margin-top:3px;font-size:11px;color:#9A9A6A}
+.sug-hint.sug-off{cursor:default;font-size:11px;color:#9A9A6A}
+.set-inp.ghost::placeholder{color:#8A8A8A;font-size:13px}
 .prog-hint{margin:0 14px 10px;padding:10px 12px;font-size:12px;color:#CCC;border:1px solid #333;background:#141414;cursor:pointer;line-height:1.5}
 .prog-hint b{color:#FFF}
 .prog-lock-detail{font-size:13px;color:#6E6E6E;margin-top:14px;line-height:1.6;text-align:center}
@@ -1554,6 +1793,22 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
     setExercises(p=>p.map(e=>e.id===exId?{ ...e, sets: setsSrc }:e));
   };
 
+  // Подсказка из истории: подставляет серые значения только в пустые поля (внесённое не трогает).
+  // Если все строки упражнения пусты — создаёт столько строк, сколько в подсказке.
+  const fillFromSuggestion=(exId,sug)=>setExercises(p=>p.map(e=>{
+    if(e.id!==exId)return e;
+    let sets=e.sets;
+    if(sets.every(s=>!setHasData(s))) sets=Array.from({length:sugRowCount(sug)},()=>({...newSet(),bilateral:sug.lr}));
+    sets=sets.map((s,si)=>{
+      const g=sugGhostFor(sug,si,s);
+      if(!g)return s;
+      const out={...s};
+      for(const f of ["weight","reps","weightL","repsL","weightR","repsR"]) if(g[f]!=null && !String(out[f]??"").trim()) out[f]=g[f];
+      return out;
+    });
+    return {...e,sets};
+  }));
+
   const handleSave=async()=>{
     setSaving(true);
     const hasData=s=>s.bilateral?(s.weightL||s.repsL||s.weightR||s.repsR):(s.weight||s.reps);
@@ -1630,6 +1885,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
         {exercises.map((ex,ei)=>{
           const prev=getPrev(ex.name);
           const prog=getProg(ex.name);
+          const sug=(!prog && !isEdit && settingsState.suggest && ex.name.trim())?sugForExercise(getHistory(ex.name),date,ex.sets):null;
           const exNote=getExNote(ex.name);
           return(
             <div key={ex.id} className="ex-block">
@@ -1673,6 +1929,12 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
                   {prog.next_session.is_amrap&&<div style={{marginTop:4,color:"#FF9800",fontSize:12}}>Последний подход — в отказ, а не по плану</div>}
                 </div>
               )}
+              {sug&&(sug.text?(
+                <div className="sug-hint" onClick={()=>fillFromSuggestion(ex.id,sug)}>
+                  <span className="sug-lbl">Подсказка</span> <b>{sug.text}</b> — нажми, чтобы подставить
+                  {sug.note&&<div className="sug-note">{sug.note}</div>}
+                </div>
+              ):(sug.note&&<div className="sug-hint sug-off">{sug.note}</div>))}
               {prev&&(
                 <div className="prev tappable" onClick={()=>setHistoryFor(ex.name.trim())} title="Показать все прошлые разы">
                   <div className="prev-body">
@@ -1692,6 +1954,7 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
                 {ex.sets.map((s,si)=>{
                   const cs=setColorStyle(s);
                   const ckey=`${ex.id}:${si}`;
+                  const gh=sug?sugGhostFor(sug,si,s):null;
                   return (
                   <Fragment key={si}>
                   <div className="set-row">
@@ -1704,22 +1967,22 @@ function WorkoutSheet({ workouts, initial, draft, onSave, onClose, onMinimize, p
                       <div className="set-bi-wrap">
                         <div className="set-bi-row">
                           <span className="set-side L">Л</span>
-                          <input style={cs} className="set-inp sm" type="text" inputMode="decimal" placeholder="кг" value={s.weightL} onChange={e=>upSet(ex.id,si,"weightL",normalizeDecimal(e.target.value))}/>
+                          <input style={cs} className={`set-inp sm${gh?.weightL?" ghost":""}`} type="text" inputMode="decimal" placeholder={gh?.weightL??"кг"} value={s.weightL} onChange={e=>upSet(ex.id,si,"weightL",normalizeDecimal(e.target.value))}/>
                           <span className="set-sep" style={cs}>×</span>
-                          <input style={cs} className="set-inp sm" type="number" inputMode="numeric" placeholder="повт" value={s.repsL} onChange={e=>upSet(ex.id,si,"repsL",e.target.value)}/>
+                          <input style={cs} className={`set-inp sm${gh?.repsL?" ghost":""}`} type="number" inputMode="numeric" placeholder={gh?.repsL??"повт"} value={s.repsL} onChange={e=>upSet(ex.id,si,"repsL",e.target.value)}/>
                         </div>
                         <div className="set-bi-row">
                           <span className="set-side R">П</span>
-                          <input style={cs} className="set-inp sm" type="text" inputMode="decimal" placeholder="кг" value={s.weightR} onChange={e=>upSet(ex.id,si,"weightR",normalizeDecimal(e.target.value))}/>
+                          <input style={cs} className={`set-inp sm${gh?.weightR?" ghost":""}`} type="text" inputMode="decimal" placeholder={gh?.weightR??"кг"} value={s.weightR} onChange={e=>upSet(ex.id,si,"weightR",normalizeDecimal(e.target.value))}/>
                           <span className="set-sep" style={cs}>×</span>
-                          <input style={cs} className="set-inp sm" type="number" inputMode="numeric" placeholder="повт" value={s.repsR} onChange={e=>upSet(ex.id,si,"repsR",e.target.value)}/>
+                          <input style={cs} className={`set-inp sm${gh?.repsR?" ghost":""}`} type="number" inputMode="numeric" placeholder={gh?.repsR??"повт"} value={s.repsR} onChange={e=>upSet(ex.id,si,"repsR",e.target.value)}/>
                         </div>
                       </div>
                     ):(
                       <>
-                        <input style={cs} className="set-inp" type="text" inputMode="decimal" placeholder="кг" value={s.weight} onChange={e=>upSet(ex.id,si,"weight",normalizeDecimal(e.target.value))}/>
+                        <input style={cs} className={`set-inp${gh?.weight?" ghost":""}`} type="text" inputMode="decimal" placeholder={gh?.weight??"кг"} value={s.weight} onChange={e=>upSet(ex.id,si,"weight",normalizeDecimal(e.target.value))}/>
                         <span className="set-sep" style={cs}>×</span>
-                        <input style={cs} className="set-inp" type="number" inputMode="numeric" placeholder="повт" value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)}/>
+                        <input style={cs} className={`set-inp${gh?.reps?" ghost":""}`} type="number" inputMode="numeric" placeholder={gh?.reps??"повт"} value={s.reps} onChange={e=>upSet(ex.id,si,"reps",e.target.value)}/>
                       </>
                     )}
                     <button className={`btn-bi${s.bilateral?" active":""}`} onClick={()=>toggleBilateral(ex.id,si)} title="Унилатеральный режим"><IconBilateral/></button>
@@ -5962,6 +6225,11 @@ function SettingsTab({toast}) {
         <ChipsRow label="Считать перерывом паузу дольше" sub="Если между подходами прошло больше, при сохранении предложим вычесть это время из длительности" value={s.gapHours}
           options={[[1,"1 ч"],[2,"2 ч"],[3,"3 ч"],[4,"4 ч"]]} onChange={v=>setSetting("gapHours",v)}/>
       </>}
+
+      <div className="sec-lbl" style={{marginTop:28}}>Подсказки</div>
+      <ToggleRow label="Подсказки к подходам" sub="В форме тренировки серым показывает, сколько сделать, по твоей истории упражнения" checked={s.suggest} onChange={v=>setSetting("suggest",v)}/>
+      {s.suggest&&<ChipsRow label="Повторять результат перед ростом" sub="Авто: если упражнение у тебя чаще раза в ~6 дней, один раз повторяем результат, потом +1 повтор. «Нет» — расти после каждой удачной тренировки" value={s.suggestRepeats}
+        options={[["auto","Авто"],[0,"Нет"],[1,"1 раз"]]} onChange={v=>setSetting("suggestRepeats",v)}/>}
 
       <div className="sec-lbl" style={{marginTop:28}}>Управление</div>
       <ToggleRow label="Свайп между вкладками" sub="Листание вкладок жестом влево и вправо" checked={s.swipeTabs} onChange={v=>setSetting("swipeTabs",v)}/>
