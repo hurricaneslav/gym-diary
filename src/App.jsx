@@ -1477,7 +1477,9 @@ function KeyboardDismissButton() {
 
   useEffect(() => {
     const vv = window.visualViewport;
-    const updatePos = () => { if (vv) setTop(vv.offsetTop + vv.height - 52); };
+    // Позиция считается заново при любом сдвиге видимой области (iOS двигает её при появлении клавиатуры,
+    // смене высоты контента, прокрутке) — иначе кнопка остаётся на старом месте и «пропадает» за краем экрана
+    const updatePos = () => { if (vv) setTop(Math.max(8, Math.round(vv.offsetTop + vv.height - 52))); };
     const onFocusIn = (e) => {
       if (!isTextField(e.target)) return;
       fieldRef.current = e.target;
@@ -1492,14 +1494,28 @@ function KeyboardDismissButton() {
     };
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("focusout", onFocusOut);
-    if (vv) vv.addEventListener("resize", updatePos);
+    if (vv) { vv.addEventListener("resize", updatePos); vv.addEventListener("scroll", updatePos); }
+    window.addEventListener("scroll", updatePos, true);
+    window.addEventListener("orientationchange", updatePos);
     return () => {
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("focusout", onFocusOut);
-      if (vv) vv.removeEventListener("resize", updatePos);
+      if (vv) { vv.removeEventListener("resize", updatePos); vv.removeEventListener("scroll", updatePos); }
+      window.removeEventListener("scroll", updatePos, true);
+      window.removeEventListener("orientationchange", updatePos);
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };
   }, []);
+
+  // Страховка: пока кнопка показана, раз в 250 мс сверяем позицию (если событий о сдвиге не пришло)
+  useEffect(() => {
+    if (!visible) return;
+    const id = setInterval(() => {
+      const vv = window.visualViewport;
+      if (vv) setTop(Math.max(8, Math.round(vv.offsetTop + vv.height - 52)));
+    }, 250);
+    return () => clearInterval(id);
+  }, [visible]);
 
   if (!visible) return null;
   const handleDismiss = () => {
