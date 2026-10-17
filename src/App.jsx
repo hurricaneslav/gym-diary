@@ -16,12 +16,11 @@ const today = () => { const d = new Date(); return new Date(d.getTime() - d.getT
 // ── Настройки приложения (хранятся на этом устройстве, применяются сразу) ──────
 // <settings-core>
 const SETTINGS_KEY = "gym_settings_v1";
-const SETTINGS_DEFAULTS = { swipeTabs: true, swipeBack: true, animation: true, dateFormat: "dmy", gapHours: 2, restGoal: 0, restHaptic: true, suggest: false, suggestRepeats: "auto", kbdMode: "new", kbdDebug: false };
+const SETTINGS_DEFAULTS = { swipeTabs: true, swipeBack: true, animation: true, dateFormat: "dmy", gapHours: 2, restGoal: 0, restHaptic: true, suggest: false, suggestRepeats: "auto" };
 const SETTINGS_ALLOWED = {
   swipeTabs: [true, false], swipeBack: [true, false], animation: [true, false], restHaptic: [true, false],
   dateFormat: ["dmy", "mdy", "ymd"], gapHours: [1, 2, 3, 4], restGoal: [0, 60, 90, 120, 180],
   suggest: [true, false], suggestRepeats: ["auto", 0, 1],
-  kbdMode: ["new", "classic"], kbdDebug: [true, false],
 };
 const loadSettings = () => {
   let raw = {};
@@ -865,9 +864,6 @@ html.no-anim .flex-fig .ff-shine{opacity:0}
 .sug-tap{font-size:10.5px;color:#5A5A5A;text-decoration:underline;white-space:nowrap}
 .sug-note{margin-top:2px;font-size:10.5px;color:#7F7F5F}
 .sug-hint.sug-off{cursor:default}
-html.kbd-new .overlay{top:var(--vv-top,0px);bottom:calc(0px - var(--vv-top,0px));padding-bottom:var(--kb-h,0px);transition:padding-bottom .2s ease}
-html.kbd-new .sheet{max-height:min(92dvh,calc(var(--vv-h,100dvh) - 8px));scroll-padding:60px 0 28px}
-.set-log{width:100%;height:120px;margin-top:8px;background:#111;color:#8A8A8A;border:1px solid #2A2A2A;font-size:10px;font-family:monospace}
 .set-inp.ghost::placeholder{color:rgba(255,255,255,.24);font-style:italic;font-size:13px}
 .prog-hint{margin:0 14px 10px;padding:10px 12px;font-size:12px;color:#CCC;border:1px solid #333;background:#141414;cursor:pointer;line-height:1.5}
 .prog-hint b{color:#FFF}
@@ -1237,101 +1233,14 @@ function profileDraftLabels(pid) {
 function clearProfileDrafts(pid) { DRAFT_TYPES.forEach(t => clearDraftFromStorage(t, pid)); }
 const activeProfileIdOf = (plist) => { const a = (plist || []).find(x => x.is_active) || (plist || [])[0]; return a ? a.id : null; };
 
-// ── Клавиатура: стабильная геометрия шторок ──────────────────────────────────
-// Что происходит на iOS/Telegram: при фокусе на поле система сама «поднимает» видимую область
-// (visualViewport.offsetTop), а при переходе между полями на мгновение возвращает её назад и снова
-// поднимает. Фиксированная шторка уезжает вместе с ней — отсюда скачки и проблески списка за шторкой.
-// Бороться с этим прокруткой бесполезно (так было раньше), поэтому режим «новый»:
-//  1) документ под шторкой блокируется целиком (body: fixed) — прокручиваться нечему;
-//  2) затемнение (.overlay) всегда на весь экран → страница за шторкой не проступает;
-//  3) оверлей «приклеен» к видимой области (сдвиг на offsetTop), а шторка стоит ровно над клавиатурой
-//     (отступ --kb-h) — сдвиг видимой области на экране не виден;
-//  4) подкрутка поля внутри шторки делается один раз и мягко (плюс scroll-padding в CSS).
-// Режим «прежний» (настройки → Клавиатура) оставляет старое поведение — на случай, если новое не понравится.
-const kbdIsNew = () => settingsState.kbdMode !== "classic";
-const kbdApplyVars = () => {
-  const root = document.documentElement, vv = window.visualViewport;
-  const clear = () => { for (const k of ["--vv-top", "--vv-h", "--kb-h"]) root.style.removeProperty(k); };
-  if (!kbdIsNew() || !vv || vv.scale > 1.02) { clear(); return; }
-  const layoutH = Math.max(window.innerHeight, root.clientHeight);
-  let kb = Math.round(layoutH - vv.height);
-  if (kb < 80) kb = 0;                                   // меньше — это не клавиатура (панели браузера)
-  root.style.setProperty("--vv-top", `${Math.round(vv.offsetTop * 10) / 10}px`);
-  root.style.setProperty("--vv-h", `${Math.round(vv.height)}px`);
-  root.style.setProperty("--kb-h", `${kb}px`);
-};
-
-// Запись диагностики (настройки → Клавиатура): по кадрам после каждого фокуса/потери фокуса
-const kbdLog = { rows: [], t0: 0, until: 0, raf: 0, label: "" };
-const KBD_LOG_COLS = "t_ms;событие;vv_h;vv_top;innerH;scrollY;tg_vh;ov_top;ov_bot;sheet_top;sheet_bot;sheet_scroll;field_top;kb_h";
-const kbdSnap = () => {
-  const vv = window.visualViewport, tg = window.Telegram?.WebApp;
-  const ov = document.querySelector(".overlay"), sh = document.querySelector(".overlay .sheet"), fa = document.activeElement;
-  const R = (el) => el ? el.getBoundingClientRect() : null, o = R(ov), s = R(sh), f = R(fa);
-  const n = (x) => x == null ? "" : Math.round(x * 10) / 10;
-  return [Math.round(performance.now() - kbdLog.t0), kbdLog.label, n(vv?.height), n(vv?.offsetTop), window.innerHeight, Math.round(window.scrollY),
-    n(tg?.viewportHeight), n(o?.top), n(o?.bottom), n(s?.top), n(s?.bottom), n(sh?.scrollTop), n(f?.top),
-    document.documentElement.style.getPropertyValue("--kb-h").replace("px", "")].join(";");
-};
-const kbdLogStart = (label) => {
-  if (!settingsState.kbdDebug) return;
-  kbdLog.label = label; kbdLog.t0 = performance.now(); kbdLog.until = kbdLog.t0 + 1600;
-  if (kbdLog.raf) return;
-  const tick = () => {
-    if (kbdLog.rows.length < 4000) kbdLog.rows.push(kbdSnap());
-    if (performance.now() < kbdLog.until) kbdLog.raf = requestAnimationFrame(tick); else kbdLog.raf = 0;
-  };
-  kbdLog.raf = requestAnimationFrame(tick);
-};
-const kbdLogText = () => `kbdMode=${settingsState.kbdMode}; ua=${navigator.userAgent}\n${KBD_LOG_COLS}\n${kbdLog.rows.join("\n")}`;
-
-// Подписка приложения на изменения видимой области (монтируется один раз в AppInner)
-function useKbdViewportSync(mode) {
-  useEffect(() => {
-    const root = document.documentElement, vv = window.visualViewport;
-    root.classList.toggle("kbd-new", mode !== "classic");
-    kbdApplyVars();
-    const onVV = () => kbdApplyVars();
-    const onIn = (e) => { if (isTextField(e.target)) kbdLogStart("focusin"); };
-    const onOut = () => kbdLogStart("focusout");
-    if (vv) { vv.addEventListener("resize", onVV); vv.addEventListener("scroll", onVV); }
-    window.addEventListener("resize", onVV); window.addEventListener("orientationchange", onVV);
-    document.addEventListener("focusin", onIn); document.addEventListener("focusout", onOut);
-    return () => {
-      if (vv) { vv.removeEventListener("resize", onVV); vv.removeEventListener("scroll", onVV); }
-      window.removeEventListener("resize", onVV); window.removeEventListener("orientationchange", onVV);
-      document.removeEventListener("focusin", onIn); document.removeEventListener("focusout", onOut);
-      root.classList.remove("kbd-new"); kbdApplyVars();
-    };
-  }, [mode]);
-}
-
 // ── Keyboard-aware scroll ─────────────────────────────────────────────────
-// Режим «прежний»: слушаем visualViewport.resize и плавно подматываем .sheet к активному полю.
-// Режим «новый»: после фокуса/смены размера один раз (с несколькими проверками, пока клавиатура доезжает)
-// проверяем, что поле целиком видно внутри шторки над клавиатурой, и при необходимости подкручиваем.
+// Единственный правильный способ: слушаем visualViewport.resize,
+// когда клавиатура поднимается — плавно подматываем .sheet к активному полю.
 // scrollIntoView НЕ используется — он вызывает прыжки body.
 function useKeyboardScroll(sheetRef) {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    if (kbdIsNew()) {
-      let timers = [];
-      const ensure = () => {
-        const sheet = sheetRef.current, a = document.activeElement;
-        if (!sheet || !a || !sheet.contains(a) || !isTextField(a)) return;
-        const sr = sheet.getBoundingClientRect(), er = a.getBoundingClientRect();
-        const bottomLimit = Math.min(sr.bottom, vv.offsetTop + vv.height) - 14;   // нижняя граница видимого куска шторки
-        const topLimit = Math.max(sr.top, vv.offsetTop) + 56;                      // не прячем поле под ручкой/шапкой
-        let d = 0;
-        if (er.bottom > bottomLimit) d = er.bottom - bottomLimit; else if (er.top < topLimit) d = er.top - topLimit;
-        if (Math.abs(d) > 2) sheet.scrollTo({ top: sheet.scrollTop + d, behavior: Math.abs(d) < 160 ? "smooth" : "auto" });
-      };
-      const schedule = () => { timers.forEach(clearTimeout); timers = [60, 240, 460].map(ms => setTimeout(ensure, ms)); };
-      document.addEventListener("focusin", schedule);
-      vv.addEventListener("resize", schedule);
-      return () => { document.removeEventListener("focusin", schedule); vv.removeEventListener("resize", schedule); timers.forEach(clearTimeout); };
-    }
     let raf = null;
     const onResize = () => {
       if (raf) cancelAnimationFrame(raf);
@@ -1339,6 +1248,7 @@ function useKeyboardScroll(sheetRef) {
         const sheet = sheetRef.current;
         const active = document.activeElement;
         if (!sheet || !active || !sheet.contains(active)) return;
+        const sheetRect = sheet.getBoundingClientRect();
         const elRect = active.getBoundingClientRect();
         const vpBottom = vv.offsetTop + vv.height;
         // Сколько пикселей элемент выходит за нижнюю границу viewport
@@ -1353,25 +1263,9 @@ function useKeyboardScroll(sheetRef) {
   }, [sheetRef]);
 }
 
-// Блокируем прокрутку страницы под шторкой. Режим «новый»: body становится fixed (iOS игнорирует overflow:hidden
-// при фокусе на поле и всё равно прокручивает документ), позиция запоминается и возвращается при закрытии.
-let bodyLockCount = 0, bodyLockPrev = null;
+// Блокируем скролл body пока шторка открыта
 function useLockBodyScroll() {
   useEffect(() => {
-    if (kbdIsNew()) {
-      if (bodyLockCount++ === 0) {
-        const b = document.body.style, y = window.scrollY;
-        bodyLockPrev = { position: b.position, top: b.top, left: b.left, right: b.right, width: b.width, overflow: b.overflow, y };
-        b.position = "fixed"; b.top = `-${y}px`; b.left = "0"; b.right = "0"; b.width = "100%"; b.overflow = "hidden";
-      }
-      return () => {
-        if (--bodyLockCount === 0 && bodyLockPrev) {
-          const p = bodyLockPrev, b = document.body.style; bodyLockPrev = null;
-          b.position = p.position; b.top = p.top; b.left = p.left; b.right = p.right; b.width = p.width; b.overflow = p.overflow;
-          window.scrollTo(0, p.y);
-        }
-      };
-    }
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = prev; };
@@ -6363,18 +6257,7 @@ function ChipsRow({label, sub, value, options, onChange}) {
 function SettingsTab({toast}) {
   const s=useSettings();
   const [timerOn,setTimerOn]=useState(timerEnabled);
-  const [logText,setLogText]=useState("");
   const sample="2026-10-25";
-  const copyLog=async()=>{
-    const text=kbdLogText();
-    try{ await navigator.clipboard.writeText(text); toast("Лог скопирован"); setLogText(""); return; }catch{}
-    try{
-      const ta=document.createElement("textarea"); ta.value=text; ta.style.cssText="position:fixed;opacity:0;top:0"; document.body.appendChild(ta);
-      ta.select(); const ok=document.execCommand("copy"); document.body.removeChild(ta);
-      if(ok){ toast("Лог скопирован"); setLogText(""); return; }
-    }catch{}
-    setLogText(text); toast("Не удалось скопировать — лог ниже, выдели и скопируй");
-  };
   const reset=async()=>{
     if(!(await askConfirm("Сбросить все настройки к значениям по умолчанию?"))) return;
     resetSettings(); setTimerEnabled(true); setTimerOn(true);
@@ -6408,16 +6291,6 @@ function SettingsTab({toast}) {
       <ToggleRow label="Анимация персонажей" sub="Если выключить, все персонажи будут неподвижны" checked={s.animation} onChange={v=>setSetting("animation",v)}/>
       <ChipsRow label="Формат даты" sub="Только в приложении; в файле выгрузки формат не меняется" value={s.dateFormat}
         options={[["dmy",formatDateAs(sample,"dmy")],["mdy",formatDateAs(sample,"mdy")],["ymd",formatDateAs(sample,"ymd")]]} onChange={v=>setSetting("dateFormat",v)}/>
-
-      <div className="sec-lbl" style={{marginTop:28}}>Клавиатура</div>
-      <ChipsRow label="Поведение шторок при вводе" sub="«Новый» убирает скачки и проблески страницы за шторкой при открытии и смене поля. «Прежний» — как раньше" value={s.kbdMode}
-        options={[["new","Новый"],["classic","Прежний"]]} onChange={v=>{ setSetting("kbdMode",v); toast("Закрой и открой форму, чтобы применить"); }}/>
-      <ToggleRow label="Запись диагностики" sub="Для разбора скачков: пишет положение экрана по кадрам при открытии клавиатуры и смене поля" checked={s.kbdDebug} onChange={v=>{ setSetting("kbdDebug",v); }}/>
-      {s.kbdDebug&&<>
-        <button className="btn ghost set-test" onClick={copyLog}>Скопировать лог ({kbdLog.rows.length} строк)</button>
-        <button className="btn ghost set-test" onClick={()=>{ kbdLog.rows.length=0; setLogText(""); toast("Лог очищен"); }}>Очистить лог</button>
-        {logText&&<textarea readOnly className="set-log" value={logText} onFocus={e=>e.target.select()}/>}
-      </>}
 
       <div style={{height:28}}/>
       <button className="btn ghost" onClick={reset}>Сбросить настройки</button>
@@ -6453,7 +6326,6 @@ function AppInner() {
   useScrollTopOnChange(tab);
   const settings=useSettings();   // смена настроек перерисовывает всё приложение (даты, свайпы, таймер)
   useEffect(()=>{ document.documentElement.classList.toggle("no-anim", !settings.animation); },[settings.animation]);
-  useKbdViewportSync(settings.kbdMode);
 
   const showToast=(msg)=>{
     setToastMsg(msg);
